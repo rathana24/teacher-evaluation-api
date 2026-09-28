@@ -58,6 +58,7 @@ type EvaluationContext = Prisma.evaluationsGetPayload<{
 const questionSelect = {
   id: true,
   question_text: true,
+  question_text_km: true,
   question_type: true,
   category: true,
   is_required: true,

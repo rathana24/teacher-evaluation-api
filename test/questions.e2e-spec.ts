@@ -195,7 +195,7 @@ describe('Questions (e2e)', () => {
   describe(
     'POST /api/survey-versions/:versionId/questions',
     () => {
-      it('RATING question gets range 1–5, order 1, required by default -> 201', async () => {
+      it('RATING question gets range 1–5, order 1, required by default and supports Khmer -> 201', async () => {
         const res = await request(
           app.getHttpServer(),
         )
@@ -204,12 +204,17 @@ describe('Questions (e2e)', () => {
           .send({
             question_text:
               'The lecturer explains clearly.',
+            question_text_km:
+              'គ្រូបង្រៀនពន្យល់បានច្បាស់លាស់។',
             question_type: 'RATING',
           });
 
         expect(res.status).toBe(201);
         expect(res.body.question_type).toBe(
           'RATING',
+        );
+        expect(res.body.question_text_km).toBe(
+          'គ្រូបង្រៀនពន្យល់បានច្បាស់លាស់។',
         );
         expect(res.body.min_rating).toBe(1);
         expect(res.body.max_rating).toBe(5);
@@ -222,7 +227,7 @@ describe('Questions (e2e)', () => {
         ratingQuestionId = res.body.id;
       });
 
-      it('TEXT question has no range and goes to the end -> 201', async () => {
+      it('TEXT question without Khmer has question_text_km null -> 201', async () => {
         const res = await request(
           app.getHttpServer(),
         )
@@ -238,6 +243,9 @@ describe('Questions (e2e)', () => {
         expect(res.body.question_type).toBe(
           'TEXT',
         );
+        expect(
+          res.body.question_text_km,
+        ).toBeNull();
         expect(res.body.min_rating).toBeNull();
         expect(res.body.max_rating).toBeNull();
         expect(res.body.display_order).toBe(2);
@@ -667,6 +675,48 @@ describe('Questions (e2e)', () => {
         ]);
       });
 
+      it('returns Khmer question text -> 200', async () => {
+        const res = await request(
+          app.getHttpServer(),
+        )
+          .get(questionsUrl())
+          .set(auth());
+
+        expect(res.status).toBe(200);
+
+        const question = res.body.find(
+          (item: any) =>
+            item.id === ratingQuestionId,
+        );
+
+        expect(question).toBeDefined();
+
+        expect(question.question_text_km).toBe(
+          'គ្រូបង្រៀនពន្យល់បានច្បាស់លាស់។',
+        );
+      });
+
+      it('returns null Khmer text when translation was not provided -> 200', async () => {
+        const res = await request(
+          app.getHttpServer(),
+        )
+          .get(questionsUrl())
+          .set(auth());
+
+        expect(res.status).toBe(200);
+
+        const question = res.body.find(
+          (item: any) =>
+            item.id === textQuestionId,
+        );
+
+        expect(question).toBeDefined();
+
+        expect(
+          question.question_text_km,
+        ).toBeNull();
+      });
+
       it('returns MULTIPLE_CHOICE options in display order -> 200', async () => {
         const res = await request(
           app.getHttpServer(),
@@ -708,7 +758,7 @@ describe('Questions (e2e)', () => {
   describe(
     'PUT /api/questions/:questionId',
     () => {
-      it('ADMIN can edit the text -> 200', async () => {
+      it('ADMIN can edit the English and Khmer text -> 200', async () => {
         const res = await request(
           app.getHttpServer(),
         )
@@ -719,12 +769,41 @@ describe('Questions (e2e)', () => {
           .send({
             question_text:
               'The lecturer explains concepts clearly.',
+            question_text_km:
+              'គ្រូបង្រៀនពន្យល់គោលគំនិតបានច្បាស់លាស់។',
           });
 
         expect(res.status).toBe(200);
 
         expect(res.body.question_text).toBe(
           'The lecturer explains concepts clearly.',
+        );
+
+        expect(res.body.question_text_km).toBe(
+          'គ្រូបង្រៀនពន្យល់គោលគំនិតបានច្បាស់លាស់។',
+        );
+      });
+
+      it('updating another field keeps existing Khmer text -> 200', async () => {
+        const res = await request(
+          app.getHttpServer(),
+        )
+          .put(
+            `/api/questions/${ratingQuestionId}`,
+          )
+          .set(auth())
+          .send({
+            category: 'Teaching Quality',
+          });
+
+        expect(res.status).toBe(200);
+
+        expect(res.body.category).toBe(
+          'Teaching Quality',
+        );
+
+        expect(res.body.question_text_km).toBe(
+          'គ្រូបង្រៀនពន្យល់គោលគំនិតបានច្បាស់លាស់។',
         );
       });
 
@@ -746,6 +825,11 @@ describe('Questions (e2e)', () => {
         );
         expect(res.body.min_rating).toBeNull();
         expect(res.body.max_rating).toBeNull();
+
+        // Khmer translation should remain unchanged.
+        expect(res.body.question_text_km).toBe(
+          'គ្រូបង្រៀនពន្យល់គោលគំនិតបានច្បាស់លាស់។',
+        );
       });
 
       it('changing TEXT to MULTIPLE_CHOICE without options -> 400', async () => {

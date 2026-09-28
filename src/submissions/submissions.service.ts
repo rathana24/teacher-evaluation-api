@@ -42,14 +42,14 @@ export class SubmissionsService {
     studentId: bigint,
     dto: SubmitResponseDto,
   ) {
-    // 1. Same eligibility rules as viewing the survey
+    // 1. Same eligibility rules as viewing the survey.
     const { evaluation, participant } =
       await this.studentAccess.getAnswerableEvaluation(
         evaluationId,
         studentId,
       );
 
-    // 2. Load all questions and their selectable options
+    // 2. Load all questions and their selectable options.
     const questionList = await this.prisma.questions.findMany({
       where: {
         survey_version_id: evaluation.survey_version_id,
@@ -59,13 +59,13 @@ export class SubmissionsService {
       },
     });
 
-    // 3. Validate every answer before any write
+    // 3. Validate every answer before any write.
     const answersToSave = this.buildAnswers(
       questionList,
       dto.answers,
     );
 
-    // 4. All or nothing
+    // 4. All or nothing.
     const day = startOfUtcDay(new Date());
 
     await this.prisma.$transaction(async (tx) => {
@@ -154,6 +154,19 @@ export class SubmissionsService {
           });
         }
       }
+
+      /*
+       * The final response is now safely stored anonymously.
+       *
+       * Remove the identifiable unfinished draft in the SAME
+       * transaction. If any part of this transaction fails,
+       * Prisma rolls everything back and the draft remains.
+       */
+      await tx.assessment_drafts.deleteMany({
+        where: {
+          participant_id: participant.id,
+        },
+      });
     });
 
     return {
@@ -206,7 +219,10 @@ export class SubmissionsService {
 
       switch (question.question_type) {
         case question_type.RATING:
-          this.rejectTextAndOptions(answer, question.display_order);
+          this.rejectTextAndOptions(
+            answer,
+            question.display_order,
+          );
 
           if (answer.rating_value === undefined) {
             break;
@@ -228,7 +244,10 @@ export class SubmissionsService {
 
         case question_type.AGREEMENT:
         case question_type.FREQUENCY:
-          this.rejectTextAndOptions(answer, question.display_order);
+          this.rejectTextAndOptions(
+            answer,
+            question.display_order,
+          );
 
           if (answer.rating_value === undefined) {
             break;
@@ -304,7 +323,9 @@ export class SubmissionsService {
           }
 
           const uniqueIds = new Set(
-            selected.map((id) => BigInt(id).toString()),
+            selected.map((id) =>
+              BigInt(id).toString(),
+            ),
           );
 
           if (uniqueIds.size !== selected.length) {
@@ -329,10 +350,14 @@ export class SubmissionsService {
             ),
           );
 
-          const selectedIds = selected.map((id) => BigInt(id));
+          const selectedIds = selected.map((id) =>
+            BigInt(id),
+          );
 
           for (const optionId of selectedIds) {
-            if (!validOptionIds.has(optionId.toString())) {
+            if (
+              !validOptionIds.has(optionId.toString())
+            ) {
               throw new BadRequestException(
                 `Option ${optionId.toString()} does not belong to question ${question.display_order}`,
               );
@@ -389,7 +414,10 @@ export class SubmissionsService {
     const min = question.min_rating ?? 1;
     const max = question.max_rating ?? 5;
 
-    if (ratingValue < min || ratingValue > max) {
+    if (
+      ratingValue < min ||
+      ratingValue > max
+    ) {
       throw new BadRequestException(
         `Rating for question ${question.display_order} must be between ${min} and ${max}`,
       );

@@ -27,6 +27,14 @@ export class UpdateQuestionDto {
   question_text?: string;
 
   @ApiPropertyOptional({
+    example: 'គ្រូបង្រៀនពន្យល់គោលគំនិតបានច្បាស់លាស់។',
+    description: 'Optional Khmer translation of the question.',
+  })
+  @IsOptional()
+  @IsString()
+  question_text_km?: string;
+
+  @ApiPropertyOptional({
     enum: question_type,
     example: 'RATING',
   })

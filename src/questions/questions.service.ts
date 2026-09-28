@@ -5,13 +5,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { question_type } from '@prisma/client';
+
 import { PrismaService } from '../prisma/prisma.service';
 import { SurveyVersionsService } from '../survey-versions/survey-versions.service';
+
 import {
   CreateQuestionDto,
   QuestionOptionDto,
 } from './dto/create-question.dto';
 import { UpdateQuestionDto } from './dto/update-question.dto';
+import { ReorderQuestionsDto } from './dto/reorder-questions.dto';
 
 const OPTION_TYPES: question_type[] = [
   question_type.MULTIPLE_CHOICE,
@@ -26,13 +29,20 @@ export class QuestionsService {
   ) {}
 
   async findAllForVersion(versionId: bigint) {
-    const version = await this.prisma.survey_versions.findUnique({
-      where: { id: versionId },
-      select: { id: true },
-    });
+    const version =
+      await this.prisma.survey_versions.findUnique({
+        where: {
+          id: versionId,
+        },
+        select: {
+          id: true,
+        },
+      });
 
     if (!version) {
-      throw new NotFoundException('Survey version not found');
+      throw new NotFoundException(
+        'Survey version not found',
+      );
     }
 
     return this.prisma.questions.findMany({
@@ -52,8 +62,13 @@ export class QuestionsService {
     });
   }
 
-  async create(versionId: bigint, dto: CreateQuestionDto) {
-    await this.surveyVersions.assertEditable(versionId);
+  async create(
+    versionId: bigint,
+    dto: CreateQuestionDto,
+  ) {
+    await this.surveyVersions.assertEditable(
+      versionId,
+    );
 
     const range = this.resolveRatingRange(
       dto.question_type,
@@ -61,7 +76,10 @@ export class QuestionsService {
       dto.max_rating,
     );
 
-    this.validateOptions(dto.question_type, dto.options);
+    this.validateOptions(
+      dto.question_type,
+      dto.options,
+    );
 
     const displayOrder =
       dto.display_order ??
@@ -74,9 +92,12 @@ export class QuestionsService {
         data: {
           survey_version_id: versionId,
           question_text: dto.question_text,
+          question_text_km:
+            dto.question_text_km,
           question_type: dto.question_type,
           category: dto.category,
-          is_required: dto.is_required ?? true,
+          is_required:
+            dto.is_required ?? true,
           min_rating: range.min,
           max_rating: range.max,
           display_order: displayOrder,
@@ -85,10 +106,14 @@ export class QuestionsService {
 
           question_options: dto.options
             ? {
-                create: dto.options.map((option) => ({
-                  option_text: option.option_text,
-                  display_order: option.display_order,
-                })),
+                create: dto.options.map(
+                  (option) => ({
+                    option_text:
+                      option.option_text,
+                    display_order:
+                      option.display_order,
+                  }),
+                ),
               }
             : undefined,
         },
@@ -112,18 +137,246 @@ export class QuestionsService {
     }
   }
 
+  /**
+   * Reorder every question in a survey version.
+   *
+   * The frontend must send the complete list of questions
+   * belonging to the version.
+   *
+   * Example:
+   *
+   * {
+   *   "questions": [
+   *     {
+   *       "question_id": "12",
+   *       "display_order": 1
+   *     },
+   *     {
+   *       "question_id": "15",
+   *       "display_order": 2
+   *     }
+   *   ]
+   * }
+   *
+   * Validation:
+   * - survey version must be editable
+   * - complete question list is required
+   * - question IDs must be unique
+   * - display orders must be unique
+   * - display orders must be exactly 1..N
+   * - every question must belong to this version
+   *
+   * The update is performed in two phases so swapping
+   * positions does not violate the database unique
+   * constraint on display_order.
+   */
+  async reorder(
+    versionId: bigint,
+    dto: ReorderQuestionsDto,
+  ) {
+    await this.surveyVersions.assertEditable(
+      versionId,
+    );
+
+    const existingQuestions =
+      await this.prisma.questions.findMany({
+        where: {
+          survey_version_id: versionId,
+        },
+        select: {
+          id: true,
+          display_order: true,
+        },
+        orderBy: {
+          display_order: 'asc',
+        },
+      });
+
+    if (existingQuestions.length === 0) {
+      throw new BadRequestException(
+        'Survey version has no questions to reorder',
+      );
+    }
+
+    if (
+      dto.questions.length !==
+      existingQuestions.length
+    ) {
+      throw new BadRequestException(
+        'The complete question list is required when reordering',
+      );
+    }
+
+    const requestedIds = dto.questions.map(
+      (item) => item.question_id,
+    );
+
+    if (
+      new Set(requestedIds).size !==
+      requestedIds.length
+    ) {
+      throw new BadRequestException(
+        'Each question_id must be unique',
+      );
+    }
+
+    const requestedOrders =
+      dto.questions.map(
+        (item) => item.display_order,
+      );
+
+    if (
+      new Set(requestedOrders).size !==
+      requestedOrders.length
+    ) {
+      throw new BadRequestException(
+        'Each display_order must be unique',
+      );
+    }
+
+    const expectedOrders = Array.from(
+      {
+        length: existingQuestions.length,
+      },
+      (_, index) => index + 1,
+    );
+
+    const sortedRequestedOrders = [
+      ...requestedOrders,
+    ].sort((a, b) => a - b);
+
+    const hasValidSequence =
+      sortedRequestedOrders.every(
+        (order, index) =>
+          order === expectedOrders[index],
+      );
+
+    if (!hasValidSequence) {
+      throw new BadRequestException(
+        `display_order must contain every position from 1 to ${existingQuestions.length}`,
+      );
+    }
+
+    const existingIdSet = new Set(
+      existingQuestions.map((question) =>
+        question.id.toString(),
+      ),
+    );
+
+    for (const item of dto.questions) {
+      if (
+        !existingIdSet.has(item.question_id)
+      ) {
+        throw new BadRequestException(
+          `Question ${item.question_id} does not belong to this survey version`,
+        );
+      }
+    }
+
+    const now = new Date();
+
+    try {
+      await this.prisma.$transaction(
+        async (tx) => {
+          /*
+           * Phase 1:
+           *
+           * Move every question to a temporary unique
+           * negative display_order.
+           *
+           * Example:
+           *
+           * 1, 2, 3
+           * ↓
+           * -1, -2, -3
+           *
+           * This frees all positive positions before
+           * assigning the final order.
+           */
+          for (
+            let index = 0;
+            index <
+            existingQuestions.length;
+            index++
+          ) {
+            const question =
+              existingQuestions[index];
+
+            await tx.questions.update({
+              where: {
+                id: question.id,
+              },
+              data: {
+                display_order:
+                  -(index + 1),
+                updated_at: now,
+              },
+            });
+          }
+
+          /*
+           * Phase 2:
+           *
+           * Assign the final positions requested by
+           * the frontend.
+           */
+          for (const item of dto.questions) {
+            await tx.questions.update({
+              where: {
+                id: BigInt(
+                  item.question_id,
+                ),
+              },
+              data: {
+                display_order:
+                  item.display_order,
+                updated_at: now,
+              },
+            });
+          }
+        },
+      );
+    } catch (e: any) {
+      if (e.code === 'P2002') {
+        throw new ConflictException(
+          'Unable to reorder questions because a display_order conflict occurred',
+        );
+      }
+
+      throw e;
+    }
+
+    return this.prisma.questions.findMany({
+      where: {
+        survey_version_id: versionId,
+      },
+      include: {
+        question_options: {
+          orderBy: {
+            display_order: 'asc',
+          },
+        },
+      },
+      orderBy: {
+        display_order: 'asc',
+      },
+    });
+  }
+
   async update(
     questionId: bigint,
     dto: UpdateQuestionDto,
   ) {
-    const question = await this.findQuestion(questionId);
+    const question =
+      await this.findQuestion(questionId);
 
     await this.surveyVersions.assertEditable(
       question.survey_version_id,
     );
 
     const type =
-      dto.question_type ?? question.question_type;
+      dto.question_type ??
+      question.question_type;
 
     const typeChanged =
       type !== question.question_type;
@@ -132,19 +385,22 @@ export class QuestionsService {
       dto.min_rating ??
       (typeChanged
         ? undefined
-        : question.min_rating ?? undefined);
+        : question.min_rating ??
+          undefined);
 
     const max =
       dto.max_rating ??
       (typeChanged
         ? undefined
-        : question.max_rating ?? undefined);
+        : question.max_rating ??
+          undefined);
 
-    const range = this.resolveRatingRange(
-      type,
-      min,
-      max,
-    );
+    const range =
+      this.resolveRatingRange(
+        type,
+        min,
+        max,
+      );
 
     this.validateOptionsForUpdate(
       type,
@@ -160,35 +416,49 @@ export class QuestionsService {
            * replace the old option list.
            */
           if (dto.options !== undefined) {
-            await tx.question_options.deleteMany({
-              where: {
-                question_id: questionId,
+            await tx.question_options.deleteMany(
+              {
+                where: {
+                  question_id:
+                    questionId,
+                },
               },
-            });
+            );
 
-            await tx.question_options.createMany({
-              data: dto.options.map((option) => ({
-                question_id: questionId,
-                option_text: option.option_text,
-                display_order: option.display_order,
-              })),
-            });
+            await tx.question_options.createMany(
+              {
+                data: dto.options.map(
+                  (option) => ({
+                    question_id:
+                      questionId,
+                    option_text:
+                      option.option_text,
+                    display_order:
+                      option.display_order,
+                  }),
+                ),
+              },
+            );
           }
 
           /*
-           * If the question changes from an option-based
-           * type to a non-option type, remove old options.
+           * If the question changes from an
+           * option-based type to a non-option type,
+           * remove old options.
            */
           if (
             typeChanged &&
             !this.isOptionType(type) &&
             dto.options === undefined
           ) {
-            await tx.question_options.deleteMany({
-              where: {
-                question_id: questionId,
+            await tx.question_options.deleteMany(
+              {
+                where: {
+                  question_id:
+                    questionId,
+                },
               },
-            });
+            );
           }
 
           return tx.questions.update({
@@ -197,13 +467,18 @@ export class QuestionsService {
             },
 
             data: {
-              question_text: dto.question_text,
+              question_text:
+                dto.question_text,
+              question_text_km:
+                dto.question_text_km,
               question_type: type,
               category: dto.category,
-              is_required: dto.is_required,
+              is_required:
+                dto.is_required,
               min_rating: range.min,
               max_rating: range.max,
-              display_order: dto.display_order,
+              display_order:
+                dto.display_order,
               updated_at: new Date(),
             },
 
@@ -245,11 +520,14 @@ export class QuestionsService {
     try {
       await this.prisma.$transaction(
         async (tx) => {
-          await tx.question_options.deleteMany({
-            where: {
-              question_id: questionId,
+          await tx.question_options.deleteMany(
+            {
+              where: {
+                question_id:
+                  questionId,
+              },
             },
-          });
+          );
 
           await tx.questions.delete({
             where: {
@@ -273,11 +551,13 @@ export class QuestionsService {
     questionId: bigint,
   ) {
     const question =
-      await this.prisma.questions.findUnique({
-        where: {
-          id: questionId,
+      await this.prisma.questions.findUnique(
+        {
+          where: {
+            id: questionId,
+          },
         },
-      });
+      );
 
     if (!question) {
       throw new NotFoundException(
@@ -402,12 +682,15 @@ export class QuestionsService {
    */
   private validateOptionsForUpdate(
     type: question_type,
-    options: QuestionOptionDto[] | undefined,
+    options:
+      | QuestionOptionDto[]
+      | undefined,
     typeChanged: boolean,
   ) {
     /*
      * Important:
-     * TEXT/RATING/etc. -> MULTIPLE_CHOICE/CHECKBOX
+     * TEXT/RATING/etc. ->
+     * MULTIPLE_CHOICE/CHECKBOX
      * cannot happen without providing options.
      */
     if (

@@ -33,6 +33,18 @@ model answer_options {
   @@id([answer_id, option_id])
 }
 
+/// Stores a student's temporary unfinished evaluation answers.
+/// The draft is identifiable while editing, but the final response remains anonymous.
+model assessment_drafts {
+  id             BigInt   @id @default(autoincrement())
+  participant_id BigInt   @unique
+  answers_json   Json
+  created_at     DateTime @db.Timestamp(6)
+  updated_at     DateTime @db.Timestamp(6)
+
+  evaluation_participants evaluation_participants @relation(fields: [participant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
 /// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
 model course_offerings {
   id           BigInt        @id @default(autoincrement())
@@ -75,19 +87,20 @@ model enrollments {
 
 /// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
 model evaluation_participants {
-  id            BigInt      @id @default(autoincrement())
-  evaluation_id BigInt
-  student_id    BigInt
-  has_submitted Boolean     @default(false)
-  submitted_at  DateTime?   @db.Timestamp(6)
-  created_at    DateTime    @db.Timestamp(6)
-  evaluations   evaluations @relation(fields: [evaluation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  users         users       @relation(fields: [student_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id                BigInt             @id @default(autoincrement())
+  evaluation_id     BigInt
+  student_id        BigInt
+  has_submitted     Boolean            @default(false)
+  submitted_at      DateTime?          @db.Timestamp(6)
+  created_at        DateTime           @db.Timestamp(6)
+  evaluations       evaluations        @relation(fields: [evaluation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users             users              @relation(fields: [student_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  assessment_drafts assessment_drafts?
 
   @@unique([evaluation_id, student_id], map: "evaluation_participants_evaluation_id_student_id_idx")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
+/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https\://pris.ly/d/constraint-deferring for more info.
 model evaluations {
   id                      BigInt                    @id @default(autoincrement())
   course_offering_id      BigInt
@@ -107,11 +120,12 @@ model evaluations {
   @@unique([course_offering_id, survey_version_id], map: "evaluations_course_offering_id_survey_version_id_idx")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
+/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https\://pris.ly/d/constraint-deferring for more info.
 model questions {
   id                BigInt             @id @default(autoincrement())
   survey_version_id BigInt
   question_text     String
+  question_text_km  String?
   question_type     question_type
   category          String?            @db.VarChar(100)
   is_required       Boolean            @default(true)
@@ -139,7 +153,7 @@ model question_options {
   @@unique([question_id, display_order], map: "question_options_question_id_display_order_idx")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
+/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https\://pris.ly/d/constraint-deferring for more info.
 model responses {
   id            BigInt      @id @default(autoincrement())
   evaluation_id BigInt
@@ -162,7 +176,7 @@ model semesters {
   @@unique([semester_name, academic_year], map: "semesters_semester_name_academic_year_idx")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
+/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https\://pris.ly/d/constraint-deferring for more info.
 model surveys {
   id              BigInt            @id @default(autoincrement())
   title           String            @db.VarChar(200)
