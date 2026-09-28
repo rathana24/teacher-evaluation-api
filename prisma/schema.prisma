@@ -9,16 +9,28 @@ datasource db {
 
 /// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
 model answers {
-  id           BigInt    @id @default(autoincrement())
-  response_id  BigInt
-  question_id  BigInt
-  rating_value Int?
-  text_value   String?
-  created_at   DateTime  @db.Timestamp(6)
-  questions    questions @relation(fields: [question_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  responses    responses @relation(fields: [response_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id             BigInt           @id @default(autoincrement())
+  response_id    BigInt
+  question_id    BigInt
+  rating_value   Int?
+  text_value     String?
+  created_at     DateTime         @db.Timestamp(6)
+  questions      questions        @relation(fields: [question_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  responses      responses        @relation(fields: [response_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  answer_options answer_options[]
 
   @@unique([response_id, question_id], map: "answers_response_id_question_id_idx")
+}
+
+/// Stores selected options for MULTIPLE_CHOICE and CHECKBOX answers.
+model answer_options {
+  answer_id BigInt
+  option_id BigInt
+
+  answers          answers          @relation(fields: [answer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  question_options question_options @relation(fields: [option_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([answer_id, option_id])
 }
 
 /// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
@@ -97,21 +109,34 @@ model evaluations {
 
 /// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
 model questions {
-  id            BigInt        @id @default(autoincrement())
+  id                BigInt             @id @default(autoincrement())
   survey_version_id BigInt
-  question_text String
-  question_type question_type
-  category      String?       @db.VarChar(100)
-  is_required   Boolean       @default(true)
-  min_rating    Int?
-  max_rating    Int?
-  display_order Int
-  created_at    DateTime      @db.Timestamp(6)
-  updated_at    DateTime      @db.Timestamp(6)
-  answers       answers[]
-  survey_versions survey_versions @relation(fields: [survey_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  question_text     String
+  question_type     question_type
+  category          String?            @db.VarChar(100)
+  is_required       Boolean            @default(true)
+  min_rating        Int?
+  max_rating        Int?
+  display_order     Int
+  created_at        DateTime           @db.Timestamp(6)
+  updated_at        DateTime           @db.Timestamp(6)
+  answers           answers[]
+  question_options  question_options[]
+  survey_versions   survey_versions    @relation(fields: [survey_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([survey_version_id, display_order], map: "questions_survey_version_id_display_order_idx")
+}
+
+/// Stores options for MULTIPLE_CHOICE and CHECKBOX questions.
+model question_options {
+  id             BigInt           @id @default(autoincrement())
+  question_id    BigInt
+  option_text    String
+  display_order  Int
+  questions      questions        @relation(fields: [question_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  answer_options answer_options[]
+
+  @@unique([question_id, display_order], map: "question_options_question_id_display_order_idx")
 }
 
 /// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
@@ -139,28 +164,28 @@ model semesters {
 
 /// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
 model surveys {
-  id          BigInt        @id @default(autoincrement())
-  title       String        @db.VarChar(200)
-  description String?
-  created_by  BigInt
-  created_at  DateTime      @db.Timestamp(6)
-  updated_at  DateTime      @db.Timestamp(6)
+  id              BigInt            @id @default(autoincrement())
+  title           String            @db.VarChar(200)
+  description     String?
+  created_by      BigInt
+  created_at      DateTime          @db.Timestamp(6)
+  updated_at      DateTime          @db.Timestamp(6)
   survey_versions survey_versions[]
-  users           users           @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users           users             @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
 model survey_versions {
-  id            BigInt               @id @default(autoincrement())
-  survey_id     BigInt
-  version_no    Int
-  status        survey_version_status @default(DRAFT)
-  locked_at     DateTime?
-  created_by    BigInt
-  created_at    DateTime             @db.Timestamp(6)
-  surveys       surveys              @relation(fields: [survey_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  users         users                @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  questions     questions[]
-  evaluations   evaluations[]
+  id          BigInt                @id @default(autoincrement())
+  survey_id   BigInt
+  version_no  Int
+  status      survey_version_status @default(DRAFT)
+  locked_at   DateTime?
+  created_by  BigInt
+  created_at  DateTime              @db.Timestamp(6)
+  surveys     surveys               @relation(fields: [survey_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users       users                 @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  questions   questions[]
+  evaluations evaluations[]
 
   @@unique([survey_id, version_no], map: "survey_versions_survey_id_version_no_idx")
 }
@@ -191,6 +216,10 @@ enum evaluation_status {
 enum question_type {
   RATING
   TEXT
+  AGREEMENT
+  FREQUENCY
+  MULTIPLE_CHOICE
+  CHECKBOX
 }
 
 enum user_role {
