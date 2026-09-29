@@ -7,6 +7,29 @@ const now = new Date();
 async function main() {
   const password = await bcrypt.hash('Password123', 10);
 
+  // ---------- ACADEMIC YEAR ----------
+  const academicYear = await prisma.academic_years.create({
+    data: {
+      name: '2025-2026',
+      start_date: new Date('2025-10-01'),
+      end_date: new Date('2026-07-31'),
+      is_active: true,
+      created_at: now,
+      updated_at: now,
+    },
+  });
+
+  // ---------- DEPARTMENT ----------
+  const department = await prisma.departments.create({
+    data: {
+      code: 'AMS',
+      name: 'Applied Mathematics and Statistics',
+      status: 'ACTIVE',
+      created_at: now,
+      updated_at: now,
+    },
+  });
+
   // ---------- USERS ----------
   const admin = await prisma.users.create({
     data: {
@@ -42,6 +65,7 @@ async function main() {
   });
 
   const students = [];
+
   for (let i = 1; i <= 5; i++) {
     students.push(
       await prisma.users.create({
@@ -57,13 +81,42 @@ async function main() {
     );
   }
 
+  // ---------- USER DEPARTMENTS ----------
+  // Current deployment uses one department: AMS.
+  // Admin and lecturers belong to AMS.
+  await prisma.user_departments.createMany({
+    data: [
+      {
+        user_id: admin.id,
+        department_id: department.id,
+        is_primary: true,
+        created_at: now,
+      },
+      {
+        user_id: lecturer1.id,
+        department_id: department.id,
+        is_primary: true,
+        created_at: now,
+      },
+      {
+        user_id: lecturer2.id,
+        department_id: department.id,
+        is_primary: true,
+        created_at: now,
+      },
+    ],
+  });
+
   // ---------- SEMESTER ----------
   const semester = await prisma.semesters.create({
     data: {
       semester_name: 'Semester 1',
-      academic_year: '2025-2026',
+
+      academic_year_id: academicYear.id,
+
       start_date: new Date('2025-10-01'),
       end_date: new Date('2026-02-28'),
+
       created_at: now,
       updated_at: now,
     },
@@ -75,6 +128,9 @@ async function main() {
       course_code: 'CS301',
       course_name: 'Database Systems',
       description: 'Relational databases and SQL',
+
+      department_id: department.id,
+
       created_at: now,
       updated_at: now,
     },
@@ -85,6 +141,9 @@ async function main() {
       course_code: 'CS402',
       course_name: 'Machine Learning',
       description: 'Supervised and unsupervised learning',
+
+      department_id: department.id,
+
       created_at: now,
       updated_at: now,
     },
@@ -113,13 +172,14 @@ async function main() {
     },
   });
 
-  // ---------- ENROLLMENTS (all 5 students in both) ----------
-  for (const s of students) {
-    for (const off of [offering1, offering2]) {
+  // ---------- ENROLLMENTS ----------
+  // All 5 students are enrolled in both offerings.
+  for (const student of students) {
+    for (const offering of [offering1, offering2]) {
       await prisma.enrollments.create({
         data: {
-          student_id: s.id,
-          course_offering_id: off.id,
+          student_id: student.id,
+          course_offering_id: offering.id,
           enrolled_at: now,
         },
       });
@@ -149,25 +209,49 @@ async function main() {
 
   // ---------- QUESTIONS ----------
   const questions = [
-    { text: 'The lecturer explains concepts clearly.', type: 'RATING' },
-    { text: 'The lecturer is well prepared for class.', type: 'RATING' },
-    { text: 'Course materials are useful and relevant.', type: 'RATING' },
-    { text: 'The lecturer is available to answer questions.', type: 'RATING' },
-    { text: 'What did you like most about this course?', type: 'TEXT' },
-    { text: 'What could be improved?', type: 'TEXT' },
+    {
+      text: 'The lecturer explains concepts clearly.',
+      type: 'RATING',
+    },
+    {
+      text: 'The lecturer is well prepared for class.',
+      type: 'RATING',
+    },
+    {
+      text: 'Course materials are useful and relevant.',
+      type: 'RATING',
+    },
+    {
+      text: 'The lecturer is available to answer questions.',
+      type: 'RATING',
+    },
+    {
+      text: 'What did you like most about this course?',
+      type: 'TEXT',
+    },
+    {
+      text: 'What could be improved?',
+      type: 'TEXT',
+    },
   ];
 
   for (let i = 0; i < questions.length; i++) {
-    const q = questions[i];
+    const question = questions[i];
+
     await prisma.questions.create({
       data: {
         survey_version_id: surveyVersion.id,
-        question_text: q.text,
-        question_type: q.type as any,
-        category: q.type === 'RATING' ? 'Teaching' : 'Feedback',
-        is_required: q.type === 'RATING',
-        min_rating: q.type === 'RATING' ? 1 : null,
-        max_rating: q.type === 'RATING' ? 5 : null,
+        question_text: question.text,
+        question_type: question.type as any,
+        category:
+          question.type === 'RATING'
+            ? 'Teaching'
+            : 'Feedback',
+        is_required: question.type === 'RATING',
+        min_rating:
+          question.type === 'RATING' ? 1 : null,
+        max_rating:
+          question.type === 'RATING' ? 5 : null,
         display_order: i + 1,
         created_at: now,
         updated_at: now,
@@ -175,9 +259,11 @@ async function main() {
     });
   }
 
-  // ---------- EVALUATIONS (one OPEN, one DRAFT) ----------
+  // ---------- EVALUATIONS ----------
+  // One OPEN evaluation and one DRAFT evaluation.
   const start = new Date();
   start.setDate(start.getDate() - 1);
+
   const end = new Date();
   end.setDate(end.getDate() + 14);
 
@@ -205,12 +291,13 @@ async function main() {
     },
   });
 
-  // ---------- PARTICIPANTS for the open evaluation ----------
-  for (const s of students) {
+  // ---------- PARTICIPANTS ----------
+  // Add all students to the OPEN evaluation.
+  for (const student of students) {
     await prisma.evaluation_participants.create({
       data: {
         evaluation_id: evalOpen.id,
-        student_id: s.id,
+        student_id: student.id,
         has_submitted: false,
         created_at: now,
       },
@@ -218,10 +305,18 @@ async function main() {
   }
 
   console.log('Seed complete.');
-  console.log('Login with any of these, password: Password123');
-  console.log('  admin@itc.edu.kh      (ADMIN)');
-  console.log('  sokdara@itc.edu.kh    (LECTURER)');
-  console.log('  student1@itc.edu.kh   (STUDENT)');
+  console.log(
+    'Login with any of these, password: Password123',
+  );
+  console.log(
+    '  admin@itc.edu.kh      (ADMIN)',
+  );
+  console.log(
+    '  sokdara@itc.edu.kh    (LECTURER)',
+  );
+  console.log(
+    '  student1@itc.edu.kh   (STUDENT)',
+  );
 }
 
 main()

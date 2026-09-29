@@ -28,6 +28,10 @@ export class QuestionsService {
     private surveyVersions: SurveyVersionsService,
   ) {}
 
+  // =========================================================
+  // GET ALL QUESTIONS FOR VERSION
+  // =========================================================
+
   async findAllForVersion(versionId: bigint) {
     const version =
       await this.prisma.survey_versions.findUnique({
@@ -49,6 +53,7 @@ export class QuestionsService {
       where: {
         survey_version_id: versionId,
       },
+
       include: {
         question_options: {
           orderBy: {
@@ -56,11 +61,16 @@ export class QuestionsService {
           },
         },
       },
+
       orderBy: {
         display_order: 'asc',
       },
     });
   }
+
+  // =========================================================
+  // CREATE QUESTION
+  // =========================================================
 
   async create(
     versionId: bigint,
@@ -81,51 +91,186 @@ export class QuestionsService {
       dto.options,
     );
 
+    const questionCount =
+      await this.prisma.questions.count({
+        where: {
+          survey_version_id: versionId,
+        },
+      });
+
+    /*
+     * If display_order is omitted:
+     * append to the end.
+     *
+     * If supplied:
+     * it must be between 1 and count + 1.
+     */
     const displayOrder =
-      dto.display_order ??
-      (await this.nextDisplayOrder(versionId));
+      dto.display_order ?? questionCount + 1;
+
+    if (
+      displayOrder < 1 ||
+      displayOrder > questionCount + 1
+    ) {
+      throw new BadRequestException(
+        `display_order must be between 1 and ${
+          questionCount + 1
+        }`,
+      );
+    }
 
     const now = new Date();
 
     try {
-      return await this.prisma.questions.create({
-        data: {
-          survey_version_id: versionId,
-          question_text: dto.question_text,
-          question_text_km:
-            dto.question_text_km,
-          question_type: dto.question_type,
-          category: dto.category,
-          is_required:
-            dto.is_required ?? true,
-          min_rating: range.min,
-          max_rating: range.max,
-          display_order: displayOrder,
-          created_at: now,
-          updated_at: now,
+      return await this.prisma.$transaction(
+        async (tx) => {
+          /*
+           * If inserting somewhere before the end,
+           * shift all questions from that position
+           * one place to the right.
+           *
+           * Example:
+           *
+           * 1 A
+           * 2 B
+           * 3 C
+           *
+           * Insert at 2:
+           *
+           * 1 A
+           * 2 NEW
+           * 3 B
+           * 4 C
+           *
+           * Because display_order is unique inside
+           * the survey version, we first move the
+           * affected rows to temporary negative values.
+           */
 
-          question_options: dto.options
-            ? {
-                create: dto.options.map(
-                  (option) => ({
-                    option_text:
-                      option.option_text,
-                    display_order:
-                      option.display_order,
-                  }),
-                ),
-              }
-            : undefined,
-        },
+          const questionsToShift =
+            await tx.questions.findMany({
+              where: {
+                survey_version_id: versionId,
 
-        include: {
-          question_options: {
-            orderBy: {
-              display_order: 'asc',
+                display_order: {
+                  gte: displayOrder,
+                },
+              },
+
+              select: {
+                id: true,
+                display_order: true,
+              },
+
+              orderBy: {
+                display_order: 'asc',
+              },
+            });
+
+          // Phase 1:
+          // move affected questions to temporary
+          // negative positions.
+          for (
+            let index = 0;
+            index < questionsToShift.length;
+            index++
+          ) {
+            const question =
+              questionsToShift[index];
+
+            await tx.questions.update({
+              where: {
+                id: question.id,
+              },
+
+              data: {
+                display_order:
+                  -(index + 1),
+                updated_at: now,
+              },
+            });
+          }
+
+          // Phase 2:
+          // move each old question one position right.
+          for (const question of questionsToShift) {
+            await tx.questions.update({
+              where: {
+                id: question.id,
+              },
+
+              data: {
+                display_order:
+                  question.display_order + 1,
+                updated_at: now,
+              },
+            });
+          }
+
+          // Phase 3:
+          // create the new question in the free slot.
+          return tx.questions.create({
+            data: {
+              survey_version_id:
+                versionId,
+
+              question_text:
+                dto.question_text,
+
+              question_text_km:
+                dto.question_text_km,
+
+              question_type:
+                dto.question_type,
+
+              category:
+                dto.category,
+
+              is_required:
+                dto.is_required ?? true,
+
+              min_rating:
+                range.min,
+
+              max_rating:
+                range.max,
+
+              display_order:
+                displayOrder,
+
+              created_at:
+                now,
+
+              updated_at:
+                now,
+
+              question_options:
+                dto.options
+                  ? {
+                      create:
+                        dto.options.map(
+                          (option) => ({
+                            option_text:
+                              option.option_text,
+
+                            display_order:
+                              option.display_order,
+                          }),
+                        ),
+                    }
+                  : undefined,
             },
-          },
+
+            include: {
+              question_options: {
+                orderBy: {
+                  display_order: 'asc',
+                },
+              },
+            },
+          });
         },
-      });
+      );
     } catch (e: any) {
       if (e.code === 'P2002') {
         throw new ConflictException(
@@ -136,6 +281,10 @@ export class QuestionsService {
       throw e;
     }
   }
+
+  // =========================================================
+  // REORDER QUESTIONS
+  // =========================================================
 
   /**
    * Reorder every question in a survey version.
@@ -166,9 +315,7 @@ export class QuestionsService {
    * - display orders must be exactly 1..N
    * - every question must belong to this version
    *
-   * The update is performed in two phases so swapping
-   * positions does not violate the database unique
-   * constraint on display_order.
+   * Two-phase update avoids unique-order conflicts.
    */
   async reorder(
     versionId: bigint,
@@ -183,10 +330,12 @@ export class QuestionsService {
         where: {
           survey_version_id: versionId,
         },
+
         select: {
           id: true,
           display_order: true,
         },
+
         orderBy: {
           display_order: 'asc',
         },
@@ -207,9 +356,10 @@ export class QuestionsService {
       );
     }
 
-    const requestedIds = dto.questions.map(
-      (item) => item.question_id,
-    );
+    const requestedIds =
+      dto.questions.map(
+        (item) => item.question_id,
+      );
 
     if (
       new Set(requestedIds).size !==
@@ -234,12 +384,14 @@ export class QuestionsService {
       );
     }
 
-    const expectedOrders = Array.from(
-      {
-        length: existingQuestions.length,
-      },
-      (_, index) => index + 1,
-    );
+    const expectedOrders =
+      Array.from(
+        {
+          length:
+            existingQuestions.length,
+        },
+        (_, index) => index + 1,
+      );
 
     const sortedRequestedOrders = [
       ...requestedOrders,
@@ -257,15 +409,19 @@ export class QuestionsService {
       );
     }
 
-    const existingIdSet = new Set(
-      existingQuestions.map((question) =>
-        question.id.toString(),
-      ),
-    );
+    const existingIdSet =
+      new Set(
+        existingQuestions.map(
+          (question) =>
+            question.id.toString(),
+        ),
+      );
 
     for (const item of dto.questions) {
       if (
-        !existingIdSet.has(item.question_id)
+        !existingIdSet.has(
+          item.question_id,
+        )
       ) {
         throw new BadRequestException(
           `Question ${item.question_id} does not belong to this survey version`,
@@ -280,18 +436,8 @@ export class QuestionsService {
         async (tx) => {
           /*
            * Phase 1:
-           *
-           * Move every question to a temporary unique
+           * Move every question to a temporary
            * negative display_order.
-           *
-           * Example:
-           *
-           * 1, 2, 3
-           * ↓
-           * -1, -2, -3
-           *
-           * This frees all positive positions before
-           * assigning the final order.
            */
           for (
             let index = 0;
@@ -306,31 +452,37 @@ export class QuestionsService {
               where: {
                 id: question.id,
               },
+
               data: {
                 display_order:
                   -(index + 1),
-                updated_at: now,
+
+                updated_at:
+                  now,
               },
             });
           }
 
           /*
            * Phase 2:
-           *
-           * Assign the final positions requested by
-           * the frontend.
+           * Assign requested final positions.
            */
-          for (const item of dto.questions) {
+          for (
+            const item of dto.questions
+          ) {
             await tx.questions.update({
               where: {
                 id: BigInt(
                   item.question_id,
                 ),
               },
+
               data: {
                 display_order:
                   item.display_order,
-                updated_at: now,
+
+                updated_at:
+                  now,
               },
             });
           }
@@ -348,8 +500,10 @@ export class QuestionsService {
 
     return this.prisma.questions.findMany({
       where: {
-        survey_version_id: versionId,
+        survey_version_id:
+          versionId,
       },
+
       include: {
         question_options: {
           orderBy: {
@@ -357,18 +511,25 @@ export class QuestionsService {
           },
         },
       },
+
       orderBy: {
         display_order: 'asc',
       },
     });
   }
 
+  // =========================================================
+  // UPDATE QUESTION
+  // =========================================================
+
   async update(
     questionId: bigint,
     dto: UpdateQuestionDto,
   ) {
     const question =
-      await this.findQuestion(questionId);
+      await this.findQuestion(
+        questionId,
+      );
 
     await this.surveyVersions.assertEditable(
       question.survey_version_id,
@@ -415,50 +576,48 @@ export class QuestionsService {
            * If options are explicitly supplied,
            * replace the old option list.
            */
-          if (dto.options !== undefined) {
-            await tx.question_options.deleteMany(
-              {
-                where: {
+          if (
+            dto.options !== undefined
+          ) {
+            await tx.question_options.deleteMany({
+              where: {
+                question_id:
+                  questionId,
+              },
+            });
+
+            await tx.question_options.createMany({
+              data: dto.options.map(
+                (option) => ({
                   question_id:
                     questionId,
-                },
-              },
-            );
 
-            await tx.question_options.createMany(
-              {
-                data: dto.options.map(
-                  (option) => ({
-                    question_id:
-                      questionId,
-                    option_text:
-                      option.option_text,
-                    display_order:
-                      option.display_order,
-                  }),
-                ),
-              },
-            );
+                  option_text:
+                    option.option_text,
+
+                  display_order:
+                    option.display_order,
+                }),
+              ),
+            });
           }
 
           /*
-           * If the question changes from an
-           * option-based type to a non-option type,
-           * remove old options.
+           * If changing from an option-based
+           * question to a non-option question,
+           * remove the old options.
            */
           if (
             typeChanged &&
             !this.isOptionType(type) &&
             dto.options === undefined
           ) {
-            await tx.question_options.deleteMany(
-              {
-                where: {
-                  question_id:
-                    questionId,
-                },
+            await tx.question_options.deleteMany({
+              where: {
+                question_id:
+                  questionId,
               },
-            );
+            });
           }
 
           return tx.questions.update({
@@ -469,23 +628,37 @@ export class QuestionsService {
             data: {
               question_text:
                 dto.question_text,
+
               question_text_km:
                 dto.question_text_km,
-              question_type: type,
-              category: dto.category,
+
+              question_type:
+                type,
+
+              category:
+                dto.category,
+
               is_required:
                 dto.is_required,
-              min_rating: range.min,
-              max_rating: range.max,
+
+              min_rating:
+                range.min,
+
+              max_rating:
+                range.max,
+
               display_order:
                 dto.display_order,
-              updated_at: new Date(),
+
+              updated_at:
+                new Date(),
             },
 
             include: {
               question_options: {
                 orderBy: {
-                  display_order: 'asc',
+                  display_order:
+                    'asc',
                 },
               },
             },
@@ -509,31 +682,129 @@ export class QuestionsService {
     }
   }
 
+  // =========================================================
+  // DELETE QUESTION
+  // =========================================================
+
   async remove(questionId: bigint) {
     const question =
-      await this.findQuestion(questionId);
+      await this.findQuestion(
+        questionId,
+      );
 
     await this.surveyVersions.assertEditable(
       question.survey_version_id,
     );
 
+    const now = new Date();
+
     try {
       await this.prisma.$transaction(
         async (tx) => {
-          await tx.question_options.deleteMany(
-            {
-              where: {
-                question_id:
-                  questionId,
-              },
-            },
-          );
+          /*
+           * Example:
+           *
+           * 1 A
+           * 2 B <- delete
+           * 3 C
+           * 4 D
+           *
+           * Result:
+           *
+           * 1 A
+           * 2 C
+           * 3 D
+           */
 
+          // Find questions that come after
+          // the question being deleted.
+          const questionsToShift =
+            await tx.questions.findMany({
+              where: {
+                survey_version_id:
+                  question.survey_version_id,
+
+                display_order: {
+                  gt:
+                    question.display_order,
+                },
+              },
+
+              select: {
+                id: true,
+                display_order: true,
+              },
+
+              orderBy: {
+                display_order: 'asc',
+              },
+            });
+
+          // Remove options first.
+          await tx.question_options.deleteMany({
+            where: {
+              question_id:
+                questionId,
+            },
+          });
+
+          // Delete the question.
           await tx.questions.delete({
             where: {
               id: questionId,
             },
           });
+
+          /*
+           * Phase 1:
+           * Move later questions temporarily
+           * to negative positions.
+           */
+          for (
+            let index = 0;
+            index <
+            questionsToShift.length;
+            index++
+          ) {
+            const item =
+              questionsToShift[index];
+
+            await tx.questions.update({
+              where: {
+                id: item.id,
+              },
+
+              data: {
+                display_order:
+                  -(index + 1),
+
+                updated_at:
+                  now,
+              },
+            });
+          }
+
+          /*
+           * Phase 2:
+           * Compact them by one position.
+           */
+          for (
+            const item of questionsToShift
+          ) {
+            await tx.questions.update({
+              where: {
+                id: item.id,
+              },
+
+              data: {
+                display_order:
+                  item.display_order - 1,
+
+                updated_at:
+                  now,
+              },
+            });
+          }
         },
       );
     } catch (e: any) {
@@ -543,21 +814,29 @@ export class QuestionsService {
         );
       }
 
+      if (e.code === 'P2002') {
+        throw new ConflictException(
+          'Unable to compact question ordering because a display_order conflict occurred',
+        );
+      }
+
       throw e;
     }
   }
+
+  // =========================================================
+  // INTERNAL HELPERS
+  // =========================================================
 
   private async findQuestion(
     questionId: bigint,
   ) {
     const question =
-      await this.prisma.questions.findUnique(
-        {
-          where: {
-            id: questionId,
-          },
+      await this.prisma.questions.findUnique({
+        where: {
+          id: questionId,
         },
-      );
+      });
 
     if (!question) {
       throw new NotFoundException(
@@ -583,7 +862,9 @@ export class QuestionsService {
     min?: number,
     max?: number,
   ) {
-    if (type === question_type.RATING) {
+    if (
+      type === question_type.RATING
+    ) {
       const low = min ?? 1;
       const high = max ?? 5;
 
@@ -600,8 +881,10 @@ export class QuestionsService {
     }
 
     if (
-      type === question_type.AGREEMENT ||
-      type === question_type.FREQUENCY
+      type ===
+        question_type.AGREEMENT ||
+      type ===
+        question_type.FREQUENCY
     ) {
       if (
         min !== undefined ||
@@ -637,10 +920,10 @@ export class QuestionsService {
    * Creation:
    *
    * MULTIPLE_CHOICE / CHECKBOX
-   * → options required
+   * -> options required
    *
    * Other question types
-   * → options not allowed
+   * -> options not allowed
    */
   private validateOptions(
     type: question_type,
@@ -674,11 +957,11 @@ export class QuestionsService {
    * Update:
    *
    * Existing option question + no options
-   * → keep existing options.
+   * -> keep existing options.
    *
    * Changing a non-option question into
    * MULTIPLE_CHOICE / CHECKBOX
-   * → new options are required.
+   * -> new options are required.
    */
   private validateOptionsForUpdate(
     type: question_type,
@@ -687,12 +970,6 @@ export class QuestionsService {
       | undefined,
     typeChanged: boolean,
   ) {
-    /*
-     * Important:
-     * TEXT/RATING/etc. ->
-     * MULTIPLE_CHOICE/CHECKBOX
-     * cannot happen without providing options.
-     */
     if (
       typeChanged &&
       this.isOptionType(type) &&
@@ -703,18 +980,10 @@ export class QuestionsService {
       );
     }
 
-    /*
-     * Nothing supplied:
-     * keep existing options.
-     */
     if (options === undefined) {
       return;
     }
 
-    /*
-     * Non-option question types must not
-     * receive an options array.
-     */
     if (!this.isOptionType(type)) {
       throw new BadRequestException(
         'options are only allowed for MULTIPLE_CHOICE and CHECKBOX questions',
@@ -735,9 +1004,11 @@ export class QuestionsService {
   private validateOptionDisplayOrders(
     options: QuestionOptionDto[],
   ) {
-    const orders = options.map(
-      (option) => option.display_order,
-    );
+    const orders =
+      options.map(
+        (option) =>
+          option.display_order,
+      );
 
     if (
       new Set(orders).size !==
@@ -752,7 +1023,9 @@ export class QuestionsService {
   private isOptionType(
     type: question_type,
   ) {
-    return OPTION_TYPES.includes(type);
+    return OPTION_TYPES.includes(
+      type,
+    );
   }
 
   private async nextDisplayOrder(
@@ -761,15 +1034,18 @@ export class QuestionsService {
     const result =
       await this.prisma.questions.aggregate({
         where: {
-          survey_version_id: versionId,
+          survey_version_id:
+            versionId,
         },
+
         _max: {
           display_order: true,
         },
       });
 
     return (
-      (result._max.display_order ?? 0) + 1
+      (result._max.display_order ?? 0) +
+      1
     );
   }
 }

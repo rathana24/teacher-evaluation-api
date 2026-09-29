@@ -16,6 +16,9 @@ import { EvaluationsModule } from './evaluations/evaluations.module';
 import { StudentAccessModule } from './student-access/student-access.module';
 import { SubmissionsModule } from './submissions/submissions.module';
 import { AssessmentDraftsModule } from './assessment-drafts/assessment-drafts.module';
+import { AcademicYearsModule } from './academic-years/academic-years.module';
+import { DepartmentsModule } from './departments/departments.module';
+import { ResultsModule } from './results/results.module';
 
 @Module({
   imports: [
@@ -34,6 +37,9 @@ import { AssessmentDraftsModule } from './assessment-drafts/assessment-drafts.mo
     StudentAccessModule,
     SubmissionsModule,
     AssessmentDraftsModule,
+    AcademicYearsModule,
+    DepartmentsModule,
+    ResultsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -15,21 +15,32 @@ const contextSelect = {
   end_at: true,
   survey_version_id: true,
   course_offering_id: true,
+
   course_offerings: {
     select: {
       section_code: true,
+
       courses: {
         select: {
           course_code: true,
           course_name: true,
         },
       },
+
       semesters: {
         select: {
           semester_name: true,
-          academic_year: true,
+          academic_year_id: true,
+
+          academic_years: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
       },
+
       users: {
         select: {
           full_name: true,
@@ -37,9 +48,11 @@ const contextSelect = {
       },
     },
   },
+
   survey_versions: {
     select: {
       version_no: true,
+
       surveys: {
         select: {
           title: true,
@@ -49,9 +62,10 @@ const contextSelect = {
   },
 } satisfies Prisma.evaluationsSelect;
 
-type EvaluationContext = Prisma.evaluationsGetPayload<{
-  select: typeof contextSelect;
-}>;
+type EvaluationContext =
+  Prisma.evaluationsGetPayload<{
+    select: typeof contextSelect;
+  }>;
 
 // What the student needs to render each question.
 // question_options are used by MULTIPLE_CHOICE and CHECKBOX.
@@ -72,6 +86,7 @@ const questionSelect = {
       option_text: true,
       display_order: true,
     },
+
     orderBy: {
       display_order: 'asc',
     },
@@ -91,28 +106,46 @@ function toSummary(e: EvaluationContext) {
       name: e.course_offerings.courses.course_name,
     },
 
-    section_code: e.course_offerings.section_code,
+    section_code:
+      e.course_offerings.section_code,
 
     semester: {
-      name: e.course_offerings.semesters.semester_name,
+      name:
+        e.course_offerings.semesters.semester_name,
+
+      academic_year_id:
+        e.course_offerings.semesters
+          .academic_year_id,
+
       academic_year:
-        e.course_offerings.semesters.academic_year,
+        e.course_offerings.semesters
+          .academic_years.name,
     },
 
     lecturer: {
-      full_name: e.course_offerings.users.full_name,
+      full_name:
+        e.course_offerings.users.full_name,
     },
 
     survey: {
-      title: e.survey_versions.surveys.title,
-      version_no: e.survey_versions.version_no,
+      title:
+        e.survey_versions.surveys.title,
+
+      version_no:
+        e.survey_versions.version_no,
     },
   };
 }
 
 @Injectable()
 export class StudentAccessService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+  ) {}
+
+  // =========================================================
+  // AVAILABLE EVALUATIONS
+  // =========================================================
 
   async findAvailable(studentId: bigint) {
     const now = new Date();
@@ -125,9 +158,11 @@ export class StudentAccessService {
 
           evaluations: {
             status: 'OPEN',
+
             start_at: {
               lte: now,
             },
+
             end_at: {
               gt: now,
             },
@@ -160,6 +195,103 @@ export class StudentAccessService {
     );
   }
 
+  // =========================================================
+  // EVALUATION HISTORY
+  // =========================================================
+
+  async findHistory(studentId: bigint) {
+    const now = new Date();
+
+    const rows =
+      await this.prisma.evaluation_participants.findMany({
+        where: {
+          student_id: studentId,
+
+          evaluations: {
+            course_offerings: {
+              enrollments: {
+                some: {
+                  student_id: studentId,
+                },
+              },
+            },
+          },
+        },
+
+        select: {
+          has_submitted: true,
+          submitted_at: true,
+
+          evaluations: {
+            select: contextSelect,
+          },
+        },
+
+        orderBy: {
+          evaluations: {
+            start_at: 'desc',
+          },
+        },
+      });
+
+    return rows.map((row) => {
+      const evaluation = row.evaluations;
+
+      let historyStatus:
+        | 'Not Started'
+        | 'Completed'
+        | 'Upcoming'
+        | 'Closed';
+
+      // Student already submitted this evaluation
+      if (row.has_submitted) {
+        historyStatus = 'Completed';
+      }
+
+      // Evaluation has not started yet
+      else if (
+        evaluation.start_at !== null &&
+        evaluation.start_at > now
+      ) {
+        historyStatus = 'Upcoming';
+      }
+
+      // Evaluation is currently open,
+      // but student has not submitted yet
+      else if (
+        evaluation.status === 'OPEN' &&
+        evaluation.start_at !== null &&
+        evaluation.end_at !== null &&
+        evaluation.start_at <= now &&
+        now < evaluation.end_at
+      ) {
+        historyStatus = 'Not Started';
+      }
+
+      // Evaluation is no longer answerable
+      else {
+        historyStatus = 'Closed';
+      }
+
+      return {
+        ...toSummary(evaluation),
+
+        has_submitted:
+          row.has_submitted,
+
+        submitted_at:
+          row.submitted_at,
+
+        history_status:
+          historyStatus,
+      };
+    });
+  }
+
+  // =========================================================
+  // SURVEY
+  // =========================================================
+
   async getSurvey(
     evaluationId: bigint,
     studentId: bigint,
@@ -185,22 +317,33 @@ export class StudentAccessService {
       });
 
     return {
-      evaluation: toSummary(evaluation),
+      evaluation:
+        toSummary(evaluation),
+
       questions,
     };
   }
+
+  // =========================================================
+  // SUBMISSION STATUS
+  // =========================================================
 
   async getSubmissionStatus(
     evaluationId: bigint,
     studentId: bigint,
   ) {
-    await this.findEvaluation(evaluationId);
+    await this.findEvaluation(
+      evaluationId,
+    );
 
     const participant =
       await this.prisma.evaluation_participants.findFirst({
         where: {
-          evaluation_id: evaluationId,
-          student_id: studentId,
+          evaluation_id:
+            evaluationId,
+
+          student_id:
+            studentId,
         },
 
         select: {
@@ -216,11 +359,20 @@ export class StudentAccessService {
     }
 
     return {
-      evaluation_id: evaluationId,
-      has_submitted: participant.has_submitted,
-      submitted_at: participant.submitted_at,
+      evaluation_id:
+        evaluationId,
+
+      has_submitted:
+        participant.has_submitted,
+
+      submitted_at:
+        participant.submitted_at,
     };
   }
+
+  // =========================================================
+  // ANSWERABLE EVALUATION CHECK
+  // =========================================================
 
   // The single place that decides:
   // "May this student answer this evaluation right now?"
@@ -231,43 +383,59 @@ export class StudentAccessService {
     studentId: bigint,
   ) {
     const evaluation =
-      await this.findEvaluation(evaluationId);
+      await this.findEvaluation(
+        evaluationId,
+      );
 
-    const [participant, enrollment] =
-      await Promise.all([
-        this.prisma.evaluation_participants.findFirst({
-          where: {
-            evaluation_id: evaluationId,
-            student_id: studentId,
-          },
-        }),
+    const [
+      participant,
+      enrollment,
+    ] = await Promise.all([
+      this.prisma.evaluation_participants.findFirst({
+        where: {
+          evaluation_id:
+            evaluationId,
 
-        this.prisma.enrollments.findFirst({
-          where: {
-            student_id: studentId,
-            course_offering_id:
-              evaluation.course_offering_id,
-          },
+          student_id:
+            studentId,
+        },
+      }),
 
-          select: {
-            id: true,
-          },
-        }),
-      ]);
+      this.prisma.enrollments.findFirst({
+        where: {
+          student_id:
+            studentId,
 
-    if (!participant || !enrollment) {
+          course_offering_id:
+            evaluation.course_offering_id,
+        },
+
+        select: {
+          id: true,
+        },
+      }),
+    ]);
+
+    if (
+      !participant ||
+      !enrollment
+    ) {
       throw new ForbiddenException(
         'You are not eligible for this evaluation',
       );
     }
 
-    if (!this.isOpenNow(evaluation)) {
+    if (
+      !this.isOpenNow(evaluation)
+    ) {
       throw new ConflictException(
         'This evaluation is not open',
       );
     }
 
-    if (participant.has_submitted) {
+    if (
+      participant.has_submitted
+    ) {
       throw new ConflictException(
         'You have already submitted this evaluation',
       );
@@ -278,6 +446,10 @@ export class StudentAccessService {
       participant,
     };
   }
+
+  // =========================================================
+  // INTERNAL HELPERS
+  // =========================================================
 
   private async findEvaluation(
     evaluationId: bigint,
@@ -300,7 +472,9 @@ export class StudentAccessService {
     return evaluation;
   }
 
-  private isOpenNow(e: EvaluationContext) {
+  private isOpenNow(
+    e: EvaluationContext,
+  ) {
     const now = new Date();
 
     return (
