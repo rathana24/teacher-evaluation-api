@@ -67,9 +67,11 @@ describe('Questions (e2e)', () => {
         .then((res) => res.body.access_token);
 
     adminToken = await login('admin@itc.edu.kh');
+
     studentToken = await login(
       'student1@itc.edu.kh',
     );
+
     lecturerToken = await login(
       'sokdara@itc.edu.kh',
     );
@@ -210,16 +212,20 @@ describe('Questions (e2e)', () => {
           });
 
         expect(res.status).toBe(201);
+
         expect(res.body.question_type).toBe(
           'RATING',
         );
+
         expect(res.body.question_text_km).toBe(
           'គ្រូបង្រៀនពន្យល់បានច្បាស់លាស់។',
         );
+
         expect(res.body.min_rating).toBe(1);
         expect(res.body.max_rating).toBe(5);
         expect(res.body.display_order).toBe(1);
         expect(res.body.is_required).toBe(true);
+
         expect(
           res.body.question_options,
         ).toEqual([]);
@@ -240,15 +246,19 @@ describe('Questions (e2e)', () => {
           });
 
         expect(res.status).toBe(201);
+
         expect(res.body.question_type).toBe(
           'TEXT',
         );
+
         expect(
           res.body.question_text_km,
         ).toBeNull();
+
         expect(res.body.min_rating).toBeNull();
         expect(res.body.max_rating).toBeNull();
         expect(res.body.display_order).toBe(2);
+
         expect(
           res.body.question_options,
         ).toEqual([]);
@@ -269,12 +279,15 @@ describe('Questions (e2e)', () => {
           });
 
         expect(res.status).toBe(201);
+
         expect(res.body.question_type).toBe(
           'AGREEMENT',
         );
+
         expect(res.body.min_rating).toBe(1);
         expect(res.body.max_rating).toBe(5);
         expect(res.body.display_order).toBe(3);
+
         expect(
           res.body.question_options,
         ).toEqual([]);
@@ -293,12 +306,15 @@ describe('Questions (e2e)', () => {
           });
 
         expect(res.status).toBe(201);
+
         expect(res.body.question_type).toBe(
           'FREQUENCY',
         );
+
         expect(res.body.min_rating).toBe(1);
         expect(res.body.max_rating).toBe(5);
         expect(res.body.display_order).toBe(4);
+
         expect(
           res.body.question_options,
         ).toEqual([]);
@@ -334,9 +350,11 @@ describe('Questions (e2e)', () => {
           });
 
         expect(res.status).toBe(201);
+
         expect(res.body.question_type).toBe(
           'MULTIPLE_CHOICE',
         );
+
         expect(res.body.min_rating).toBeNull();
         expect(res.body.max_rating).toBeNull();
         expect(res.body.display_order).toBe(5);
@@ -394,9 +412,11 @@ describe('Questions (e2e)', () => {
           });
 
         expect(res.status).toBe(201);
+
         expect(res.body.question_type).toBe(
           'CHECKBOX',
         );
+
         expect(res.body.min_rating).toBeNull();
         expect(res.body.max_rating).toBeNull();
         expect(res.body.display_order).toBe(6);
@@ -608,7 +628,21 @@ describe('Questions (e2e)', () => {
         expect(res.status).toBe(400);
       });
 
-      it('rejects a display_order already in use -> 409', async () => {
+      // FIXED:
+      // Creating at an occupied display_order now inserts
+      // the new question and shifts later questions.
+      it('inserts at an existing display_order and shifts later questions -> 201', async () => {
+        const before = await request(
+          app.getHttpServer(),
+        )
+          .get(questionsUrl())
+          .set(auth());
+
+        expect(before.status).toBe(200);
+
+        const originalFirstQuestion =
+          before.body[0];
+
         const res = await request(
           app.getHttpServer(),
         )
@@ -620,7 +654,61 @@ describe('Questions (e2e)', () => {
             display_order: 1,
           });
 
-        expect(res.status).toBe(409);
+        expect(res.status).toBe(201);
+        expect(res.body.question_text).toBe(
+          'Clash',
+        );
+        expect(res.body.display_order).toBe(1);
+
+        const afterInsert = await request(
+          app.getHttpServer(),
+        )
+          .get(questionsUrl())
+          .set(auth());
+
+        expect(afterInsert.status).toBe(200);
+
+        expect(
+          afterInsert.body.map(
+            (question: any) =>
+              question.display_order,
+          ),
+        ).toEqual([1, 2, 3, 4, 5, 6, 7]);
+
+        expect(
+          afterInsert.body[0].question_text,
+        ).toBe('Clash');
+
+        expect(afterInsert.body[1].id).toBe(
+          originalFirstQuestion.id,
+        );
+
+        // Clean up the temporary question.
+        const deleted = await request(
+          app.getHttpServer(),
+        )
+          .delete(
+            `/api/questions/${res.body.id}`,
+          )
+          .set(auth());
+
+        expect(deleted.status).toBe(204);
+
+        // Delete compacts the ordering back to 1..6.
+        const afterDelete = await request(
+          app.getHttpServer(),
+        )
+          .get(questionsUrl())
+          .set(auth());
+
+        expect(afterDelete.status).toBe(200);
+
+        expect(
+          afterDelete.body.map(
+            (question: any) =>
+              question.display_order,
+          ),
+        ).toEqual([1, 2, 3, 4, 5, 6]);
       });
 
       it('survey version that does not exist -> 404', async () => {
@@ -820,9 +908,11 @@ describe('Questions (e2e)', () => {
           });
 
         expect(res.status).toBe(200);
+
         expect(res.body.question_type).toBe(
           'TEXT',
         );
+
         expect(res.body.min_rating).toBeNull();
         expect(res.body.max_rating).toBeNull();
 

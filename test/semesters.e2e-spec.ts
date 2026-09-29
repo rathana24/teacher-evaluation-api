@@ -2,37 +2,82 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { PrismaService } from '../src/prisma/prisma.service';
 
-// Same fix as main.ts — BigInt IDs can't be JSON-serialised by default
+// BigInt IDs cannot be JSON-serialized by default
 (BigInt.prototype as any).toJSON = function () {
   return this.toString();
 };
 
 describe('Semesters (e2e)', () => {
   let app: INestApplication;
+  let prisma: PrismaService;
+
   let adminToken: string;
   let studentToken: string;
   let lecturerToken: string;
-  let createdSemesterId: string;
 
-  // Unique name per test run, so re-running never collides with a leftover row
+  let createdSemesterId: string;
+  let academicYearId: bigint;
+  let usedSemesterId: string;
+
+  // Unique name per test run
   const testSemesterName = `E2E-${Date.now()}`;
-  const testYear = '2025-2026';
 
   beforeAll(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
+    const moduleFixture: TestingModule =
+      await Test.createTestingModule({
+        imports: [AppModule],
+      }).compile();
 
     app = moduleFixture.createNestApplication();
+
     app.setGlobalPrefix('api');
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        transform: true,
+      }),
+    );
+
     await app.init();
+
+    prisma = app.get(PrismaService);
+
+    // Get the seeded academic year dynamically
+    const academicYear = await prisma.academic_years.findFirst();
+
+    if (!academicYear) {
+      throw new Error(
+        'No academic year was found. Run the database seed before E2E tests.',
+      );
+    }
+
+    academicYearId = academicYear.id;
+
+    // Find a semester that is already used by a course offering
+    const usedOffering = await prisma.course_offerings.findFirst({
+      select: {
+        semester_id: true,
+      },
+    });
+
+    if (!usedOffering) {
+      throw new Error(
+        'No seeded course offering was found. Run the database seed before E2E tests.',
+      );
+    }
+
+    usedSemesterId = usedOffering.semester_id.toString();
 
     const login = (email: string) =>
       request(app.getHttpServer())
         .post('/api/auth/login')
-        .send({ email, password: 'Password123' })
+        .send({
+          email,
+          password: 'Password123',
+        })
         .then((res) => res.body.access_token);
 
     adminToken = await login('admin@itc.edu.kh');
@@ -51,13 +96,14 @@ describe('Semesters (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           semester_name: testSemesterName,
-          academic_year: testYear,
+          academic_year_id: Number(academicYearId),
           start_date: '2026-03-01',
           end_date: '2026-07-31',
         });
 
       expect(res.status).toBe(201);
       expect(res.body.semester_name).toBe(testSemesterName);
+
       createdSemesterId = res.body.id;
     });
 
@@ -65,7 +111,10 @@ describe('Semesters (e2e)', () => {
       const res = await request(app.getHttpServer())
         .post('/api/semesters')
         .set('Authorization', `Bearer ${studentToken}`)
-        .send({ semester_name: 'Nope', academic_year: testYear });
+        .send({
+          semester_name: 'Nope',
+          academic_year_id: Number(academicYearId),
+        });
 
       expect(res.status).toBe(403);
     });
@@ -74,7 +123,10 @@ describe('Semesters (e2e)', () => {
       const res = await request(app.getHttpServer())
         .post('/api/semesters')
         .set('Authorization', `Bearer ${lecturerToken}`)
-        .send({ semester_name: 'Nope', academic_year: testYear });
+        .send({
+          semester_name: 'Nope',
+          academic_year_id: Number(academicYearId),
+        });
 
       expect(res.status).toBe(403);
     });
@@ -83,7 +135,10 @@ describe('Semesters (e2e)', () => {
       const res = await request(app.getHttpServer())
         .post('/api/semesters')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ semester_name: '', academic_year: testYear });
+        .send({
+          semester_name: '',
+          academic_year_id: Number(academicYearId),
+        });
 
       expect(res.status).toBe(400);
     });
@@ -92,7 +147,11 @@ describe('Semesters (e2e)', () => {
       const res = await request(app.getHttpServer())
         .post('/api/semesters')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ semester_name: 'Bad Date', academic_year: testYear, start_date: 'not-a-date' });
+        .send({
+          semester_name: 'Bad Date',
+          academic_year_id: Number(academicYearId),
+          start_date: 'not-a-date',
+        });
 
       expect(res.status).toBe(400);
     });
@@ -103,7 +162,7 @@ describe('Semesters (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           semester_name: 'Backwards',
-          academic_year: testYear,
+          academic_year_id: Number(academicYearId),
           start_date: '2026-07-31',
           end_date: '2026-03-01',
         });
@@ -115,7 +174,10 @@ describe('Semesters (e2e)', () => {
       const res = await request(app.getHttpServer())
         .post('/api/semesters')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ semester_name: testSemesterName, academic_year: testYear });
+        .send({
+          semester_name: testSemesterName,
+          academic_year_id: Number(academicYearId),
+        });
 
       expect(res.status).toBe(409);
     });
@@ -145,17 +207,20 @@ describe('Semesters (e2e)', () => {
       const res = await request(app.getHttpServer())
         .put(`/api/semesters/${createdSemesterId}`)
         .set('Authorization', `Bearer ${studentToken}`)
-        .send({ semester_name: 'Hacked' });
+        .send({
+          semester_name: 'Hacked',
+        });
 
       expect(res.status).toBe(403);
     });
 
     it('rejects an end_date earlier than the saved start_date -> 400', async () => {
-      // Only end_date is sent; the service must compare it to the start_date already stored (2026-03-01)
       const res = await request(app.getHttpServer())
         .put(`/api/semesters/${createdSemesterId}`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ end_date: '2026-01-01' });
+        .send({
+          end_date: '2026-01-01',
+        });
 
       expect(res.status).toBe(400);
     });
@@ -164,17 +229,21 @@ describe('Semesters (e2e)', () => {
       const res = await request(app.getHttpServer())
         .put(`/api/semesters/${createdSemesterId}`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ end_date: '2026-08-15' });
+        .send({
+          end_date: '2026-08-15',
+        });
 
       expect(res.status).toBe(200);
-      expect(res.body.end_date).toBe('2026-08-15T00:00:00.000Z');
+      expect(res.body.end_date).toBe(
+        '2026-08-15T00:00:00.000Z',
+      );
     });
   });
 
   describe('DELETE /api/semesters/:id', () => {
     it('cannot delete a semester used by course offerings -> 409', async () => {
       const res = await request(app.getHttpServer())
-        .delete('/api/semesters/1')
+        .delete(`/api/semesters/${usedSemesterId}`)
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(res.status).toBe(409);

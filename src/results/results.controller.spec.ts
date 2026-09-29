@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import {
@@ -18,29 +19,28 @@ describe('ResultsControllers', () => {
   };
 
   beforeEach(async () => {
-    const module: TestingModule =
-      await Test.createTestingModule({
-        controllers: [
-          AdminResultsController,
-          LecturerResultsController,
-        ],
-        providers: [
-          {
-            provide: ResultsService,
-            useValue: mockResultsService,
-          },
-        ],
-      }).compile();
-
-    adminController =
-      module.get<AdminResultsController>(
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [
         AdminResultsController,
-      );
-
-    lecturerController =
-      module.get<LecturerResultsController>(
         LecturerResultsController,
-      );
+      ],
+      providers: [
+        {
+          provide: ResultsService,
+          useValue: mockResultsService,
+        },
+      ],
+    }).compile();
+
+    adminController = module.get<AdminResultsController>(
+      AdminResultsController,
+    );
+
+    lecturerController = module.get<LecturerResultsController>(
+      LecturerResultsController,
+    );
+
+    jest.clearAllMocks();
   });
 
   it('should define the admin results controller', () => {

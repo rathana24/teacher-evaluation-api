@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AppController } from './app.controller';
 import { PrismaService } from './prisma/prisma.service';
@@ -7,29 +8,27 @@ describe('AppController', () => {
 
   const prismaMock = {
     users: {
-      count: jest.fn(),
+      count: jest.fn<() => Promise<number>>(),
     },
     courses: {
-      count: jest.fn(),
+      count: jest.fn<() => Promise<number>>(),
     },
   };
 
   beforeEach(async () => {
     jest.clearAllMocks();
 
-    const app: TestingModule =
-      await Test.createTestingModule({
-        controllers: [AppController],
-        providers: [
-          {
-            provide: PrismaService,
-            useValue: prismaMock,
-          },
-        ],
-      }).compile();
+    const app: TestingModule = await Test.createTestingModule({
+      controllers: [AppController],
+      providers: [
+        {
+          provide: PrismaService,
+          useValue: prismaMock,
+        },
+      ],
+    }).compile();
 
-    appController =
-      app.get<AppController>(AppController);
+    appController = app.get<AppController>(AppController);
   });
 
   describe('health', () => {
@@ -37,8 +36,7 @@ describe('AppController', () => {
       prismaMock.users.count.mockResolvedValue(42);
       prismaMock.courses.count.mockResolvedValue(12);
 
-      const result =
-        await appController.health();
+      const result = await appController.health();
 
       expect(result).toEqual({
         status: 'ok',
@@ -46,13 +44,8 @@ describe('AppController', () => {
         courseCount: 12,
       });
 
-      expect(
-        prismaMock.users.count,
-      ).toHaveBeenCalledTimes(1);
-
-      expect(
-        prismaMock.courses.count,
-      ).toHaveBeenCalledTimes(1);
+      expect(prismaMock.users.count).toHaveBeenCalledTimes(1);
+      expect(prismaMock.courses.count).toHaveBeenCalledTimes(1);
     });
   });
 });
