@@ -4,9 +4,7 @@ import {
   Param,
   UseGuards,
 } from '@nestjs/common';
-
 import { AuthGuard } from '@nestjs/passport';
-
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -27,7 +25,13 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 @Roles('STUDENT')
 @Controller('student/evaluations')
 export class StudentAccessController {
-  constructor(private studentAccessService: StudentAccessService) {}
+  constructor(
+    private readonly studentAccessService: StudentAccessService,
+  ) {}
+
+  // =========================================================
+  // AVAILABLE EVALUATIONS
+  // =========================================================
 
   @Get()
   @ApiOperation({
@@ -35,11 +39,45 @@ export class StudentAccessController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Available evaluations returned successfully',
+    description:
+      'Available evaluations returned successfully',
   })
-  findAvailable(@CurrentUser() currentUser: { id: bigint }) {
-    return this.studentAccessService.findAvailable(currentUser.id);
+  findAvailable(
+    @CurrentUser()
+    currentUser: { id: bigint },
+  ) {
+    return this.studentAccessService.findAvailable(
+      currentUser.id,
+    );
   }
+
+  // =========================================================
+  // EVALUATION HISTORY
+  // Static route must stay before :id routes
+  // =========================================================
+
+  @Get('history')
+  @ApiOperation({
+    summary:
+      'My evaluation history, including completed, upcoming, and closed evaluations',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Student evaluation history returned successfully',
+  })
+  findHistory(
+    @CurrentUser()
+    currentUser: { id: bigint },
+  ) {
+    return this.studentAccessService.findHistory(
+      currentUser.id,
+    );
+  }
+
+  // =========================================================
+  // SURVEY
+  // =========================================================
 
   @Get(':id/survey')
   @ApiOperation({
@@ -53,23 +91,30 @@ export class StudentAccessController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Evaluation survey returned successfully',
+    description:
+      'Evaluation survey returned successfully',
   })
   @ApiResponse({
     status: 403,
-    description: 'Not eligible (not a participant or not enrolled)',
+    description:
+      'Not eligible (not a participant or not enrolled)',
   })
   @ApiResponse({
     status: 404,
-    description: 'Evaluation not found',
+    description:
+      'Evaluation not found',
   })
   @ApiResponse({
     status: 409,
-    description: 'Not open right now, or already submitted',
+    description:
+      'Not open right now, or already submitted',
   })
   getSurvey(
-    @Param('id', ParseBigIntPipe) id: bigint,
-    @CurrentUser() currentUser: { id: bigint },
+    @Param('id', ParseBigIntPipe)
+    id: bigint,
+
+    @CurrentUser()
+    currentUser: { id: bigint },
   ) {
     return this.studentAccessService.getSurvey(
       id,
@@ -77,9 +122,14 @@ export class StudentAccessController {
     );
   }
 
+  // =========================================================
+  // SUBMISSION STATUS
+  // =========================================================
+
   @Get(':id/submission-status')
   @ApiOperation({
-    summary: 'Whether I have already submitted this evaluation',
+    summary:
+      'Whether I have already submitted this evaluation',
   })
   @ApiParam({
     name: 'id',
@@ -88,19 +138,25 @@ export class StudentAccessController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Submission status returned successfully',
+    description:
+      'Submission status returned successfully',
   })
   @ApiResponse({
     status: 403,
-    description: 'Not a participant',
+    description:
+      'Not a participant',
   })
   @ApiResponse({
     status: 404,
-    description: 'Evaluation not found',
+    description:
+      'Evaluation not found',
   })
   getSubmissionStatus(
-    @Param('id', ParseBigIntPipe) id: bigint,
-    @CurrentUser() currentUser: { id: bigint },
+    @Param('id', ParseBigIntPipe)
+    id: bigint,
+
+    @CurrentUser()
+    currentUser: { id: bigint },
   ) {
     return this.studentAccessService.getSubmissionStatus(
       id,

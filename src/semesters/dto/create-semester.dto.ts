@@ -1,5 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsDateString,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+  IsInt,
+  Min,
+} from 'class-validator';
 
 export class CreateSemesterDto {
   @ApiProperty({ maxLength: 50, example: 'Semester 1' })
@@ -8,18 +16,20 @@ export class CreateSemesterDto {
   @MaxLength(50)
   semester_name!: string;
 
-  @ApiProperty({ maxLength: 20, example: '2025-2026' })
-  @IsNotEmpty()
-  @IsString()
-  @MaxLength(20)
-  academic_year!: string;
+  @ApiProperty({
+    example: 1,
+    description: 'Academic year ID',
+  })
+  @IsInt()
+  @Min(1)
+  academic_year_id!: number;
 
-  @ApiPropertyOptional({ example: '2025-10-01' })
+  @ApiPropertyOptional({ example: '2026-10-01' })
   @IsOptional()
   @IsDateString()
   start_date?: string;
 
-  @ApiPropertyOptional({ example: '2026-02-28' })
+  @ApiPropertyOptional({ example: '2027-02-28' })
   @IsOptional()
   @IsDateString()
   end_date?: string;
