@@ -37,8 +37,14 @@ export class StudentAccessController {
   @ApiOperation({
     summary: 'Evaluations I can answer right now',
   })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Available evaluations returned successfully',
+  })
   findAvailable(
-    @CurrentUser() currentUser: { id: bigint },
+    @CurrentUser()
+    currentUser: { id: bigint },
   ) {
     return this.studentAccessService.findAvailable(
       currentUser.id,
@@ -47,7 +53,7 @@ export class StudentAccessController {
 
   // =========================================================
   // EVALUATION HISTORY
-  // Keep this static route before :id routes
+  // Static route must stay before :id routes
   // =========================================================
 
   @Get('history')
@@ -57,42 +63,12 @@ export class StudentAccessController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Student evaluation history',
-    schema: {
-      example: [
-        {
-          id: '1',
-
-          course: {
-            id: '1',
-            code: 'AMS401',
-            name: 'Data Science',
-          },
-
-          lecturer: {
-            id: '2',
-            full_name: 'Lecturer One',
-          },
-
-          semester: {
-            id: '1',
-            name: 'Semester 1',
-            academic_year_id: '1',
-            academic_year: '2025-2026',
-          },
-
-          status: 'Completed',
-          has_submitted: true,
-          submitted_at: '2026-09-20T10:30:00.000Z',
-
-          starts_at: '2026-09-15T00:00:00.000Z',
-          ends_at: '2026-09-25T23:59:59.000Z',
-        },
-      ],
-    },
+    description:
+      'Student evaluation history returned successfully',
   })
   findHistory(
-    @CurrentUser() currentUser: { id: bigint },
+    @CurrentUser()
+    currentUser: { id: bigint },
   ) {
     return this.studentAccessService.findHistory(
       currentUser.id,
@@ -114,13 +90,19 @@ export class StudentAccessController {
     example: '1',
   })
   @ApiResponse({
+    status: 200,
+    description:
+      'Evaluation survey returned successfully',
+  })
+  @ApiResponse({
     status: 403,
     description:
       'Not eligible (not a participant or not enrolled)',
   })
   @ApiResponse({
     status: 404,
-    description: 'Evaluation not found',
+    description:
+      'Evaluation not found',
   })
   @ApiResponse({
     status: 409,
@@ -128,8 +110,11 @@ export class StudentAccessController {
       'Not open right now, or already submitted',
   })
   getSurvey(
-    @Param('id', ParseBigIntPipe) id: bigint,
-    @CurrentUser() currentUser: { id: bigint },
+    @Param('id', ParseBigIntPipe)
+    id: bigint,
+
+    @CurrentUser()
+    currentUser: { id: bigint },
   ) {
     return this.studentAccessService.getSurvey(
       id,
@@ -152,16 +137,26 @@ export class StudentAccessController {
     example: '1',
   })
   @ApiResponse({
+    status: 200,
+    description:
+      'Submission status returned successfully',
+  })
+  @ApiResponse({
     status: 403,
-    description: 'Not a participant',
+    description:
+      'Not a participant',
   })
   @ApiResponse({
     status: 404,
-    description: 'Evaluation not found',
+    description:
+      'Evaluation not found',
   })
   getSubmissionStatus(
-    @Param('id', ParseBigIntPipe) id: bigint,
-    @CurrentUser() currentUser: { id: bigint },
+    @Param('id', ParseBigIntPipe)
+    id: bigint,
+
+    @CurrentUser()
+    currentUser: { id: bigint },
   ) {
     return this.studentAccessService.getSubmissionStatus(
       id,

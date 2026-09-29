@@ -37,6 +37,10 @@ export class QuestionsController {
     private readonly questionsService: QuestionsService,
   ) {}
 
+  // =========================================================
+  // LIST QUESTIONS
+  // =========================================================
+
   @Get('survey-versions/:versionId/questions')
   @ApiOperation({
     summary:
@@ -49,20 +53,29 @@ export class QuestionsController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Questions returned in display order',
+    description:
+      'Questions returned in display order',
   })
   @ApiResponse({
     status: 404,
-    description: 'Survey version not found',
+    description:
+      'Survey version not found',
   })
   findAll(
-    @Param('versionId', ParseBigIntPipe)
+    @Param(
+      'versionId',
+      ParseBigIntPipe,
+    )
     versionId: bigint,
   ) {
     return this.questionsService.findAllForVersion(
       versionId,
     );
   }
+
+  // =========================================================
+  // CREATE QUESTION
+  // =========================================================
 
   @Post('survey-versions/:versionId/questions')
   @ApiOperation({
@@ -85,7 +98,8 @@ export class QuestionsController {
   })
   @ApiResponse({
     status: 404,
-    description: 'Survey version not found',
+    description:
+      'Survey version not found',
   })
   @ApiResponse({
     status: 409,
@@ -93,15 +107,24 @@ export class QuestionsController {
       'Version is locked, or display_order already used',
   })
   create(
-    @Param('versionId', ParseBigIntPipe)
+    @Param(
+      'versionId',
+      ParseBigIntPipe,
+    )
     versionId: bigint,
-    @Body() dto: CreateQuestionDto,
+
+    @Body()
+    dto: CreateQuestionDto,
   ) {
     return this.questionsService.create(
       versionId,
       dto,
     );
   }
+
+  // =========================================================
+  // REORDER QUESTIONS
+  // =========================================================
 
   @Put(
     'survey-versions/:versionId/questions/reorder',
@@ -138,15 +161,24 @@ export class QuestionsController {
       'Survey version is not editable',
   })
   reorder(
-    @Param('versionId', ParseBigIntPipe)
+    @Param(
+      'versionId',
+      ParseBigIntPipe,
+    )
     versionId: bigint,
-    @Body() dto: ReorderQuestionsDto,
+
+    @Body()
+    dto: ReorderQuestionsDto,
   ) {
     return this.questionsService.reorder(
       versionId,
       dto,
     );
   }
+
+  // =========================================================
+  // UPDATE QUESTION
+  // =========================================================
 
   @Put('questions/:questionId')
   @ApiOperation({
@@ -169,7 +201,8 @@ export class QuestionsController {
   })
   @ApiResponse({
     status: 404,
-    description: 'Question not found',
+    description:
+      'Question not found',
   })
   @ApiResponse({
     status: 409,
@@ -177,15 +210,24 @@ export class QuestionsController {
       'Version is locked, or display_order already used',
   })
   update(
-    @Param('questionId', ParseBigIntPipe)
+    @Param(
+      'questionId',
+      ParseBigIntPipe,
+    )
     questionId: bigint,
-    @Body() dto: UpdateQuestionDto,
+
+    @Body()
+    dto: UpdateQuestionDto,
   ) {
     return this.questionsService.update(
       questionId,
       dto,
     );
   }
+
+  // =========================================================
+  // DELETE QUESTION
+  // =========================================================
 
   @Delete('questions/:questionId')
   @HttpCode(204)
@@ -204,14 +246,19 @@ export class QuestionsController {
   })
   @ApiResponse({
     status: 404,
-    description: 'Question not found',
+    description:
+      'Question not found',
   })
   @ApiResponse({
     status: 409,
-    description: 'Version is locked',
+    description:
+      'Version is locked',
   })
   async remove(
-    @Param('questionId', ParseBigIntPipe)
+    @Param(
+      'questionId',
+      ParseBigIntPipe,
+    )
     questionId: bigint,
   ) {
     await this.questionsService.remove(
