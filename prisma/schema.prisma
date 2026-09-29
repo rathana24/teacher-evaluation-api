@@ -7,7 +7,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
+/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
 model answers {
   id             BigInt           @id @default(autoincrement())
   response_id    BigInt
@@ -45,7 +45,46 @@ model assessment_drafts {
   evaluation_participants evaluation_participants @relation(fields: [participant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
+/// NEW: Independently managed academic years.
+model academic_years {
+  id         BigInt    @id @default(autoincrement())
+  name       String    @unique @db.VarChar(20)
+  start_date DateTime? @db.Date
+  end_date   DateTime? @db.Date
+  is_active  Boolean   @default(false)
+  created_at DateTime  @default(now()) @db.Timestamp(6)
+  updated_at DateTime  @updatedAt @db.Timestamp(6)
+
+  semesters semesters[]
+}
+
+/// NEW: Departments such as AMS.
+model departments {
+  id         BigInt            @id @default(autoincrement())
+  code       String            @unique @db.VarChar(30)
+  name       String            @unique @db.VarChar(150)
+  status     department_status @default(ACTIVE)
+  created_at DateTime          @default(now()) @db.Timestamp(6)
+  updated_at DateTime          @updatedAt @db.Timestamp(6)
+
+  user_departments user_departments[]
+  courses          courses[]
+}
+
+/// NEW: Many-to-many relationship between users and departments.
+model user_departments {
+  user_id       BigInt
+  department_id BigInt
+  is_primary    Boolean  @default(false)
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+
+  users       users       @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  departments departments @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([user_id, department_id])
+}
+
+/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
 model course_offerings {
   id           BigInt        @id @default(autoincrement())
   course_id    BigInt
@@ -63,17 +102,20 @@ model course_offerings {
   @@unique([course_id, lecturer_id, semester_id, section_code], map: "course_offerings_course_id_lecturer_id_semester_id_section__idx")
 }
 
+/// UPDATED: Every course belongs to one department.
 model courses {
   id               BigInt             @id @default(autoincrement())
   course_code      String             @unique @db.VarChar(30)
   course_name      String             @db.VarChar(150)
   description      String?
+  department_id    BigInt
   created_at       DateTime           @db.Timestamp(6)
   updated_at       DateTime           @db.Timestamp(6)
+  departments      departments        @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   course_offerings course_offerings[]
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
+/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
 model enrollments {
   id                 BigInt           @id @default(autoincrement())
   student_id         BigInt
@@ -85,7 +127,7 @@ model enrollments {
   @@unique([student_id, course_offering_id], map: "enrollments_student_id_course_offering_id_idx")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
+/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
 model evaluation_participants {
   id                BigInt             @id @default(autoincrement())
   evaluation_id     BigInt
@@ -100,7 +142,7 @@ model evaluation_participants {
   @@unique([evaluation_id, student_id], map: "evaluation_participants_evaluation_id_student_id_idx")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https\://pris.ly/d/constraint-deferring for more info.
+/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
 model evaluations {
   id                      BigInt                    @id @default(autoincrement())
   course_offering_id      BigInt
@@ -120,7 +162,7 @@ model evaluations {
   @@unique([course_offering_id, survey_version_id], map: "evaluations_course_offering_id_survey_version_id_idx")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https\://pris.ly/d/constraint-deferring for more info.
+/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
 model questions {
   id                BigInt             @id @default(autoincrement())
   survey_version_id BigInt
@@ -153,7 +195,7 @@ model question_options {
   @@unique([question_id, display_order], map: "question_options_question_id_display_order_idx")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https\://pris.ly/d/constraint-deferring for more info.
+/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
 model responses {
   id            BigInt      @id @default(autoincrement())
   evaluation_id BigInt
@@ -163,20 +205,22 @@ model responses {
   evaluations   evaluations @relation(fields: [evaluation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
+/// UPDATED: academic_year text is now an AcademicYear relationship.
 model semesters {
   id               BigInt             @id @default(autoincrement())
   semester_name    String             @db.VarChar(50)
-  academic_year    String             @db.VarChar(20)
+  academic_year_id BigInt
   start_date       DateTime?          @db.Date
   end_date         DateTime?          @db.Date
   created_at       DateTime           @db.Timestamp(6)
   updated_at       DateTime           @db.Timestamp(6)
+  academic_years   academic_years     @relation(fields: [academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   course_offerings course_offerings[]
 
-  @@unique([semester_name, academic_year], map: "semesters_semester_name_academic_year_idx")
+  @@unique([academic_year_id, semester_name], map: "semesters_academic_year_id_semester_name_idx")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https\://pris.ly/d/constraint-deferring for more info.
+/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
 model surveys {
   id              BigInt            @id @default(autoincrement())
   title           String            @db.VarChar(200)
@@ -204,6 +248,7 @@ model survey_versions {
   @@unique([survey_id, version_no], map: "survey_versions_survey_id_version_no_idx")
 }
 
+/// UPDATED: users can belong to multiple departments.
 model users {
   id                      BigInt                    @id @default(autoincrement())
   email                   String                    @unique @db.VarChar(255)
@@ -219,6 +264,7 @@ model users {
   evaluations             evaluations[]
   surveys                 surveys[]
   survey_versions         survey_versions[]
+  user_departments        user_departments[]
 }
 
 enum evaluation_status {
@@ -251,4 +297,10 @@ enum survey_version_status {
   DRAFT
   LOCKED
   ARCHIVED
+}
+
+/// NEW
+enum department_status {
+  ACTIVE
+  INACTIVE
 }
