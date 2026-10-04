@@ -2482,3 +2482,24 @@ The current improvement implementation has passed the latest full regression che
 ```
 
 and is ready for final frontend integration testing and internship defense review.
+
+Command:
+npx prisma migrate dev --name add_participant_survey_version
+
+Purpose:
+Creates and applies a new Prisma database migration during development.
+
+What happens when executed:
+1. Prisma reads schema.prisma.
+2. It compares the Prisma schema with the current migration/database state.
+3. It generates a migration folder containing SQL changes.
+4. It applies the migration to PostgreSQL.
+5. Prisma records the migration in _prisma_migrations.
+
+Why we used it:
+We added survey_version_id to evaluation participants so each unfinished
+student could safely use an effective questionnaire version.
+
+Important:
+This changes the database schema. It is different from `prisma generate`,
+which only regenerates Prisma Client and does not migrate the database.
