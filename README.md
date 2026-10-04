@@ -1,6 +1,6 @@
 # Assessment / Teaching Evaluation System — Backend
 
-> **Backend status:** Core scope complete and tested  
+> **Backend status:** Improvement scope implemented and regression-tested  
 > **Stack:** NestJS · TypeScript · PostgreSQL · Prisma · JWT/Passport · Swagger · Jest · ts-jest · Supertest  
 > **Roles:** ADMIN · LECTURER · STUDENT  
 > **API base path:** `/api`
@@ -10,22 +10,33 @@
 ## Table of Contents
 
 1. [Project Overview](#1-project-overview)
-2. [Current Development Progress](#2-current-development-progress)
+2. [System Architecture](#2-system-architecture)
 3. [Technology Stack](#3-technology-stack)
 4. [Roles and Permissions](#4-roles-and-permissions)
-5. [Main Evaluation Workflow](#5-main-evaluation-workflow)
-6. [Privacy and Anonymity](#6-privacy-and-anonymity)
-7. [Important Business Rules](#7-important-business-rules)
-8. [Project Structure](#8-project-structure)
-9. [Main API Endpoints](#9-main-api-endpoints)
-10. [API Conventions](#10-api-conventions)
-11. [Swagger Documentation](#11-swagger-documentation)
-12. [Backend Testing](#12-backend-testing)
-13. [Setup and Run](#13-setup-and-run)
-14. [Seed Accounts](#14-seed-accounts)
-15. [Known Limitations / Future Improvements](#15-known-limitations--future-improvements)
-16. [Differences From the Original Proposal](#16-differences-from-the-original-proposal)
-17. [Final Backend Status](#17-final-backend-status)
+5. [Core Concepts](#5-core-concepts)
+6. [Authentication and Security](#6-authentication-and-security)
+7. [Academic and Student Management](#7-academic-and-student-management)
+8. [Courses, Course Offerings and Enrollment](#8-courses-course-offerings-and-enrollment)
+9. [Named Question Sets and Survey Versions](#9-named-question-sets-and-survey-versions)
+10. [Evaluations and Participant Targeting](#10-evaluations-and-participant-targeting)
+11. [Student Access and Evaluation History](#11-student-access-and-evaluation-history)
+12. [Assessment Drafts](#12-assessment-drafts)
+13. [Anonymous Submission](#13-anonymous-submission)
+14. [Safe Question-Set Updates](#14-safe-question-set-updates)
+15. [Lecturer Results and Comments](#15-lecturer-results-and-comments)
+16. [Important Business Rules](#16-important-business-rules)
+17. [Main End-to-End Workflow](#17-main-end-to-end-workflow)
+18. [Project Structure](#18-project-structure)
+19. [API Conventions](#19-api-conventions)
+20. [Swagger Documentation](#20-swagger-documentation)
+21. [Database and Prisma](#21-database-and-prisma)
+22. [Backend Testing](#22-backend-testing)
+23. [Setup and Run](#23-setup-and-run)
+24. [Frontend Integration Notes](#24-frontend-integration-notes)
+25. [Known Limitations and Future Improvements](#25-known-limitations-and-future-improvements)
+26. [Differences From the Original Proposal](#26-differences-from-the-original-proposal)
+27. [Current Backend Status](#27-current-backend-status)
+28. [Quick Start](#28-quick-start)
 
 ---
 
@@ -33,272 +44,139 @@
 
 This project is the backend API for an **Assessment / Teaching Evaluation System**.
 
-The backend manages the complete teaching evaluation lifecycle from academic setup to anonymous student feedback and lecturer result viewing.
+The system manages the teaching-evaluation lifecycle from academic setup and student enrollment to evaluation assignment, student feedback, anonymous submission, and lecturer result viewing.
 
-The system has three main roles:
+The backend supports three main roles:
 
 - **ADMIN**
-- **STUDENT**
 - **LECTURER**
+- **STUDENT**
 
-The Admin prepares academic data, course offerings, enrollments, surveys, questions, and evaluations.
+The system includes:
 
-Students can anonymously evaluate courses for which they are eligible.
+- user and authentication management;
+- student profiles;
+- student generations;
+- student academic records;
+- academic years and semesters;
+- departments and majors;
+- courses and course offerings;
+- individual and group enrollment;
+- named question sets;
+- versioned questionnaires;
+- question management;
+- evaluation scheduling;
+- evaluation participant targeting;
+- student evaluation availability and history;
+- server-side assessment drafts;
+- anonymous final submissions;
+- safe questionnaire-version reconciliation;
+- student progress;
+- student import/export;
+- lecturer dashboards;
+- anonymous comments;
+- administrative and lecturer results.
 
-After an evaluation is closed, lecturers can view aggregated rating results and anonymous written comments for their own course offerings.
-
-The main workflow is:
+The high-level lifecycle is:
 
 ```text
 ADMIN
-  │
-  ├── Manage Academic Years
-  ├── Manage Departments
-  ├── Manage Users
-  ├── Manage Courses
-  ├── Manage Semesters
-  ├── Create Course Offerings
-  ├── Enroll Students
-  ├── Create Surveys
-  ├── Create Survey Versions
-  ├── Create / Reorder Questions
-  └── Create & Open Evaluations
-             │
-             ▼
-          STUDENT
-             │
-             ├── View available evaluations
-             ├── View survey questions
-             ├── Submit one anonymous response
-             └── View evaluation history
-                        │
-                        ▼
-                     ADMIN
-                        │
-                        └── Close Evaluation
-                                  │
-                                  ▼
+  |
+  +--> Academic setup
+  |
+  +--> User / Student management
+  |
+  +--> Course Offering
+  |
+  +--> Enrollment
+  |
+  +--> Named Question Set
+  |       |
+  |       +--> Survey Version
+  |               |
+  |               +--> Questions
+  |
+  +--> Evaluation
+          |
+          +--> Participant targeting
+          +--> Schedule
+          +--> OPEN
+                 |
+                 v
+              STUDENT
+                 |
+                 +--> View assigned evaluation
+                 +--> Save draft
+                 +--> Submit anonymously
+                         |
+                         v
+                      ADMIN
+                         |
+                         +--> Close evaluation
+                                  |
+                                  v
                               LECTURER
-                                  │
-                                  ├── View own evaluations
-                                  ├── View aggregate dashboard
-                                  ├── View results
-                                  └── View anonymous comments
+                                  |
+                                  +--> Dashboard
+                                  +--> Results
+                                  +--> Anonymous comments
 ```
 
 ---
 
-# 2. Current Development Progress
+# 2. System Architecture
 
-## 2.1 Original Core Scope
-
-The original backend scope was divided into **13 main features**.
-
-| # | Feature | Description | Status |
-|---|---|---|---|
-| 1 | Users | Manage users and account status | ✅ |
-| 2 | Courses | Manage course information | ✅ |
-| 3 | Semesters | Manage semesters | ✅ |
-| 4 | Course Offerings | Connect course, semester, lecturer, and section | ✅ |
-| 5 | Enrollments | Enroll students into course offerings | ✅ |
-| 6 | Surveys | Manage reusable survey templates | ✅ |
-| 7 | Survey Versions | Version surveys and copy questions | ✅ |
-| 8 | Questions | Manage survey questions | ✅ |
-| 9 | Evaluations | Create, schedule, open, close, and delete evaluations | ✅ |
-| 10 | Student Access | Show evaluations available to a student | ✅ |
-| 11 | Submission | Validate and save anonymous responses | ✅ |
-| 12 | Lecturer Dashboard | Show aggregated evaluation results | ✅ |
-| 13 | Comments | Show anonymous written feedback | ✅ |
-
-### Original core scope status
+The backend follows the standard NestJS modular architecture.
 
 ```text
-13 / 13 core backend features completed ✅
+Frontend
+   |
+   v
+HTTP Request
+   |
+   v
+Controller
+   |
+   +--> Authentication Guard
+   +--> Roles Guard
+   +--> DTO Validation
+   |
+   v
+Service
+   |
+   +--> Business Rules
+   +--> Eligibility Checks
+   +--> State Validation
+   +--> Transactions
+   |
+   v
+Prisma ORM
+   |
+   v
+PostgreSQL
 ```
 
----
+## Controller
 
-## 2.2 Additional Backend Enhancements
+Controllers expose HTTP routes and receive requests.
 
-After completing the original scope, the backend was extended with additional academic management, results, workflow, and testing improvements.
+## DTO
 
-### Academic Years
+DTOs define and validate incoming request data.
 
-Academic years are now managed as their own database resource.
+## Service
 
-This allows semesters to reference an academic year using a proper relation instead of storing only a text value.
+Services contain the main business logic.
 
-```text
-Academic Year
-     │
-     └── Semesters
-```
+Important rules are enforced by the backend rather than relying only on frontend state.
 
-Status:
+## Prisma
 
-```text
-Academic Years CRUD ✅
-Semester → Academic Year relation ✅
-```
+Prisma provides database access, relations, queries, and transactions.
 
----
+## PostgreSQL
 
-### Departments
-
-Departments are now managed as a separate resource.
-
-Departments can be connected to courses and users.
-
-```text
-Department
-   │
-   ├── Courses
-   │
-   └── Users
-```
-
-Status:
-
-```text
-Departments CRUD ✅
-Course → Department relation ✅
-User ↔ Department assignment ✅
-```
-
----
-
-### User Department Assignment
-
-Users can be associated with departments.
-
-Supported operations include:
-
-```text
-GET    /api/users/:id/departments
-POST   /api/users/:id/departments
-DELETE /api/users/:id/departments/:departmentId
-```
-
----
-
-### Question Ordering
-
-Question ordering was improved.
-
-Questions can now be:
-
-- inserted at a specific position;
-- shifted automatically when a new question is inserted;
-- deleted while keeping the remaining order continuous;
-- reordered explicitly.
-
-Example:
-
-```text
-Before:
-
-1. Question A
-2. Question B
-3. Question C
-```
-
-Insert a new question at position `2`:
-
-```text
-After:
-
-1. Question A
-2. New Question
-3. Question B
-4. Question C
-```
-
-A dedicated reorder API is also supported:
-
-```text
-PUT /api/survey-versions/:versionId/questions/reorder
-```
-
----
-
-### Survey Version Copy Improvements
-
-Survey version copying supports copying the question structure into a new version.
-
-This allows an existing survey to evolve without modifying a version already being used by an evaluation.
-
----
-
-### Student Evaluation History
-
-Students can view their evaluation history.
-
-The history can represent states such as:
-
-```text
-Completed
-Upcoming
-Not Started
-Closed
-```
-
-This allows the frontend to distinguish current, future, completed, and unavailable evaluations.
-
----
-
-### Results APIs
-
-Additional results APIs are available for Admin and Lecturer workflows.
-
-Examples:
-
-```text
-GET /api/admin/results
-GET /api/admin/results/:lecturerId
-GET /api/lecturer/results
-```
-
-These complement the lecturer evaluation dashboard and comments APIs.
-
----
-
-### CORS Configuration
-
-The backend supports configurable frontend origins through:
-
-```env
-FRONTEND_ORIGIN=http://localhost:5173
-```
-
-Multiple origins can be configured using comma-separated values.
-
-This allows the frontend and backend to run on different origins while controlling which frontend applications can access the API.
-
----
-
-### Automated Testing Improvements
-
-The testing environment was updated for the current NestJS/Jest module setup.
-
-Current testing configuration includes:
-
-```text
-Jest
-ts-jest
-Supertest
-ESM-compatible test configuration
-Dedicated tsconfig.spec.json
-Unit tests
-E2E tests
-Full integration workflow test
-```
-
-Current verified E2E result:
-
-```text
-16 / 16 E2E test suites passed
-303 / 303 E2E tests passed
-```
+PostgreSQL stores the persistent application data.
 
 ---
 
@@ -314,20 +192,19 @@ Current verified E2E result:
 | Password Hashing | bcrypt |
 | Validation | class-validator + class-transformer |
 | API Documentation | Swagger |
-| Unit Testing | Jest + ts-jest |
-| API / E2E Testing | Jest + Supertest |
-| Database Testing | Prisma + PostgreSQL |
+| Testing | Jest + ts-jest |
+| HTTP / E2E Testing | Supertest |
 
-Swagger is available at:
-
-```text
-http://localhost:3000/api/docs
-```
-
-The API base path is:
+API base path:
 
 ```text
 /api
+```
+
+Swagger:
+
+```text
+http://localhost:3000/api/docs
 ```
 
 ---
@@ -336,246 +213,1159 @@ The API base path is:
 
 ## ADMIN
 
-The Admin prepares and controls the teaching evaluation process.
+The Admin manages the academic and evaluation workflow.
 
-Admin responsibilities include:
+Typical responsibilities include:
 
-- managing users;
-- managing academic years;
-- managing departments;
-- assigning users to departments;
-- managing courses;
-- managing semesters;
-- creating course offerings;
-- enrolling students;
-- creating surveys;
-- creating survey versions;
-- creating and managing questions;
-- reordering questions;
-- creating evaluations;
-- scheduling evaluations;
-- opening evaluations;
-- closing evaluations;
-- viewing administrative results.
-
----
+- manage users;
+- manage students;
+- manage academic years;
+- manage semesters;
+- manage departments;
+- manage majors;
+- manage student generations;
+- manage student academic records;
+- manage courses;
+- manage course offerings;
+- manage enrollments;
+- preview and confirm group enrollment;
+- import/export students;
+- reset user passwords;
+- manage named question sets;
+- manage survey versions;
+- manage questions;
+- create evaluations;
+- preview eligible participants;
+- confirm evaluation participants;
+- schedule evaluations;
+- open evaluations;
+- close evaluations;
+- safely apply newer questionnaire versions to eligible unfinished participants;
+- monitor student progress;
+- view administrative results.
 
 ## STUDENT
 
-The Student participates in evaluations.
+Students participate in evaluations assigned to them.
 
 Students can:
 
-- see evaluations they are eligible to answer;
-- view evaluation surveys;
-- check submission status;
-- submit one anonymous response;
-- view evaluation history.
+- authenticate using their supported identifier/student code;
+- view their own profile;
+- change their own password;
+- view available evaluations;
+- view evaluation history;
+- view the correct questionnaire version;
+- save an assessment draft;
+- reload their saved draft;
+- submit one final anonymous response;
+- check submission state.
 
-A student cannot submit when:
+A student cannot answer when:
 
-- they are not eligible;
-- they are not enrolled;
-- the evaluation is not open;
-- the evaluation is outside its allowed time period;
-- they have already submitted.
-
----
+- the account is inactive;
+- the student is not enrolled in the course offering;
+- the student is not an evaluation participant;
+- the evaluation is not OPEN;
+- the current time is outside the evaluation period;
+- the student has already submitted.
 
 ## LECTURER
 
-Lecturers can view evaluation information and results for their own course offerings.
+Lecturers can access evaluation information and protected results for their own course offerings.
 
-Lecturers can:
+Lecturer features include:
 
-- see their own evaluations;
-- view aggregate results after an evaluation is closed;
-- view rating statistics;
-- view anonymous written comments;
-- access lecturer results APIs.
+- viewing their own evaluations;
+- viewing aggregate evaluation dashboards;
+- viewing protected results after the required evaluation state;
+- viewing rating statistics;
+- viewing anonymous written comments.
 
-Lecturers do not receive student identities with evaluation responses.
+Student identities are not attached to final response records.
 
 ---
 
-# 5. Main Evaluation Workflow
+# 5. Core Concepts
 
-## Step 1 — Admin prepares academic data
+Several terms in this backend look similar but represent different concepts.
 
-The Admin prepares the academic structure:
+## 5.1 User vs Student
+
+### User
+
+A `User` represents authentication and identity information.
+
+Examples include:
+
+- account identity;
+- password hash;
+- role;
+- account status;
+- authentication version.
+
+### Student
+
+A `Student` represents the academic student profile linked to a user.
+
+Conceptually:
 
 ```text
-Academic Year
-      │
-      ▼
-Semester
-
-Department
-      │
-      ▼
-Course
-
-Users
-      │
-      ▼
-Course Offering
-      │
-      ▼
-Enrollments
+User
+ |
+ | 1 : 0..1
+ v
+Student Profile
 ```
 
-A course offering connects:
+This separation keeps authentication information independent from student-specific academic data.
+
+---
+
+## 5.2 Course vs Course Offering
+
+### Course
+
+A reusable subject definition.
+
+Example:
+
+```text
+Machine Learning
+```
+
+### Course Offering
+
+A specific delivery of a course.
+
+It can connect:
 
 ```text
 Course
-   +
+  +
 Semester
-   +
+  +
 Lecturer
-   +
+  +
+Year Level
+  +
+Class Type
+  +
 Section
 ```
 
----
-
-## Step 2 — Admin prepares the survey
+Therefore:
 
 ```text
-Survey
-   ↓
-Survey Version
-   ↓
-Questions
+Course != Course Offering
 ```
 
-Questions can then be ordered according to the survey structure.
+---
 
-The system supports question types such as:
+## 5.3 Enrollment vs Evaluation Participant
+
+### Enrollment
+
+Enrollment means the student belongs to a course offering.
+
+### Evaluation Participant
+
+An evaluation participant is a student who is assigned to a particular evaluation.
+
+Therefore:
+
+```text
+Enrollment
+    !=
+Evaluation Participant
+```
+
+A student normally needs both conditions to answer:
+
+```text
+Enrolled?
+   +
+Assigned as participant?
+   =
+Eligible for further evaluation checks
+```
+
+---
+
+## 5.4 Survey vs Survey Version
+
+### Survey
+
+A stable named question set.
+
+Example:
+
+```text
+Teaching Quality Evaluation
+```
+
+### Survey Version
+
+A specific questionnaire snapshot.
+
+Example:
+
+```text
+Teaching Quality Evaluation
+  |
+  +--> Version 1
+  |
+  +--> Version 2
+```
+
+Historical versions are preserved rather than modifying questions already used by evaluations.
+
+---
+
+## 5.5 Evaluation DRAFT vs Assessment Draft
+
+These are unrelated concepts.
+
+### Evaluation DRAFT
+
+An administrative lifecycle state.
+
+```text
+DRAFT -> OPEN -> CLOSED
+```
+
+### Assessment Draft
+
+A student's unfinished saved answers.
+
+```text
+Student answers
+     |
+     +--> Save Draft
+     |
+     +--> Continue Later
+```
+
+---
+
+## 5.6 Assessment Draft vs Final Response
+
+A draft is temporary and identifiable to the participant so the student can return to it.
+
+A final response is the submitted anonymous evaluation data.
+
+```text
+Assessment Draft
+     |
+     | final submission
+     v
+Anonymous Response
+```
+
+---
+
+## 5.7 Base Survey Version vs Effective Survey Version
+
+An evaluation has a base survey version.
+
+A participant may also have a participant-level survey version.
+
+The effective questionnaire is conceptually:
+
+```text
+effective version =
+participant.survey_version_id
+        ??
+evaluation.survey_version_id
+```
+
+The fallback supports historical records where participant-level version data may not exist.
+
+---
+
+# 6. Authentication and Security
+
+## 6.1 Authentication
+
+Authentication answers:
+
+> Who is making this request?
+
+The backend uses JWT authentication with Passport.
+
+Conceptually:
+
+```text
+Identifier + Password
+        |
+        v
+Resolve User
+        |
+        v
+Verify Password
+        |
+        v
+Account ACTIVE?
+        |
+        v
+Issue JWT
+```
+
+Staff accounts can use the supported email-based identity.
+
+Student authentication also supports the student's identifier/student code.
+
+---
+
+## 6.2 Authorization
+
+Authorization answers:
+
+> Is this authenticated user allowed to perform this action?
+
+The backend uses role-based access control.
+
+Roles:
+
+```text
+ADMIN
+LECTURER
+STUDENT
+```
+
+Protected controllers use JWT authentication and role guards.
+
+Authorization is different from business eligibility.
+
+For example, a STUDENT role may be allowed to call a student endpoint, but the backend still checks whether that specific student is enrolled and assigned to the requested evaluation.
+
+---
+
+## 6.3 Authentication Version
+
+The backend supports an authentication version for JWT invalidation.
+
+Example:
+
+```text
+User auth_version = 3
+
+Login
+  |
+  v
+JWT contains version 3
+
+Password changes
+  |
+  v
+Database auth_version = 4
+
+Old JWT version = 3
+Current DB version = 4
+
+=> old JWT can be rejected
+```
+
+This helps invalidate existing sessions after security-sensitive password changes.
+
+---
+
+## 6.4 Password Management
+
+The backend supports:
+
+- self-service password change;
+- administrative password reset.
+
+Passwords are stored as hashes, not plaintext.
+
+`password_hash` must never be returned in normal API responses.
+
+---
+
+## 6.5 User Status
+
+User accounts have status such as:
+
+```text
+ACTIVE
+INACTIVE
+```
+
+Inactive users are blocked where active status is required, including authentication and new student eligibility operations.
+
+Disabling an account preserves historical records better than deleting records that may already be referenced.
+
+---
+
+# 7. Academic and Student Management
+
+The improved backend contains a richer student academic model.
+
+## 7.1 Academic Years
+
+Academic years represent academic periods.
+
+Semesters reference academic years.
+
+```text
+Academic Year
+     |
+     +--> Semester 1
+     |
+     +--> Semester 2
+```
+
+`start_year` may be used for academic calculations where available.
+
+---
+
+## 7.2 Departments and Majors
+
+Departments represent broader academic organizational units.
+
+Majors provide more specific academic programs.
+
+Conceptually:
+
+```text
+Department
+    |
+    +--> Major
+```
+
+Student academic records can reference majors.
+
+---
+
+## 7.3 Student Generations
+
+A student generation represents a cohort/intake.
+
+Example:
+
+```text
+Generation 2023
+```
+
+Generation information can contribute to effective year-level calculation.
+
+---
+
+## 7.4 Student Academic Records
+
+A student academic record stores a student's placement for a specific academic year.
+
+It can include:
+
+- year level;
+- major;
+- class group;
+- academic year.
+
+Example:
+
+```text
+Student A
+
+2025-2026
+  Year 3
+  Major: Data Science
+  Group: AMS1-A
+
+2026-2027
+  Year 4
+  Major: Data Science
+  Group: AMS1-A
+```
+
+This allows academic history to be preserved instead of overwriting the student's previous placement.
+
+---
+
+## 7.5 Student Management
+
+The backend supports administrative student management including:
+
+- create student profile;
+- retrieve student information;
+- update student information;
+- academic filtering;
+- pagination where implemented;
+- account status handling;
+- generation information;
+- academic records.
+
+---
+
+## 7.6 Student Import
+
+Student import supports bulk onboarding.
+
+The backend validates imported information and handles invalid or conflicting records according to the import rules.
+
+Important cases include:
+
+- duplicate student code;
+- duplicate identity/email where applicable;
+- invalid academic references;
+- invalid student data.
+
+---
+
+## 7.7 Student Export
+
+Student export supports structured administrative extraction of student data.
+
+Filters can be used where supported to export the required academic group.
+
+---
+
+## 7.8 Student Progress
+
+Student progress represents evaluation assignment/completion information.
+
+Conceptually:
+
+```text
+Assigned Evaluations = 5
+Completed Evaluations = 3
+
+Progress = 3 / 5
+```
+
+This is evaluation completion progress, not a percentage of questions answered inside one questionnaire.
+
+---
+
+# 8. Courses, Course Offerings and Enrollment
+
+## 8.1 Courses
+
+A course represents the reusable subject definition.
+
+Courses can be associated with departments.
+
+---
+
+## 8.2 Course Offerings
+
+A course offering represents an actual teaching instance.
+
+The current model can include information such as:
+
+- course;
+- semester;
+- lecturer;
+- year level;
+- section;
+- class type.
+
+Supported class-type values include:
+
+```text
+COURSE
+TD
+TP
+```
+
+---
+
+## 8.3 Individual Enrollment
+
+An eligible student can be enrolled into a course offering.
+
+The backend checks the student before creating the enrollment.
+
+Duplicate enrollment is not allowed.
+
+---
+
+## 8.4 Group Enrollment
+
+The improved backend supports group enrollment through a preview-and-confirm pattern.
+
+```text
+Academic Filters
+      |
+      v
+Preview Students
+      |
+      +--> Eligible
+      +--> Already Enrolled
+      +--> Other relevant state
+      |
+      v
+Admin Reviews
+      |
+      v
+Confirm
+      |
+      v
+Resolve Again
+      |
+      v
+Create Explicit Enrollment Rows
+```
+
+The important design is that academic filters are used to **select** students.
+
+After confirmation, explicit enrollment rows are stored.
+
+This means later profile changes do not silently rewrite historical course membership.
+
+Duplicate protection is also applied when bulk enrollment is confirmed.
+
+---
+
+# 9. Named Question Sets and Survey Versions
+
+## 9.1 Named Question Set
+
+A survey represents a stable named questionnaire.
+
+Example:
+
+```text
+Teaching Quality Evaluation
+```
+
+---
+
+## 9.2 Survey Versions
+
+A survey can contain multiple versions.
+
+```text
+Teaching Quality Evaluation
+        |
+        +--> v1
+        |
+        +--> v2
+        |
+        +--> v3
+```
+
+Survey versions allow the questionnaire to evolve while preserving historical evaluation context.
+
+Version states include:
+
+```text
+DRAFT
+LOCKED
+ARCHIVED
+```
+
+### DRAFT
+
+Editable version.
+
+### LOCKED
+
+Frozen version that should no longer be changed.
+
+### ARCHIVED
+
+Historical version that is not intended for normal new use.
+
+---
+
+## 9.3 Questions
+
+Questions belong to survey versions.
+
+Supported question behavior includes types such as:
 
 ```text
 RATING
 TEXT
+AGREEMENT
+FREQUENCY
+MULTIPLE_CHOICE
+CHECKBOX
 ```
 
-A RATING question uses a numeric range, normally 1–5.
+Question information can include:
 
-A TEXT question accepts written feedback.
-
-Survey versions allow the question set to evolve without modifying a version already being used by an evaluation.
+- English text;
+- Khmer text;
+- category;
+- required state;
+- rating bounds;
+- display order;
+- selectable options.
 
 ---
 
-## Step 3 — Admin creates an evaluation
+## 9.4 Question Ordering
+
+Questions support controlled ordering.
+
+Operations can include:
+
+- inserting at a position;
+- shifting later questions;
+- deleting while maintaining order;
+- explicit reordering.
+
+---
+
+## 9.5 Version Safety
+
+A version that is already used in protected evaluation/participant/draft/response context must not be freely mutated.
+
+The backend protects historical consistency rather than relying on the frontend to hide edit buttons.
+
+---
+
+# 10. Evaluations and Participant Targeting
 
 An evaluation connects:
 
 ```text
 Course Offering
-       +
+      +
 Survey Version
-       +
+      +
+Participant Scope
+      +
 Schedule
 ```
 
-A new evaluation starts as:
+---
+
+## 10.1 Evaluation Lifecycle
+
+The main lifecycle is:
 
 ```text
 DRAFT
-```
-
-While it is DRAFT, its configuration and schedule can still be prepared.
-
----
-
-## Step 4 — Admin opens the evaluation
-
-Before opening an evaluation, the backend verifies that the evaluation is ready.
-
-When the evaluation opens, important state changes occur together:
-
-```text
-Evaluation → OPEN
-
-Survey Version → LOCKED
-
-Enrolled Students
-        ↓
-Evaluation Participants
-```
-
-Locking the survey version prevents questions from being changed after the evaluation has started.
-
----
-
-## Step 5 — Student accesses the evaluation
-
-A student can access an evaluation only when the backend confirms their eligibility.
-
-The backend checks conditions such as:
-
-```text
-Student authenticated?
-        ↓
-Student role?
-        ↓
-Enrolled?
-        ↓
-Evaluation participant?
-        ↓
-Evaluation OPEN?
-        ↓
-Inside evaluation period?
-        ↓
-Already submitted?
-```
-
-Only an eligible student can continue to submission.
-
----
-
-## Step 6 — Student submits
-
-Before saving the response, the backend validates the answers.
-
-Checks include:
-
-- the question belongs to the correct survey version;
-- the same question is not answered twice;
-- required questions are answered;
-- rating values are within the allowed range;
-- TEXT answers are used only for TEXT questions;
-- the student has not already submitted.
-
-Submission is protected against duplicate and simultaneous submissions.
-
----
-
-## Step 7 — Admin closes the evaluation
-
-Evaluation state changes from:
-
-```text
+  |
+  v
 OPEN
- ↓
+  |
+  v
 CLOSED
 ```
 
-After closing, new responses are no longer accepted.
+### DRAFT
+
+The evaluation is being prepared.
+
+### OPEN
+
+Eligible participants can answer during the allowed time window.
+
+### CLOSED
+
+New submissions are no longer accepted.
 
 ---
 
-## Step 8 — Lecturer views results
+## 10.2 Schedule Rules
 
-Only after the evaluation is CLOSED can its lecturer view the protected evaluation results.
+Schedule changes are restricted by lifecycle state.
 
-The lecturer dashboard can provide:
+The backend protects evaluation state transitions so the frontend cannot bypass lifecycle rules.
 
-- eligible student count;
+---
+
+## 10.3 Participant Scope
+
+The backend supports participant scopes including:
+
+```text
+ALL_ENROLLED
+SELECTED_GENERATIONS
+```
+
+### ALL_ENROLLED
+
+The evaluation can target enrolled students according to the evaluation rules.
+
+### SELECTED_GENERATIONS
+
+The evaluation can target selected student generations while still applying eligibility requirements.
+
+---
+
+## 10.4 Eligible Student Preview
+
+Before final participant assignment, the backend can preview eligible students.
+
+Conceptually:
+
+```text
+Course Offering
+      |
+      v
+Enrolled Students
+      |
+      +--> ACTIVE?
+      +--> Student profile valid?
+      +--> Target criteria match?
+      +--> Generation match?
+      +--> Other eligibility checks
+      |
+      v
+Preview
+```
+
+The preview can help the frontend show why some students are eligible or ineligible.
+
+---
+
+## 10.5 Preview Before Confirm
+
+Participant targeting follows the same safe pattern as group enrollment:
+
+```text
+Preview
+   |
+   v
+Admin Reviews
+   |
+   v
+Confirm
+   |
+   v
+Backend Rechecks
+   |
+   v
+Participant Rows
+```
+
+The backend remains the final authority when confirmation occurs.
+
+---
+
+## 10.6 Opening an Evaluation
+
+Before an evaluation becomes OPEN, the backend verifies the required state.
+
+Checks include the required schedule, questionnaire/version state, questions, and participant requirements.
+
+When appropriate, the questionnaire version is locked to prevent unsafe editing.
+
+---
+
+# 11. Student Access and Evaluation History
+
+Student access is controlled by backend eligibility logic.
+
+A student is answerable only when the required conditions are true.
+
+Conceptually:
+
+```text
+Authenticated STUDENT?
+        |
+        v
+Participant?
+        |
+        v
+Enrolled?
+        |
+        v
+Evaluation OPEN?
+        |
+        v
+Inside active time window?
+        |
+        v
+Already submitted?
+        |
+        v
+Return exact questionnaire
+```
+
+The effective survey version is determined from the participant context with evaluation fallback for historical data.
+
+---
+
+## 11.1 Available Evaluations
+
+Available evaluations represent evaluations the student can answer according to the current access rules.
+
+---
+
+## 11.2 Evaluation History
+
+Student history can represent states such as:
+
+```text
+Upcoming
+Not Started
+Completed
+Closed
+```
+
+These display states are derived from evaluation status, schedule, and submission state.
+
+They should not be confused with additional persisted evaluation lifecycle states.
+
+---
+
+# 12. Assessment Drafts
+
+Students can save unfinished evaluation answers.
+
+A draft is scoped to:
+
+- the current student/participant;
+- the evaluation;
+- the exact effective survey version.
+
+Conceptually:
+
+```text
+Student
+   |
+   v
+Questionnaire v1
+   |
+   +--> Answer Q1
+   +--> Answer Q2
+   |
+   v
+Save Draft
+   |
+   v
+Return Later
+   |
+   v
+Reload same questionnaire context
+```
+
+Drafts are intentionally version-aware.
+
+The backend must not silently reinterpret a saved draft using a different questionnaire version.
+
+---
+
+# 13. Anonymous Submission
+
+Final submission is one of the most important protected workflows.
+
+## 13.1 Submission Flow
+
+```text
+Student submits
+      |
+      v
+Check access
+      |
+      v
+Resolve effective survey version
+      |
+      v
+Load exact questions
+      |
+      v
+Validate answers
+      |
+      v
+Begin transaction
+      |
+      +--> Recheck evaluation
+      +--> Recheck participant
+      +--> Recheck survey version
+      +--> Ensure not already submitted
+      |
+      v
+Mark participant submitted
+      |
+      v
+Create anonymous response
+      |
+      v
+Create answers / selected options
+      |
+      v
+Delete saved draft
+      |
+      v
+Commit
+```
+
+If the transaction fails, partial completion should not remain.
+
+---
+
+## 13.2 Answer Validation
+
+Validation depends on question type.
+
+Examples include:
+
+### RATING
+
+Value must be inside the configured numeric bounds.
+
+### TEXT
+
+Text response is stored for text-based questions.
+
+### MULTIPLE_CHOICE
+
+Exactly one valid option is expected.
+
+### CHECKBOX
+
+Selected options must belong to the question.
+
+### Required Questions
+
+Required questions cannot be omitted in a valid final submission.
+
+---
+
+## 13.3 Duplicate Submission Protection
+
+A student can submit only once.
+
+The backend performs checks before and during the transaction to protect against duplicate or simultaneous requests.
+
+Conceptually:
+
+```text
+Request A ----\
+               +--> only one may complete
+Request B ----/
+```
+
+---
+
+## 13.4 Privacy and Anonymity
+
+Student identity is used to verify eligibility and completion.
+
+Final response content is stored separately from the participant identity.
+
+Conceptually:
+
+```text
+Student Identity
+      |
+      v
+Evaluation Participant
+      |
+      +--> has_submitted
+      +--> submitted_at
+
+Separate:
+
+Anonymous Response
+      |
+      +--> Answers
+      +--> Selected Options
+```
+
+The final response does not directly store:
+
+```text
+student_id
+participant_id
+```
+
+This separation is important for privacy.
+
+---
+
+# 14. Safe Question-Set Updates
+
+A difficult requirement is handling a newer questionnaire version when an evaluation already has unfinished participants.
+
+The desired behavior is:
+
+```text
+New version of SAME named survey
+               |
+               v
+        Participant State
+        /       |        \
+       /        |         \
+Submitted   Has Draft   Untouched
+   |           |            |
+   v           v            v
+Keep Old    Keep Old     May Move
+Version     Version      to New Version
+```
+
+---
+
+## 14.1 Submitted Participants
+
+Completed participants remain connected to their original questionnaire context.
+
+Their historical response must not be reinterpreted using a new version.
+
+---
+
+## 14.2 Participants With Drafts
+
+An unfinished participant who already has a saved draft remains on the old version.
+
+The backend does not:
+
+- delete the draft;
+- silently convert the draft;
+- reinterpret answer IDs;
+- move the participant to an incompatible version.
+
+---
+
+## 14.3 Untouched Unfinished Participants
+
+An unfinished participant with no draft can safely be moved to the newer version of the **same named survey**, subject to backend checks.
+
+---
+
+## 14.4 Evaluation Base Version
+
+Applying a newer version to eligible unfinished participants does **not** globally rewrite:
+
+```text
+evaluation.survey_version_id
+```
+
+Instead, participant-level survey-version context controls the effective questionnaire.
+
+This preserves the evaluation's original base context.
+
+---
+
+## 14.5 Apply-to-Unfinished Operation
+
+The administrative reconciliation operation:
+
+1. verifies the target version belongs to the same survey;
+2. verifies the target is DRAFT;
+3. verifies the target contains questions;
+4. finds relevant unfinished participants;
+5. skips submitted participants;
+6. skips participants with saved drafts;
+7. skips participants already on the target version;
+8. updates only safe unfinished participants;
+9. locks the target version.
+
+This is a backend business rule, not only a frontend behavior.
+
+---
+
+# 15. Lecturer Results and Comments
+
+Lecturer result functionality is protected by lecturer ownership and evaluation state rules.
+
+Lecturers can access their own evaluation information and aggregate results according to the backend's result-access rules.
+
+Result information can include:
+
+- eligible participant count;
 - response count;
 - response rate;
-- overall rating average;
-- average per rating question;
-- rating distribution;
+- rating averages;
+- rating distributions;
 - anonymous written comments.
 
 Example:
@@ -588,418 +1378,275 @@ Response Rate:     90%
 Overall Average:   4.2 / 5
 ```
 
+The lecturer should not receive student identity attached to final response content.
+
 ---
 
-# 6. Privacy and Anonymity
+# 16. Important Business Rules
 
-Student anonymity is an important part of the backend design.
+| Rule | Backend Behaviour |
+|---|---|
+| Active account | Operations requiring an active user reject inactive accounts |
+| Enrollment eligibility | New enrollment requires a valid eligible student |
+| Duplicate enrollment | Same student cannot be enrolled twice in the same offering |
+| Group enrollment | Preview is reviewed before explicit enrollment rows are confirmed |
+| Evaluation lifecycle | Main lifecycle is DRAFT → OPEN → CLOSED |
+| Schedule editing | Protected according to evaluation lifecycle |
+| Participant eligibility | Student must satisfy enrollment and participant rules |
+| Evaluation time | Answering is allowed only during the permitted evaluation window |
+| Submit once | One final submission per participant/evaluation |
+| Effective version | Student questionnaire uses participant version with historical evaluation fallback |
+| Draft version safety | Saved drafts remain tied to their exact questionnaire version |
+| Completed history | Completed responses keep their original version |
+| Pending version update | Only safe unfinished/no-draft participants may move |
+| Question locking | Used/protected questionnaire versions cannot be freely mutated |
+| Required answers | Required questions must be answered |
+| Rating bounds | Rating must be within configured bounds |
+| Option validation | Submitted option IDs must belong to the correct question |
+| Anonymous response | Final response content does not directly store student identity |
+| Transaction safety | Final submission operations succeed or fail together |
+| Lecturer ownership | Lecturer access is restricted to permitted own-course/evaluation data |
+| Admin control | Administrative operations require appropriate authorization |
 
-The system does **not** store the student's identity directly on the response or answer records.
+---
 
-Conceptually:
+# 17. Main End-to-End Workflow
+
+A complete system scenario can be understood as follows.
+
+## Step 1 — Academic Setup
+
+Admin prepares:
 
 ```text
-Student
-   │
-   ├── Eligibility checked
-   │      through participant data
-   │
-   └── Submit
-          │
-          ▼
-       Response
-          │
-          ▼
-        Answers
-
-Response / Answer
-      ✕ no student_id
-      ✕ no participant_id
+Academic Year
+Semester
+Department
+Major
+Generation
 ```
 
-Additional protections include:
+## Step 2 — Student Setup
 
-- lecturers can access only their own evaluations;
-- lecturer results are available only after the evaluation is closed;
-- lecturers receive aggregate statistics instead of student-level results;
-- written comments are returned without student identity;
-- comments can be sorted rather than returned in submission order;
-- participant and response timestamps use reduced precision where appropriate to reduce identity matching risk;
-- `password_hash` is excluded from API responses.
+```text
+User Account
+     |
+     v
+Student Profile
+     |
+     v
+Student Academic Record
+```
+
+## Step 3 — Course Setup
+
+```text
+Course
+  |
+  v
+Course Offering
+```
+
+## Step 4 — Enrollment
+
+```text
+Select Academic Group
+      |
+      v
+Preview
+      |
+      v
+Confirm
+      |
+      v
+Explicit Enrollments
+```
+
+## Step 5 — Question Set
+
+```text
+Named Survey
+    |
+    v
+Survey Version
+    |
+    v
+Questions
+```
+
+## Step 6 — Evaluation
+
+```text
+Course Offering
+      +
+Survey Version
+      +
+Participant Scope
+      +
+Schedule
+      |
+      v
+Preview Eligible Students
+      |
+      v
+Confirm Participants
+      |
+      v
+OPEN
+```
+
+## Step 7 — Student Participation
+
+```text
+Student Login
+      |
+      v
+Available Evaluations
+      |
+      v
+Questionnaire
+      |
+      +--> Save Draft
+      |
+      v
+Final Submit
+```
+
+## Step 8 — Backend Finalization
+
+```text
+Validate
+   |
+   v
+Transaction
+   |
+   +--> Mark participant complete
+   +--> Store anonymous response
+   +--> Store answers
+   +--> Remove draft
+```
+
+## Step 9 — Results
+
+```text
+Evaluation Closed
+       |
+       v
+Lecturer
+       |
+       +--> Dashboard
+       +--> Results
+       +--> Anonymous Comments
+```
 
 ---
 
-# 7. Important Business Rules
+# 18. Project Structure
 
-| Rule | Behaviour |
-|---|---|
-| Student eligibility | Student must be enrolled and an evaluation participant |
-| Submit once | One submission per student per evaluation |
-| Evaluation period | Submission is accepted only while evaluation is OPEN and within its time window |
-| Question locking | Questions cannot be changed after the evaluation opens |
-| Question ordering | Question positions must remain valid and continuous |
-| Rating validation | Rating must be within the configured range |
-| Lecturer ownership | Lecturer can access only evaluations belonging to their own offering |
-| Lecturer result access | Protected lecturer results are available after the evaluation is CLOSED |
-| Anonymous responses | Responses and answers contain no student identity |
-| Admin control | Management operations are restricted to ADMIN where required |
-| Closed evaluation | No new submissions are accepted |
-| Course department | Courses belong to departments |
-| Semester academic year | Semesters reference academic years |
+The backend follows a modular NestJS structure.
 
----
-
-# 8. Project Structure
-
-The backend follows the NestJS modular structure.
+A simplified structure is:
 
 ```text
 teacher-evaluation-api/
-│
-├── prisma/
-│   ├── schema.prisma
-│   ├── migrations/
-│   └── seed.ts
-│
-├── src/
-│   │
-│   ├── main.ts
-│   ├── app.module.ts
-│   ├── app.controller.ts
-│   ├── app.service.ts
-│   │
-│   ├── prisma/
-│   │
-│   ├── common/
-│   │   ├── decorators/
-│   │   ├── guards/
-│   │   └── pipes/
-│   │
-│   ├── auth/
-│   ├── users/
-│   ├── academic-years/
-│   ├── departments/
-│   ├── courses/
-│   ├── semesters/
-│   ├── course-offerings/
-│   ├── enrollments/
-│   ├── surveys/
-│   ├── survey-versions/
-│   ├── questions/
-│   ├── evaluations/
-│   ├── student-access/
-│   ├── submissions/
-│   ├── lecturer-dashboard/
-│   ├── comments/
-│   └── results/
-│
-├── test/
-│   ├── jest-e2e.json
-│   ├── app.e2e-spec.ts
-│   ├── assessment-drafts.e2e-spec.ts
-│   ├── comments.e2e-spec.ts
-│   ├── course-offerings.e2e-spec.ts
-│   ├── enrollments.e2e-spec.ts
-│   ├── evaluations.e2e-spec.ts
-│   ├── integration.e2e-spec.ts
-│   ├── lecturer-dashboard.e2e-spec.ts
-│   ├── questions.e2e-spec.ts
-│   ├── questions-reorder.e2e-spec.ts
-│   ├── semesters.e2e-spec.ts
-│   ├── student-access.e2e-spec.ts
-│   ├── submissions.e2e-spec.ts
-│   ├── survey-versions.e2e-spec.ts
-│   ├── surveys.e2e-spec.ts
-│   └── users.e2e-spec.ts
-│
-├── jest.config.ts
-├── tsconfig.json
-├── tsconfig.spec.json
-├── package.json
-└── README.md
+|
++-- prisma/
+|   +-- schema.prisma
+|   +-- migrations/
+|   +-- seed.ts
+|
++-- src/
+|   +-- auth/
+|   +-- users/
+|   +-- students/
+|   +-- student-generations/
+|   +-- student-academic-records/
+|   +-- academic-years/
+|   +-- departments/
+|   +-- majors/
+|   +-- courses/
+|   +-- semesters/
+|   +-- course-offerings/
+|   +-- enrollments/
+|   +-- surveys/
+|   +-- survey-versions/
+|   +-- questions/
+|   +-- evaluations/
+|   +-- student-access/
+|   +-- assessment-drafts/
+|   +-- submissions/
+|   +-- student-progress/
+|   +-- student-import/
+|   +-- student-export/
+|   +-- lecturer-dashboard/
+|   +-- comments/
+|   +-- results/
+|   +-- common/
+|   +-- prisma/
+|   +-- main.ts
+|   +-- app.module.ts
+|
++-- test/
+|
++-- package.json
++-- tsconfig.json
++-- tsconfig.spec.json
++-- jest.config.ts
++-- README.md
 ```
 
-Each NestJS feature generally contains:
+A normal feature module generally follows:
 
 ```text
 feature/
-│
-├── feature.module.ts
-├── feature.controller.ts
-├── feature.service.ts
-└── dto/
+|
++-- dto/
++-- feature.controller.ts
++-- feature.service.ts
++-- feature.module.ts
 ```
 
-### Controller
-
-The controller handles HTTP routes.
-
-```text
-HTTP Request
-     ↓
-Controller
-```
-
-### DTO
-
-DTOs validate incoming request data.
-
-```text
-Request Body
-     ↓
-DTO Validation
-```
-
-### Service
-
-Services contain business logic and Prisma operations.
-
-```text
-Controller
-    ↓
-Service
-    ↓
-Prisma
-    ↓
-PostgreSQL
-```
+Some modules also contain targeted service/controller tests.
 
 ---
 
-# 9. Main API Endpoints
+# 19. API Conventions
 
-Swagger should be used as the complete API reference.
+General conventions include:
 
-The endpoints below summarize the main backend areas.
+- API base path: `/api`;
+- JWT Bearer authentication;
+- PostgreSQL `BigInt` IDs;
+- JSON-safe ID serialization where required;
+- DTO validation;
+- global request validation;
+- role-based guards;
+- service-level business rules.
 
-## Authentication
-
-```text
-POST /api/auth/login
-GET  /api/auth/me
-GET  /api/health
-```
-
----
-
-## Academic Years
+Authenticated requests use:
 
 ```text
-GET    /api/academic-years
-GET    /api/academic-years/:id
-POST   /api/academic-years
-PUT    /api/academic-years/:id
-DELETE /api/academic-years/:id
+Authorization: Bearer <JWT>
 ```
 
----
+Common HTTP status categories:
 
-## Departments
-
-```text
-GET    /api/departments
-GET    /api/departments/:id
-POST   /api/departments
-PUT    /api/departments/:id
-DELETE /api/departments/:id
-```
-
----
-
-## Users
-
-```text
-GET  /api/users
-GET  /api/users/:id
-POST /api/users
-PUT  /api/users/:id
-```
-
-Users are deactivated instead of being permanently removed where the current implementation requires that behaviour.
-
-### User Departments
-
-```text
-GET    /api/users/:id/departments
-POST   /api/users/:id/departments
-DELETE /api/users/:id/departments/:departmentId
-```
-
----
-
-## Courses
-
-```text
-GET    /api/courses
-POST   /api/courses
-PUT    /api/courses/:id
-DELETE /api/courses/:id
-```
-
-Courses are associated with departments.
-
----
-
-## Semesters
-
-```text
-GET    /api/semesters
-POST   /api/semesters
-PUT    /api/semesters/:id
-DELETE /api/semesters/:id
-```
-
-Semesters reference academic years.
-
----
-
-## Course Offerings
-
-```text
-GET    /api/course-offerings
-POST   /api/course-offerings
-PUT    /api/course-offerings/:id
-DELETE /api/course-offerings/:id
-```
-
----
-
-## Enrollments
-
-```text
-GET    /api/course-offerings/:offeringId/enrollments
-POST   /api/course-offerings/:offeringId/enrollments
-DELETE /api/course-offerings/:offeringId/enrollments/:studentId
-```
-
----
-
-## Surveys
-
-```text
-GET    /api/surveys
-GET    /api/surveys/:id
-POST   /api/surveys
-PUT    /api/surveys/:id
-DELETE /api/surveys/:id
-```
-
----
-
-## Survey Versions
-
-```text
-GET    /api/surveys/:surveyId/versions
-POST   /api/surveys/:surveyId/versions
-GET    /api/surveys/:surveyId/versions/:versionId
-POST   /api/surveys/:surveyId/versions/:versionId/archive
-DELETE /api/surveys/:surveyId/versions/:versionId
-```
-
----
-
-## Questions
-
-```text
-GET    /api/survey-versions/:versionId/questions
-POST   /api/survey-versions/:versionId/questions
-PUT    /api/questions/:questionId
-DELETE /api/questions/:questionId
-```
-
-Question reordering:
-
-```text
-PUT /api/survey-versions/:versionId/questions/reorder
-```
-
----
-
-## Evaluations
-
-```text
-GET    /api/evaluations
-GET    /api/evaluations/:id
-POST   /api/evaluations
-PUT    /api/evaluations/:id/schedule
-POST   /api/evaluations/:id/open
-POST   /api/evaluations/:id/close
-DELETE /api/evaluations/:id
-```
-
----
-
-## Student
-
-```text
-GET  /api/student/evaluations
-GET  /api/student/evaluations/:id/survey
-GET  /api/student/evaluations/:id/submission-status
-POST /api/student/evaluations/:id/responses
-```
-
-The backend also supports student evaluation history.
-
----
-
-## Lecturer
-
-```text
-GET /api/lecturer/evaluations
-GET /api/lecturer/evaluations/:id/dashboard
-GET /api/lecturer/evaluations/:id/comments
-GET /api/lecturer/results
-```
-
----
-
-## Admin Results
-
-```text
-GET /api/admin/results
-GET /api/admin/results/:lecturerId
-```
-
----
-
-# 10. API Conventions
-
-The backend follows these conventions:
-
-- Base path: `/api`
-- Authentication: `Authorization: Bearer <JWT>`
-- PostgreSQL IDs use `BigInt`
-- IDs are serialized safely for JSON
-- Database/API fields generally use `snake_case`
-- The authenticated user is obtained from the JWT
-- Request bodies are validated using DTOs
-- Unknown request fields are removed by the global validation pipe
-- Role-based access is enforced using guards
-
-Example authenticated request:
-
-```text
-Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
-```
-
-Common HTTP status codes:
-
-| Code | Meaning |
+| Status | Meaning |
 |---|---|
 | 200 | Successful request |
-| 201 | Resource created / response submitted |
-| 204 | Successful delete with no response body |
-| 400 | Invalid request data |
-| 401 | Missing or invalid authentication |
-| 403 | User does not have permission |
-| 404 | Resource does not exist |
-| 409 | Request conflicts with current state |
+| 201 | Resource created / operation completed |
+| 204 | Successful operation with no response body |
+| 400 | Invalid input or invalid request setup |
+| 401 | Missing, expired, revoked, or invalid authentication |
+| 403 | Authenticated but not permitted/eligible |
+| 404 | Requested resource does not exist |
+| 409 | Request conflicts with the current resource/state |
+
+Swagger is the preferred source for the exact current endpoint and DTO contract.
 
 ---
 
-# 11. Swagger Documentation
-
-Swagger provides interactive API documentation.
+# 20. Swagger Documentation
 
 Start the backend:
 
@@ -1007,7 +1654,7 @@ Start the backend:
 npm run start:dev
 ```
 
-Then open:
+Open:
 
 ```text
 http://localhost:3000/api/docs
@@ -1015,834 +1662,326 @@ http://localhost:3000/api/docs
 
 Swagger can be used to:
 
-- view endpoints;
-- view DTO request structures;
+- inspect routes;
+- inspect DTOs;
 - understand required fields;
 - inspect response structures;
-- test authentication;
-- manually send requests;
-- inspect HTTP status codes.
+- authenticate with JWT;
+- manually test API behavior;
+- inspect status codes;
+- demonstrate the backend during review/defense.
 
-Swagger is useful for **manual API testing**, while Jest and Supertest are used for **automated testing**.
+Swagger and automated testing have different purposes:
 
 ```text
 Swagger
-   ↓
-Manual testing
+   |
+   v
+Manual API verification
 
-Jest + Supertest
-   ↓
-Automated testing
+        +
+
+Jest / Supertest
+   |
+   v
+Automated verification
 ```
 
 ---
 
-# 12. Backend Testing
+# 21. Database and Prisma
 
-Testing is an important part of this backend.
+The backend uses PostgreSQL with Prisma ORM.
 
-The purpose of testing is to verify automatically that the backend behaves according to its expected rules.
-
-Without automated tests, developers may need to repeatedly test every endpoint manually after making changes.
-
-With automated testing:
+Important conceptual relationships include:
 
 ```text
-Change Backend Code
-        ↓
-Run Tests
-        ↓
-Do Tests Pass?
-    ↙       ↘
-  YES        NO
-   ↓          ↓
-Continue    Investigate
-   ↓          ↓
-Commit      Fix Problem
-```
+User
+ |
+ +--> Student Profile
+ |
+ +--> Role / Authentication
 
-Tests act as a **safety net** when the backend changes.
+Student
+ |
+ +--> Generation
+ +--> Academic Records
 
----
+Academic Year
+ |
+ +--> Semesters
 
-## 12.1 What Is a Test?
-
-A test normally has three basic ideas:
-
-```text
-Arrange
-   ↓
-Act
-   ↓
-Assert
-```
-
-### Arrange
-
-Prepare the required data.
-
-### Act
-
-Run the code or send the API request.
-
-### Assert
-
-Check whether the actual result matches the expected result.
-
-Example:
-
-```ts
-const response = await request(app.getHttpServer())
-  .post('/api/auth/login')
-  .send({
-    email: 'admin@itc.edu.kh',
-    password: 'Password123',
-  });
-
-expect(response.status).toBe(200);
-```
-
-The important part is:
-
-```ts
-expect(response.status).toBe(200);
-```
-
-It means:
-
-```text
-Expected = 200
-Actual   = 200
-
-PASS ✅
-```
-
-If the API unexpectedly returns:
-
-```text
-Expected = 200
-Actual   = 401
-
-FAIL ❌
-```
-
-The failed test tells the developer that something needs investigation.
-
----
-
-## 12.2 Why Is Testing Important?
-
-Backend features are connected.
-
-For example:
-
-```text
 Department
-   ↓
+ |
+ +--> Majors
+ +--> Courses
+
 Course
-   ↓
+ |
+ +--> Course Offerings
+
 Course Offering
-   ↓
-Enrollment
-   ↓
+ |
+ +--> Enrollments
+ +--> Evaluations
+
+Survey
+ |
+ +--> Survey Versions
+        |
+        +--> Questions
+              |
+              +--> Options
+
 Evaluation
-   ↓
-Submission
-   ↓
-Results
+ |
+ +--> Evaluation Participants
+
+Evaluation Participant
+ |
+ +--> Effective Survey Version
+ +--> Assessment Draft
+ +--> Submission State
+
+Anonymous Response
+ |
+ +--> Survey Version
+ +--> Answers
+        |
+        +--> Selected Options
 ```
 
-Changing one part can accidentally affect another.
+## Important ID Naming Note
 
-For example, Course creation now requires a department relation.
+Some database fields named `student_id` refer to the student's **user account ID**, while `students.id` represents the student-profile record.
 
-If old code sends:
+This convention should be understood carefully when integrating frontend/backend code.
 
-```json
-{
-  "course_code": "AMS101",
-  "course_name": "Mathematics"
-}
+A future redesign could use a more explicit name such as:
+
+```text
+student_user_id
 ```
 
-but the current API requires:
-
-```json
-{
-  "course_code": "AMS101",
-  "course_name": "Mathematics",
-  "department_id": 1
-}
-```
-
-a test can detect the changed behaviour immediately.
-
-This is especially important when several developers work on the same backend.
-
-Testing helps the team:
-
-- detect regressions;
-- verify business rules;
-- verify authentication;
-- verify authorization;
-- verify validation;
-- verify database relationships;
-- safely refactor code;
-- understand expected behaviour;
-- verify complete workflows;
-- reduce repetitive manual testing.
+However, this is not a reason to perform a risky schema migration during final integration testing.
 
 ---
 
-## 12.3 Main Types of Backend Testing
+## Prisma Migrations
 
-There are many forms of software testing.
+The project uses Prisma migrations to evolve the database safely.
 
-The most important categories for understanding this backend are:
-
-| Type | Purpose |
-|---|---|
-| Unit Testing | Test one small part in isolation |
-| Integration Testing | Test multiple parts working together |
-| E2E Testing | Test the application/API from end to end |
-| Validation Testing | Check invalid/valid request data |
-| Authentication Testing | Check login/token behaviour |
-| Authorization Testing | Check role/resource permissions |
-| Database Testing | Check persistence, relations, and constraints |
-| Performance Testing | Check behaviour under load |
-| Security Testing | Check security-related weaknesses |
-
-The current automated test suite focuses mainly on:
-
-```text
-Unit Testing
-     +
-E2E / API Testing
-     +
-Integration Workflow Testing
-```
-
----
-
-# 12.4 Unit Testing
-
-A **Unit Test** checks a small part of the application independently.
-
-Examples include:
-
-```text
-AcademicYearsService
-
-AcademicYearsController
-
-DepartmentsService
-
-DepartmentsController
-
-ResultsService
-
-ResultsController
-
-AppController
-```
-
-A unit test should focus on the behaviour of that specific component.
-
-Conceptually:
-
-```text
-        Unit Test
-            │
-            ▼
-      ResultsService
-            │
-            ▼
-       Mock Prisma
-```
-
-The real database does not need to be involved in every unit test.
-
----
-
-## 12.5 What Is Mocking?
-
-A **mock** is a controlled fake replacement for a dependency.
-
-For example, a service may normally use:
-
-```text
-ResultsService
-     ↓
-PrismaService
-     ↓
-PostgreSQL
-```
-
-For a unit test, Prisma can be replaced by a mock:
-
-```text
-ResultsService
-     ↓
-Mock PrismaService
-```
-
-Example concept:
-
-```ts
-const prismaMock = {
-  users: {
-    count: jest.fn<() => Promise<number>>(),
-  },
-};
-```
-
-Then the test can define what the fake database call should return.
-
-For example:
-
-```ts
-prismaMock.users.count.mockResolvedValue(10);
-```
-
-This makes the unit test:
-
-- faster;
-- more isolated;
-- easier to control;
-- independent from database state.
-
----
-
-## 12.6 E2E Testing
-
-**E2E** means **End-to-End**.
-
-An E2E test checks a much larger part of the real application.
-
-Conceptually:
-
-```text
-Supertest
-    ↓
-HTTP Request
-    ↓
-NestJS Controller
-    ↓
-ValidationPipe
-    ↓
-Authentication / Guards
-    ↓
-Service
-    ↓
-Prisma
-    ↓
-PostgreSQL
-    ↓
-HTTP Response
-    ↓
-Jest Assertion
-```
-
-This is much closer to what happens when the frontend communicates with the backend.
-
-Example:
-
-```ts
-const response = await request(app.getHttpServer())
-  .post('/api/courses')
-  .set(
-    'Authorization',
-    `Bearer ${adminToken}`,
-  )
-  .send({
-    course_code: 'AMS101',
-    course_name: 'Mathematics',
-    department_id: 1,
-  });
-
-expect(response.status).toBe(201);
-```
-
-This can verify:
-
-```text
-Route exists?               ✅
-Authentication works?       ✅
-Admin permission works?     ✅
-DTO validation works?       ✅
-Service works?              ✅
-Prisma operation works?     ✅
-Database accepts data?      ✅
-Correct status returned?    ✅
-```
-
----
-
-## 12.7 Integration Testing
-
-Integration testing verifies that several backend features work together correctly.
-
-This project contains a full workflow test:
-
-```text
-test/integration.e2e-spec.ts
-```
-
-The integration story verifies:
-
-```text
-ADMIN
-  │
-  ├── Login
-  ├── Create Lecturer
-  ├── Create Students
-  ├── Create Course
-  ├── Create Semester
-  ├── Create Course Offering
-  ├── Enroll Students
-  ├── Create Survey
-  ├── Create Survey Version
-  ├── Create Questions
-  ├── Create Evaluation
-  └── Open Evaluation
-             │
-             ▼
-          STUDENT A
-             │
-             ├── Login
-             ├── View Evaluation
-             ├── Read Questions
-             └── Submit
-             │
-             ▼
-          STUDENT B
-             │
-             ├── Login
-             └── Submit
-             │
-             ▼
-            ADMIN
-             │
-             └── Close Evaluation
-                       │
-                       ▼
-                   LECTURER
-                       │
-                       ├── Login
-                       ├── View Evaluation
-                       ├── View Dashboard
-                       └── View Anonymous Comments
-```
-
-The current integration flow contains:
-
-```text
-16 tests
-```
-
-Latest verified result:
-
-```text
-PASS test/integration.e2e-spec.ts
-
-Test Suites: 1 passed, 1 total
-Tests:       16 passed, 16 total
-```
-
----
-
-## 12.8 Unit vs Integration vs E2E
-
-An easy way to remember the difference is:
-
-```text
-UNIT TEST
-
-"Does this one part work?"
-
-Example:
-ResultsService
-     ↓
-Mock Prisma
-```
-
-```text
-INTEGRATION TEST
-
-"Do these parts work together?"
-
-Example:
-Evaluation
-    +
-Submission
-    +
-Results
-```
-
-```text
-E2E TEST
-
-"Does the real API flow work?"
-
-HTTP Request
-     ↓
-Controller
-     ↓
-Service
-     ↓
-Prisma
-     ↓
-Database
-     ↓
-HTTP Response
-```
-
-In simple terms:
-
-| Test | Question |
-|---|---|
-| Unit | Does this small piece work? |
-| Integration | Do these pieces work together? |
-| E2E | Does the application workflow work from beginning to end? |
-
----
-
-# 12.9 Testing Tools
-
-## Jest
-
-Jest is the main **test runner and assertion framework**.
-
-It executes tests containing:
-
-```ts
-describe(...)
-it(...)
-expect(...)
-```
-
-Example:
-
-```ts
-expect(response.status).toBe(201);
-```
-
-Jest reports:
-
-```text
-PASS ✅
-```
-
-or:
-
-```text
-FAIL ❌
-```
-
----
-
-## ts-jest
-
-The backend and tests are written in TypeScript.
-
-`ts-jest` allows Jest to execute TypeScript test files.
-
-The project contains dedicated test TypeScript configuration:
-
-```text
-tsconfig.spec.json
-```
-
----
-
-## Supertest
-
-Supertest is used to send HTTP requests directly to the NestJS application during API tests.
-
-Instead of manually clicking Swagger:
-
-```text
-Swagger
-   ↓
-POST /api/auth/login
-   ↓
-Execute
-```
-
-Supertest can automate the same process:
-
-```ts
-await request(app.getHttpServer())
-  .post('/api/auth/login')
-  .send(...);
-```
-
----
-
-## Prisma / PostgreSQL
-
-E2E tests can interact with the actual backend database layer.
-
-This allows the test suite to verify behaviours such as:
-
-- creation;
-- updates;
-- deletion;
-- relationships;
-- enrollment;
-- evaluation participants;
-- submissions;
-- result calculations.
-
----
-
-# 12.10 Current Unit Tests
-
-Current unit-test files cover important application components including:
-
-```text
-Academic Years
-Departments
-Results
-App Controller
-```
-
-Current verified unit-test result:
-
-```text
-Test Suites: 7 passed
-Tests:       8 passed
-```
-
----
-
-# 12.11 Current E2E Test Suites
-
-The project currently contains **16 E2E test suites**:
-
-```text
-test/
-│
-├── app.e2e-spec.ts
-├── assessment-drafts.e2e-spec.ts
-├── comments.e2e-spec.ts
-├── course-offerings.e2e-spec.ts
-├── enrollments.e2e-spec.ts
-├── evaluations.e2e-spec.ts
-├── integration.e2e-spec.ts
-├── lecturer-dashboard.e2e-spec.ts
-├── questions.e2e-spec.ts
-├── questions-reorder.e2e-spec.ts
-├── semesters.e2e-spec.ts
-├── student-access.e2e-spec.ts
-├── submissions.e2e-spec.ts
-├── survey-versions.e2e-spec.ts
-├── surveys.e2e-spec.ts
-└── users.e2e-spec.ts
-```
-
-These tests cover major areas such as:
-
-- authentication;
-- authorization;
-- courses;
-- semesters;
-- course offerings;
-- enrollments;
-- surveys;
-- survey versions;
-- questions;
-- question ordering;
-- evaluation lifecycle;
-- assessment drafts;
-- student access;
-- submissions;
-- lecturer dashboard;
-- anonymous comments;
-- complete Admin → Student → Lecturer workflow.
-
----
-
-# 12.12 Current Verified Test Status
-
-## Unit Tests
-
-```text
-Test Suites: 7 passed
-Tests:       8 passed
-```
-
-## E2E Tests
-
-Latest full verified E2E run:
-
-```text
-Test Suites: 16 passed, 16 total
-Tests:       303 passed, 303 total
-Snapshots:   0 total
-```
-
-Therefore:
-
-```text
-Unit Tests
-────────────────────────
-7 test suites passed
-8 tests passed
-              ✅
-
-E2E Tests
-────────────────────────
-16 test suites passed
-303 tests passed
-              ✅
-```
-
----
-
-# 12.13 How to Run Tests
-
-## Run Unit Tests
+After pulling schema/migration changes:
 
 ```bash
-npm test
+npx prisma generate
+```
+
+Check migration state when needed:
+
+```bash
+npx prisma migrate status
+```
+
+For development database migration:
+
+```bash
+npx prisma migrate dev
+```
+
+Do not manually remove historical migration folders that are already part of the applied migration chain.
+
+---
+
+# 22. Backend Testing
+
+Testing protects the backend against regression when business rules change.
+
+The project uses:
+
+```text
+Jest
+ts-jest
+Supertest
+Prisma
+PostgreSQL
+```
+
+The Jest configuration is ESM-compatible.
+
+---
+
+## 22.1 Unit / Service Testing
+
+Targeted tests verify individual controllers/services and business rules.
+
+Examples of heavily tested areas include:
+
+- users;
+- students;
+- student import;
+- student export;
+- student progress;
+- course offerings;
+- enrollments;
+- evaluations;
+- student access;
+- assessment drafts;
+- submissions;
+- survey versions.
+
+Mocks are used where appropriate to isolate service behavior.
+
+---
+
+## 22.2 Integration and E2E Testing
+
+Integration/E2E tests exercise larger application flows.
+
+Conceptually:
+
+```text
+HTTP Request
+     |
+     v
+Controller
+     |
+     v
+Validation / Guards
+     |
+     v
+Service
+     |
+     v
+Prisma
+     |
+     v
+PostgreSQL
+     |
+     v
+HTTP Response
 ```
 
 ---
 
-## Run E2E Tests
+## 22.3 Latest Regression Checkpoint
+
+Latest full regression checkpoint for the current improvement implementation:
+
+```text
+Test Suites: 31 passed, 31 total
+Tests:       309 passed, 309 total
+Snapshots:   0
+```
+
+TypeScript validation also passed:
+
+```bash
+npx tsc --noEmit
+```
+
+This checkpoint covers the current backend improvement implementation.
+
+---
+
+## 22.4 Important Targeted Test Results
+
+Important targeted regression results during the improvement work included:
+
+```text
+Student Import              16 / 16 passed
+Student Progress            13 / 13 passed
+Student Export              24 / 24 passed
+Evaluations Service         36 / 36 passed
+Student Access              14 / 14 passed
+Assessment Drafts           19 / 19 passed
+Submissions                 23 / 23 passed
+Survey Versions             26 / 26 passed
+```
+
+These targeted suites were used while implementing the corresponding business rules.
+
+---
+
+## 22.5 Running Tests
+
+Run the complete Jest suite:
+
+```bash
+npm test -- --runInBand
+```
+
+Run a targeted test through the project's npm test script:
+
+```bash
+npm test -- src/evaluations/evaluations.service.spec.ts --runInBand
+```
+
+Do not bypass the project's configured ESM test runner with a direct plain `npx jest` command.
+
+Run E2E tests:
 
 ```bash
 npm run test:e2e
 ```
 
----
-
-## Run Test Coverage
+Run coverage:
 
 ```bash
 npm run test:cov
 ```
 
----
-
-## Run Tests in Watch Mode
+Run the production build:
 
 ```bash
-npm run test:watch
+npm run build
+```
+
+Type-check without emitting files:
+
+```bash
+npx tsc --noEmit
 ```
 
 ---
 
-## Run One E2E Test File
+## 22.6 Recommended Development Verification
 
-For example:
-
-```bash
-npm run test:e2e -- test/integration.e2e-spec.ts
-```
-
-Or:
-
-```bash
-npm run test:e2e -- test/questions.e2e-spec.ts
-```
-
-This is useful when developing or debugging one feature.
-
----
-
-# 12.14 Recommended Development Testing Workflow
-
-When changing the backend, the recommended workflow is:
+For an important backend change:
 
 ```text
-1. Modify Code
-      ↓
-2. Run relevant test
-      ↓
-3. Fix failures
-      ↓
-4. Run complete unit tests
-      ↓
-5. Run complete E2E tests
-      ↓
+1. Modify code
+      |
+      v
+2. Run targeted test
+      |
+      v
+3. Fix real failures
+      |
+      v
+4. Run TypeScript check
+      |
+      v
+5. Run full regression
+      |
+      v
 6. Run build
-      ↓
-7. Review Git changes
-      ↓
+      |
+      v
+7. Review Git diff
+      |
+      v
 8. Commit
-      ↓
+      |
+      v
 9. Push
 ```
 
-Example commands:
-
-```bash
-npm test
-npm run test:e2e
-npm run build
-git status
-```
-
-Before pushing important backend changes, the goal is:
-
-```text
-Unit tests   → PASS ✅
-E2E tests    → PASS ✅
-Build        → PASS ✅
-```
-
 ---
 
-# 12.15 Why Both Swagger and Automated Tests Are Needed
+# 23. Setup and Run
 
-Swagger and automated tests have different purposes.
-
-## Swagger
-
-Useful for:
-
-- exploring APIs;
-- manually trying endpoints;
-- viewing DTO fields;
-- checking responses during development;
-- demonstrating the backend.
-
-## Automated Tests
-
-Useful for:
-
-- repeating checks automatically;
-- detecting regressions;
-- checking many scenarios quickly;
-- verifying business rules;
-- supporting team collaboration;
-- validating changes before commits.
-
-Therefore:
-
-```text
-Swagger
-   ↓
-Manual verification
-
-        +
-
-Jest / Supertest
-   ↓
-Automated verification
-
-        =
-
-More reliable backend development
-```
-
----
-
-# 13. Setup and Run
-
-## 13.1 Clone the Repository
+## 23.1 Clone Repository
 
 ```bash
 git clone <repository-url>
@@ -1851,7 +1990,7 @@ cd teacher-evaluation-api
 
 ---
 
-## 13.2 Install Dependencies
+## 23.2 Install Dependencies
 
 ```bash
 npm install
@@ -1859,13 +1998,11 @@ npm install
 
 ---
 
-## 13.3 Configure Environment Variables
+## 23.3 Environment Variables
 
-Create or configure the project's `.env`.
+Configure `.env`.
 
-Important environment variables include database configuration, JWT configuration, and frontend origin configuration.
-
-Example:
+Typical configuration includes:
 
 ```env
 DATABASE_URL="postgresql://..."
@@ -1873,47 +2010,49 @@ JWT_SECRET="..."
 FRONTEND_ORIGIN=http://localhost:5173
 ```
 
-Use the actual project environment values provided by the team.
+Use the real environment values provided by the team.
 
-Do not commit private production secrets.
+Never commit private production secrets.
 
 ---
 
-## 13.4 Generate Prisma Client
+## 23.4 Generate Prisma Client
 
 ```bash
 npx prisma generate
 ```
 
-This is important after:
-
-- installing dependencies;
-- changing `schema.prisma`;
-- changing Prisma Client configuration.
-
 ---
 
-## 13.5 Run Prisma Migrations
+## 23.5 Check / Apply Migrations
+
+Check:
+
+```bash
+npx prisma migrate status
+```
+
+For a development database when migrations need to be applied:
 
 ```bash
 npx prisma migrate dev
 ```
 
-This applies the project's database migrations.
-
 ---
 
-## 13.6 Seed the Database
+## 23.6 Seed Development Data
 
-If a fresh development database requires seed data:
+If required:
 
 ```bash
 npx prisma db seed
 ```
 
+Seed data is intended for development/testing only.
+
 ---
 
-## 13.7 Start the Backend
+## 23.7 Start Development Server
 
 ```bash
 npm run start:dev
@@ -1933,196 +2072,348 @@ http://localhost:3000/api/docs
 
 ---
 
-## 13.8 Verify the Project
+## 23.8 Verify Environment
 
-After setup, a teammate should verify:
-
-```bash
-npm test
-```
-
-Then:
+Recommended checks:
 
 ```bash
-npm run test:e2e
-```
-
-Then:
-
-```bash
+npx prisma generate
+npx prisma migrate status
+npx tsc --noEmit
+npm test -- --runInBand
 npm run build
 ```
 
-Expected verified test baseline:
+Use `npm run test:e2e` when the E2E test environment/database is configured.
+
+---
+
+# 24. Frontend Integration Notes
+
+The frontend should treat the backend as the final authority for eligibility and lifecycle rules.
+
+Do not rely only on frontend button visibility.
+
+For example:
 
 ```text
-Unit:
-7 suites / 8 tests passing
+Frontend hides "Submit"
+        !=
+Security rule
+```
 
-E2E:
-16 suites / 303 tests passing
+The backend must still reject an invalid submission.
+
+---
+
+## Important Concepts for Frontend Developers
+
+```text
+User
+  !=
+Student Profile
+
+Course
+  !=
+Course Offering
+
+Enrollment
+  !=
+Evaluation Participant
+
+Survey
+  !=
+Survey Version
+
+Evaluation DRAFT
+  !=
+Assessment Draft
+
+Evaluation Base Version
+  !=
+Participant Effective Version
+
+Assessment Draft
+  !=
+Final Response
 ```
 
 ---
 
-# 14. Seed Accounts
+## Recommended Frontend Test Scenarios
 
-The current development seed uses test accounts for local development and testing.
+### Authentication
 
-Seed password:
+Test:
+
+- admin login;
+- lecturer login;
+- student-code login;
+- wrong password;
+- inactive account;
+- password change;
+- old JWT after password change.
+
+### Student Management
+
+Test:
+
+- create student;
+- create/update academic record;
+- generation;
+- major;
+- academic filters;
+- inactive student behavior;
+- import;
+- export;
+- progress.
+
+### Enrollment
+
+Test:
+
+- individual enrollment;
+- group preview;
+- group confirmation;
+- already-enrolled students;
+- duplicate enrollment;
+- student becoming invalid between preview and confirmation.
+
+### Evaluation
+
+Test:
+
+- create DRAFT;
+- set schedule;
+- preview participants;
+- confirm participants;
+- open;
+- attempt invalid schedule modification;
+- close.
+
+### Student Access
+
+Test:
+
+- assigned/enrolled student;
+- enrolled but not participant;
+- participant but invalid enrollment;
+- before start;
+- during active window;
+- after end;
+- closed evaluation;
+- already submitted.
+
+### Draft
+
+Test:
+
+- save draft;
+- reload draft;
+- update draft;
+- invalid answer;
+- questionnaire-version mismatch;
+- failed final submission preserves draft.
+
+### Final Submission
+
+Test:
+
+- valid submission;
+- missing required answer;
+- out-of-range rating;
+- invalid option;
+- duplicate question answer;
+- invalid multiple-choice selection;
+- duplicate final submission;
+- simultaneous duplicate requests.
+
+### Question-Set Update
+
+Prepare three students:
 
 ```text
-Password123
+Student A -> already submitted
+Student B -> has saved draft
+Student C -> untouched
 ```
 
-Example accounts:
+Apply a newer version of the same named question set.
 
-| Role | Account |
-|---|---|
-| ADMIN | `admin@itc.edu.kh` |
-| LECTURER | `sokdara@itc.edu.kh` |
-| LECTURER | `chanthy@itc.edu.kh` |
-| STUDENT | `student1@itc.edu.kh` through `student5@itc.edu.kh` |
+Expected:
 
-These accounts are intended for local development/testing.
+```text
+Student A -> stays on old version
+Student B -> stays on old version
+Student C -> moves to new version
+```
 
----
-
-# 15. Known Limitations / Future Improvements
-
-The current backend is complete for the implemented project scope, but several areas can be improved in future development.
-
-Potential improvements include:
-
-1. Add machine-readable application error codes.
-2. Improve JWT invalidation after password/security changes.
-3. Add pagination to large list endpoints.
-4. Add additional production security configuration such as Helmet.
-5. Add login rate limiting.
-6. Strengthen production CORS configuration as deployment environments are finalized.
-7. Add or verify database-level `CHECK` constraints for rules currently enforced by services.
-8. Improve seed data consistency and evaluation windows.
-9. Normalize login email before lookup where required.
-10. Review long-term behaviour when enrollment changes after an evaluation has already opened.
-11. Expand unit-test coverage across more services.
-12. Add automated test coverage reporting targets.
-13. Add performance/load testing if the system is prepared for larger deployment.
-14. Add additional security testing before production deployment.
-15. Add CI/CD test execution so tests run automatically on pull requests.
+This is an important integration and defense scenario.
 
 ---
 
-# 16. Differences From the Original Proposal
+# 25. Known Limitations and Future Improvements
 
-During implementation, several technical choices changed to match the actual project architecture.
+The current backend is suitable for final frontend integration and internship evaluation.
 
-| Original Proposal | Current Implementation |
+Future improvements can include:
+
+1. administrative audit logging;
+2. additional production security hardening;
+3. login rate limiting;
+4. expanded HTTP-level integration/E2E coverage;
+5. automated CI/CD testing;
+6. performance/load testing;
+7. structured production monitoring/logging;
+8. machine-readable application error codes;
+9. formal API versioning if future releases require breaking changes;
+10. additional database constraints where they provide value beyond service-level validation.
+
+These are future enhancements and do not require a large pre-defense database redesign.
+
+---
+
+# 26. Differences From the Original Proposal
+
+Some implementation choices evolved during development.
+
+| Earlier / Original Direction | Current Implementation |
 |---|---|
 | TypeORM | Prisma |
-| UUID IDs | BigInt auto-increment IDs |
-| `/api/v1/admin/...` | `/api/...` |
-| PATCH updates | Current project uses PUT for applicable update endpoints |
+| UUID-oriented design | BigInt auto-increment IDs |
+| `/api/v1/admin/...` style | `/api/...` |
+| PATCH-oriented updates | PUT used where implemented |
 | argon2 | bcrypt |
-| Application error codes | Standard NestJS errors/messages |
-| Enrollment status | Enrollment row can be removed |
-| `first_name` + `last_name` | `full_name` |
+| Application-specific error codes | Standard NestJS HTTP exceptions/messages |
+| Simpler student representation | User + Student Profile + Academic Records |
+| Basic reusable survey | Named Survey + Survey Versions |
+| Simple enrollment | Individual + preview/confirm group enrollment |
+| Basic evaluation assignment | Participant scope + eligibility preview/confirmation |
+| Simple submission | Draft-aware, version-aware transactional anonymous submission |
 
-These are implementation decisions and do not mean the corresponding backend feature is unfinished.
+These are implementation decisions made as the actual backend architecture evolved.
 
 ---
 
-# 17. Final Backend Status
+# 27. Current Backend Status
 
-## Original Scope
+## Original Core Scope
 
-```text
-13 / 13 original core backend features implemented ✅
-```
+The original teaching-evaluation backend lifecycle is implemented.
 
-## Additional Work
+This includes:
 
 ```text
-Academic Years                         ✅
-Departments                            ✅
-User ↔ Department assignment           ✅
-Course → Department relation           ✅
-Semester → Academic Year relation      ✅
-Question insertion/order improvements  ✅
-Question reorder API                   ✅
-Survey version improvements            ✅
-Student evaluation history             ✅
-Admin results APIs                     ✅
-Lecturer results API                   ✅
-CORS configuration                     ✅
-Testing configuration improvements     ✅
-```
-
-## Verification
-
-```text
-Core backend implementation            ✅
-Manual Swagger verification            ✅
-Swagger API documentation               ✅
-Prisma Client generation                ✅
-NestJS production build                 ✅
-
-Unit test suites:
-7 passed                                ✅
-
-Unit tests:
-8 passed                                ✅
-
-E2E test suites:
-16 / 16 passed                          ✅
-
-E2E tests:
-303 / 303 passed                        ✅
-
-Full integration workflow:
-16 / 16 passed                          ✅
-```
-
-The current backend supports the complete teaching evaluation lifecycle:
-
-```text
-ADMIN
-prepares academic structure
-        ↓
-ADMIN
-creates survey and evaluation
-        ↓
-ADMIN
-opens evaluation
-        ↓
-STUDENTS
-submit anonymous evaluations
-        ↓
-ADMIN
-closes evaluation
-        ↓
-LECTURER
-views aggregate results
-        +
-anonymous comments
+Users
+Courses
+Semesters
+Course Offerings
+Enrollments
+Surveys
+Survey Versions
+Questions
+Evaluations
+Student Access
+Submission
+Lecturer Dashboard
+Anonymous Comments
 ```
 
 ---
 
-# Quick Start for Teammates
+## Completed Improvement Areas
 
-For a teammate joining the backend project:
+```text
+Majors                                      ✅
+Student Generations                         ✅
+Student Profiles                            ✅
+Student Academic Records                    ✅
+Academic-year improvements                  ✅
+Course year/effective-level rules           ✅
+Enhanced student filtering                  ✅
+Student authentication by identifier/code   ✅
+User/staff gender and email improvements    ✅
+Self-service password change                ✅
+JWT auth-version invalidation               ✅
+Admin password reset                        ✅
+Last-active-admin protection                ✅
+Student Import                              ✅
+Student Export                              ✅
+Student Progress                            ✅
+Course Offering improvements                ✅
+Group enrollment preview/confirm            ✅
+Named question sets                         ✅
+Survey-version behavior                     ✅
+Evaluation targeting                        ✅
+Generation targeting                        ✅
+Eligible-student preview                    ✅
+Participant survey-version pinning          ✅
+Version-aware Student Access                ✅
+Version-aware Assessment Drafts             ✅
+Version-aware Anonymous Submission          ✅
+Safe apply-to-unfinished behavior            ✅
+```
+
+---
+
+## Latest Verification
+
+```text
+TypeScript check:
+npx tsc --noEmit
+PASS ✅
+
+Full regression:
+31 / 31 test suites passed
+309 / 309 tests passed
+PASS ✅
+```
+
+The current backend is ready for:
+
+```text
+Final API contract review
+        |
+        v
+Frontend end-to-end testing
+        |
+        v
+Fix only reproducible integration issues
+        |
+        v
+Final regression
+        |
+        v
+Internship defense / review
+        |
+        v
+Merge / release decision
+```
+
+Large structural changes should be avoided during this stage unless final integration exposes a genuine defect.
+
+---
+
+# 28. Quick Start
+
+For a teammate joining the project:
 
 ```bash
 # 1. Install dependencies
 npm install
 
-# 2. Generate Prisma Client
+# 2. Configure .env
+
+# 3. Generate Prisma Client
 npx prisma generate
 
-# 3. Apply migrations
+# 4. Check migration state
+npx prisma migrate status
+
+# 5. Apply migrations when required for the development database
 npx prisma migrate dev
 
-# 4. Start backend
+# 6. Start backend
 npm run start:dev
 ```
 
@@ -2132,62 +2423,62 @@ Open Swagger:
 http://localhost:3000/api/docs
 ```
 
-Then verify tests:
+Verify the backend:
 
 ```bash
-npm test
-npm run test:e2e
+npx tsc --noEmit
+npm test -- --runInBand
 npm run build
 ```
 
-Current expected testing baseline:
+Run E2E tests when the E2E environment is configured:
 
-```text
-Unit Tests:
-7 suites / 8 tests passed
-
-E2E Tests:
-16 suites / 303 tests passed
+```bash
+npm run test:e2e
 ```
 
-If these tests pass, the teammate's environment is consistent with the current verified backend state.
+Latest regression checkpoint:
+
+```text
+31 test suites passed
+309 tests passed
+```
 
 ---
 
 # Summary
 
-The backend currently provides:
+The Assessment / Teaching Evaluation System backend provides a complete role-based evaluation workflow built with NestJS, Prisma, PostgreSQL, and JWT authentication.
 
-- academic year management;
-- department management;
-- user and department relationships;
-- course management;
-- semester management;
-- course offerings;
-- student enrollments;
-- survey management;
-- survey versioning;
-- question management and ordering;
-- evaluation lifecycle management;
-- anonymous student submission;
-- student evaluation access/history;
-- lecturer dashboards;
-- anonymous comments;
-- administrative and lecturer results;
-- JWT authentication;
-- role-based authorization;
-- Swagger documentation;
-- unit testing;
-- E2E testing;
-- integration workflow testing.
+The current implementation supports academic and student management, course offerings, enrollment, named/versioned question sets, evaluation participant targeting, student drafts, anonymous final submission, lecturer results, and safe questionnaire-version evolution.
 
-The project has moved beyond the original 13-feature scope while preserving the complete core teaching evaluation workflow.
-
-Current verified automated testing state:
+The most important architectural principles are:
 
 ```text
-Unit: 7 suites / 8 tests      ✅
-E2E:  16 suites / 303 tests  ✅
+Backend-enforced business rules
+
+Explicit enrollment and participant assignment
+
+Historical questionnaire preservation
+
+Participant-level effective survey versions
+
+Draft protection
+
+Transactional final submission
+
+Duplicate-submission protection
+
+Anonymous final response storage
+
+Role-based authorization
 ```
 
-This README should be updated whenever the database schema, API contracts, major features, or verified test baseline changes.
+The current improvement implementation has passed the latest full regression checkpoint of:
+
+```text
+31 / 31 test suites
+309 / 309 tests
+```
+
+and is ready for final frontend integration testing and internship defense review.
