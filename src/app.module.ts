@@ -22,11 +22,15 @@ import { SubmissionsModule } from './submissions/submissions.module';
 import { AssessmentDraftsModule } from './assessment-drafts/assessment-drafts.module';
 import { AcademicYearsModule } from './academic-years/academic-years.module';
 import { DepartmentsModule } from './departments/departments.module';
+import { MajorsModule } from './majors/majors.module';
+import { StudentGenerationsModule } from './student-generations/student-generations.module';
 import { ResultsModule } from './results/results.module';
 
 // Master modules
 import { LecturerDashboardModule } from './lecturer-dashboard/lecturer-dashboard.module';
 import { CommentsModule } from './comments/comments.module';
+import { StudentsModule } from './students/students.module';
+import { StudentAcademicRecordsModule } from './student-academic-records/student-academic-records.module';
 
 @Module({
   imports: [
@@ -52,11 +56,15 @@ import { CommentsModule } from './comments/comments.module';
     AssessmentDraftsModule,
     AcademicYearsModule,
     DepartmentsModule,
+    MajorsModule,
+    StudentGenerationsModule,
     ResultsModule,
 
     // Master
     LecturerDashboardModule,
     CommentsModule,
+    StudentsModule,
+    StudentAcademicRecordsModule,
   ],
 
   controllers: [AppController],

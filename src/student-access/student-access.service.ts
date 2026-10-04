@@ -296,7 +296,11 @@ export class StudentAccessService {
     evaluationId: bigint,
     studentId: bigint,
   ) {
-    const { evaluation } =
+    const {
+      evaluation,
+      participant,
+      effectiveSurveyVersionId,
+    } =
       await this.getAnswerableEvaluation(
         evaluationId,
         studentId,
@@ -306,7 +310,7 @@ export class StudentAccessService {
       await this.prisma.questions.findMany({
         where: {
           survey_version_id:
-            evaluation.survey_version_id,
+            effectiveSurveyVersionId,
         },
 
         select: questionSelect,
@@ -319,6 +323,12 @@ export class StudentAccessService {
     return {
       evaluation:
         toSummary(evaluation),
+
+      survey_version_id:
+        effectiveSurveyVersionId,
+
+      participant_survey_version_id:
+        participant.survey_version_id,
 
       questions,
     };
@@ -347,6 +357,7 @@ export class StudentAccessService {
         },
 
         select: {
+          survey_version_id: true,
           has_submitted: true,
           submitted_at: true,
         },
@@ -361,6 +372,9 @@ export class StudentAccessService {
     return {
       evaluation_id:
         evaluationId,
+
+      survey_version_id:
+        participant.survey_version_id,
 
       has_submitted:
         participant.has_submitted,
@@ -377,7 +391,7 @@ export class StudentAccessService {
   // The single place that decides:
   // "May this student answer this evaluation right now?"
   //
-  // Also used by Submission.
+  // Also used by Submission and Drafts.
   async getAnswerableEvaluation(
     evaluationId: bigint,
     studentId: bigint,
@@ -398,6 +412,16 @@ export class StudentAccessService {
 
           student_id:
             studentId,
+        },
+
+        select: {
+          id: true,
+          evaluation_id: true,
+          student_id: true,
+          survey_version_id: true,
+          has_submitted: true,
+          submitted_at: true,
+          created_at: true,
         },
       }),
 
@@ -441,9 +465,18 @@ export class StudentAccessService {
       );
     }
 
+    // New participants are pinned to their own survey version.
+    // Historical participants created before this field existed
+    // may still have NULL, so they safely fall back to the
+    // evaluation's original/base survey version.
+    const effectiveSurveyVersionId =
+      participant.survey_version_id ??
+      evaluation.survey_version_id;
+
     return {
       evaluation,
       participant,
+      effectiveSurveyVersionId,
     };
   }
 

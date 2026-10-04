@@ -33,6 +33,7 @@ const userExample = {
   id: '9',
   email: 'newlecturer@itc.edu.kh',
   full_name: 'Keo Sophal',
+  gender: 'MALE',
   role: 'LECTURER',
   status: 'ACTIVE',
   created_at: '2026-09-23T08:00:00.000Z',
@@ -83,19 +84,37 @@ export class UsersController {
   @Get()
   @ApiOperation({
     summary:
-      'List users, optionally filtered by role and/or status',
+      'List, search, filter, and paginate lecturer/admin accounts',
+    description:
+      'Staff-management endpoint. Returns ADMIN and LECTURER accounts only. Student accounts are managed through /students.',
   })
   @ApiResponse({
     status: 200,
     description:
-      'Array of users with department information. Password hashes are never returned.',
+      'Paginated lecturer/admin accounts with department information',
     schema: {
-      example: [userExample],
+      example: {
+        data: [userExample],
+
+        pagination: {
+          page: 1,
+          limit: 20,
+          total: 1,
+          total_pages: 1,
+        },
+
+        filters: {
+          search: null,
+          role: 'LECTURER',
+          status: 'ACTIVE',
+        },
+      },
     },
   })
   @ApiResponse({
     status: 400,
-    description: 'Invalid role or status filter',
+    description:
+      'Invalid search, role, status, page, or limit',
   })
   findAll(
     @Query() query: ListUsersQueryDto,
@@ -132,7 +151,10 @@ export class UsersController {
 
   @Post()
   @ApiOperation({
-    summary: 'Create a user account',
+    summary:
+      'Create a lecturer or admin account',
+    description:
+      'Student accounts must be created through the student API so the user and student profile are created together.',
   })
   @ApiResponse({
     status: 201,
@@ -143,11 +165,13 @@ export class UsersController {
   })
   @ApiResponse({
     status: 400,
-    description: 'Invalid input',
+    description:
+      'Invalid input. Student accounts must use the student creation API.',
   })
   @ApiResponse({
     status: 409,
-    description: 'Email is already in use',
+    description:
+      'Email is already in use',
   })
   create(
     @Body() dto: CreateUserDto,
@@ -158,7 +182,7 @@ export class UsersController {
   @Put(':id')
   @ApiOperation({
     summary:
-      'Update a user (name, email, status, or password). Role cannot be changed.',
+      'Update a user (name, email, gender, status, or password). Role cannot be changed.',
   })
   @ApiParam({
     name: 'id',
@@ -183,7 +207,8 @@ export class UsersController {
   })
   @ApiResponse({
     status: 409,
-    description: 'Email is already in use',
+    description:
+      'Email is already in use, or the target is the last active admin',
   })
   update(
     @Param('id', ParseBigIntPipe) id: bigint,
@@ -193,6 +218,59 @@ export class UsersController {
     return this.usersService.update(
       id,
       dto,
+      currentUser.id,
+    );
+  }
+
+  @Delete(':id')
+  @ApiOperation({
+    summary:
+      'Permanently delete an unreferenced student or lecturer account',
+    description:
+      'Admin accounts cannot be permanently deleted. Users with historical references must be deactivated instead.',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    example: '9',
+    description: 'User ID',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'User deleted successfully',
+    schema: {
+      example: {
+        message:
+          'User deleted successfully',
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Cannot delete your own account, cannot delete an admin account, or the target role is not deletable',
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Only an authenticated admin can use this endpoint',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'User not found',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'User has historical references and cannot be permanently deleted. Deactivate the account instead.',
+  })
+  remove(
+    @Param('id', ParseBigIntPipe) id: bigint,
+    @CurrentUser() currentUser: { id: bigint },
+  ) {
+    return this.usersService.remove(
+      id,
       currentUser.id,
     );
   }
@@ -217,7 +295,9 @@ export class UsersController {
     description:
       'Departments assigned to the user',
     schema: {
-      example: [departmentAssignmentExample],
+      example: [
+        departmentAssignmentExample,
+      ],
     },
   })
   @ApiResponse({
@@ -246,7 +326,8 @@ export class UsersController {
     description:
       'Department assigned to user',
     schema: {
-      example: departmentAssignmentExample,
+      example:
+        departmentAssignmentExample,
     },
   })
   @ApiResponse({
@@ -291,7 +372,8 @@ export class UsersController {
       'Department removed from user',
     schema: {
       example: {
-        message: 'Department removed from user',
+        message:
+          'Department removed from user',
       },
     },
   })
@@ -302,7 +384,10 @@ export class UsersController {
   })
   removeDepartment(
     @Param('id', ParseBigIntPipe) id: bigint,
-    @Param('departmentId', ParseBigIntPipe)
+    @Param(
+      'departmentId',
+      ParseBigIntPipe,
+    )
     departmentId: bigint,
   ) {
     return this.usersService.removeDepartment(

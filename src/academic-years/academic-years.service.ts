@@ -52,6 +52,7 @@ export class AcademicYearsService {
         return tx.academic_years.create({
           data: {
             name: dto.name,
+            start_year: dto.start_year ?? null,
             start_date: startDate,
             end_date: endDate,
             is_active: dto.is_active ?? false,
@@ -104,6 +105,7 @@ export class AcademicYearsService {
           where: { id },
           data: {
             name: dto.name,
+            start_year: dto.start_year,
             start_date: startDate,
             end_date: endDate,
             is_active: dto.is_active,

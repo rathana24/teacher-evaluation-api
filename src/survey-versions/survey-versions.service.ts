@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -10,7 +11,7 @@ import { CreateSurveyVersionDto } from './dto/create-survey-version.dto';
 @Injectable()
 export class SurveyVersionsService {
   constructor(
-    private prisma: PrismaService,
+    private readonly prisma: PrismaService,
   ) {}
 
   // =========================================================
@@ -34,6 +35,9 @@ export class SurveyVersionsService {
           select: {
             questions: true,
             evaluations: true,
+            evaluation_participants: true,
+            assessment_drafts: true,
+            responses: true,
           },
         },
       },
@@ -48,8 +52,6 @@ export class SurveyVersionsService {
   // GET ONE VERSION
   // =========================================================
 
-  // The version must belong to the survey
-  // in the URL, otherwise it is "not found".
   async findOne(
     surveyId: bigint,
     versionId: bigint,
@@ -79,6 +81,9 @@ export class SurveyVersionsService {
           _count: {
             select: {
               evaluations: true,
+              evaluation_participants: true,
+              assessment_drafts: true,
+              responses: true,
             },
           },
         },
@@ -107,23 +112,8 @@ export class SurveyVersionsService {
     );
 
     try {
-      /*
-       * Everything happens in one transaction.
-       *
-       * If copying any question or option fails,
-       * the new survey version is also rolled back.
-       */
       return await this.prisma.$transaction(
         async (tx) => {
-          /*
-           * Find the latest version.
-           *
-           * Include:
-           * - questions
-           * - Khmer question text
-           * - display order
-           * - question options
-           */
           const latest =
             await tx.survey_versions.findFirst({
               where: {
@@ -153,10 +143,6 @@ export class SurveyVersionsService {
 
           const now = new Date();
 
-          // -----------------------------------------
-          // Create new survey version
-          // -----------------------------------------
-
           const version =
             await tx.survey_versions.create({
               data: {
@@ -176,21 +162,11 @@ export class SurveyVersionsService {
               },
             });
 
-          // -----------------------------------------
-          // Copy questions from latest version
-          // -----------------------------------------
-
           if (
             dto.copy_questions &&
             latest &&
             latest.questions.length > 0
           ) {
-            /*
-             * We use create() instead of
-             * createMany() here because every
-             * copied question may also contain
-             * nested question_options.
-             */
             for (
               const question of
               latest.questions
@@ -200,11 +176,9 @@ export class SurveyVersionsService {
                   survey_version_id:
                     version.id,
 
-                  // English question
                   question_text:
                     question.question_text,
 
-                  // Khmer question
                   question_text_km:
                     question.question_text_km,
 
@@ -223,7 +197,6 @@ export class SurveyVersionsService {
                   max_rating:
                     question.max_rating,
 
-                  // Preserve exact ordering
                   display_order:
                     question.display_order,
 
@@ -233,7 +206,6 @@ export class SurveyVersionsService {
                   updated_at:
                     now,
 
-                  // Copy question options
                   question_options:
                     question.question_options
                       .length > 0
@@ -254,10 +226,6 @@ export class SurveyVersionsService {
               });
             }
           }
-
-          // -----------------------------------------
-          // Return complete new version
-          // -----------------------------------------
 
           return tx.survey_versions.findUniqueOrThrow({
             where: {
@@ -293,6 +261,360 @@ export class SurveyVersionsService {
 
       throw e;
     }
+  }
+
+  // =========================================================
+  // APPLY VERSION TO UNFINISHED PARTICIPANTS
+  // =========================================================
+
+  /**
+   * Safely applies a newer version of the SAME named
+   * question set to unfinished participant assignments.
+   *
+   * Important rules:
+   *
+   * - the target version must belong to surveyId
+   * - the target version must still be DRAFT
+   * - the target version must contain questions
+   * - completed participants never move
+   * - participants with saved drafts never move
+   * - only unfinished participants without drafts move
+   * - only evaluations belonging to this same named set
+   *   are considered
+   * - evaluations.survey_version_id is NOT changed
+   * - the target version is locked after reconciliation
+   *
+   * Keeping the evaluation's base version unchanged
+   * preserves the original evaluation context.
+   *
+   * The participant-level survey_version_id is the
+   * effective version used by student access, drafts,
+   * and submissions.
+   */
+  async applyToUnfinished(
+    surveyId: bigint,
+    versionId: bigint,
+  ) {
+    await this.checkSurveyExists(
+      surveyId,
+    );
+
+    const targetVersion =
+      await this.prisma.survey_versions.findFirst({
+        where: {
+          id: versionId,
+          survey_id: surveyId,
+        },
+
+        select: {
+          id: true,
+          survey_id: true,
+          version_no: true,
+          status: true,
+          locked_at: true,
+
+          _count: {
+            select: {
+              questions: true,
+            },
+          },
+        },
+      });
+
+    if (!targetVersion) {
+      throw new NotFoundException(
+        'Survey version not found',
+      );
+    }
+
+    if (
+      targetVersion.status !== 'DRAFT'
+    ) {
+      throw new ConflictException(
+        'Only a DRAFT survey version can be applied to unfinished participants',
+      );
+    }
+
+    if (
+      targetVersion._count.questions === 0
+    ) {
+      throw new BadRequestException(
+        'The survey version has no questions',
+      );
+    }
+
+    const now = new Date();
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        /*
+         * Re-read the target version inside the transaction.
+         *
+         * This prevents a stale pre-transaction check from
+         * silently applying a version whose state changed.
+         */
+        const currentTarget =
+          await tx.survey_versions.findFirst({
+            where: {
+              id: versionId,
+              survey_id: surveyId,
+            },
+
+            select: {
+              id: true,
+              version_no: true,
+              status: true,
+              locked_at: true,
+
+              _count: {
+                select: {
+                  questions: true,
+                },
+              },
+            },
+          });
+
+        if (!currentTarget) {
+          throw new NotFoundException(
+            'Survey version not found',
+          );
+        }
+
+        if (
+          currentTarget.status !==
+          'DRAFT'
+        ) {
+          throw new ConflictException(
+            'Only a DRAFT survey version can be applied to unfinished participants',
+          );
+        }
+
+        if (
+          currentTarget._count
+            .questions === 0
+        ) {
+          throw new BadRequestException(
+            'The survey version has no questions',
+          );
+        }
+
+        /*
+         * Find evaluations whose BASE survey version
+         * belongs to this same named question set.
+         *
+         * CLOSED evaluations are intentionally excluded.
+         *
+         * DRAFT and OPEN evaluations can still contain
+         * unfinished participant assignments that may
+         * safely move forward.
+         *
+         * We never change evaluations.survey_version_id.
+         */
+        const evaluations =
+          await tx.evaluations.findMany({
+            where: {
+              status: {
+                in: [
+                  'DRAFT',
+                  'OPEN',
+                ],
+              },
+
+              survey_versions: {
+                survey_id:
+                  surveyId,
+              },
+            },
+
+            select: {
+              id: true,
+            },
+          });
+
+        const evaluationIds =
+          evaluations.map(
+            (evaluation) =>
+              evaluation.id,
+          );
+
+        let updatedParticipants = 0;
+        let skippedSubmitted = 0;
+        let skippedWithDraft = 0;
+        let alreadyOnTarget = 0;
+
+        if (
+          evaluationIds.length > 0
+        ) {
+          /*
+           * Count completed assignments.
+           *
+           * They are historical records and must never
+           * move to another question-set version.
+           */
+          skippedSubmitted =
+            await tx.evaluation_participants.count({
+              where: {
+                evaluation_id: {
+                  in: evaluationIds,
+                },
+
+                has_submitted:
+                  true,
+              },
+            });
+
+          /*
+           * Count unfinished participants that already
+           * have a saved server-side draft.
+           *
+           * Their answers reference the exact question
+           * IDs of their current version, so we must not
+           * reinterpret or silently discard that draft.
+           */
+          skippedWithDraft =
+            await tx.evaluation_participants.count({
+              where: {
+                evaluation_id: {
+                  in: evaluationIds,
+                },
+
+                has_submitted:
+                  false,
+
+                assessment_drafts: {
+                  isNot: null,
+                },
+
+                NOT: {
+                  survey_version_id:
+                    versionId,
+                },
+              },
+            });
+
+          /*
+           * Some participant rows may already point to
+           * the target version. They require no update.
+           */
+          alreadyOnTarget =
+            await tx.evaluation_participants.count({
+              where: {
+                evaluation_id: {
+                  in: evaluationIds,
+                },
+
+                has_submitted:
+                  false,
+
+                survey_version_id:
+                  versionId,
+              },
+            });
+
+          /*
+           * Safe migration:
+           *
+           * - unfinished only
+           * - no saved draft
+           * - not already on the target version
+           *
+           * Historical rows with NULL survey_version_id
+           * are also eligible when they have no draft.
+           * After this update they become explicitly
+           * pinned to the target version.
+           */
+          const changed =
+            await tx.evaluation_participants.updateMany({
+              where: {
+                evaluation_id: {
+                  in: evaluationIds,
+                },
+
+                has_submitted:
+                  false,
+
+                assessment_drafts: {
+                  is: null,
+                },
+
+                NOT: {
+                  survey_version_id:
+                    versionId,
+                },
+              },
+
+              data: {
+                survey_version_id:
+                  versionId,
+              },
+            });
+
+          updatedParticipants =
+            changed.count;
+        }
+
+        /*
+         * Lock the target version only after the safe
+         * participant reconciliation succeeds.
+         *
+         * The conditional update also protects against
+         * another request changing the version state
+         * concurrently.
+         */
+        const locked =
+          await tx.survey_versions.updateMany({
+            where: {
+              id: versionId,
+              survey_id: surveyId,
+              status: 'DRAFT',
+            },
+
+            data: {
+              status: 'LOCKED',
+              locked_at:
+                currentTarget.locked_at ??
+                now,
+            },
+          });
+
+        if (
+          locked.count === 0
+        ) {
+          throw new ConflictException(
+            'The survey version changed while reconciliation was running. Please try again.',
+          );
+        }
+
+        return {
+          survey_id:
+            surveyId.toString(),
+
+          survey_version_id:
+            versionId.toString(),
+
+          version_no:
+            currentTarget.version_no,
+
+          status:
+            'LOCKED',
+
+          eligible_evaluations:
+            evaluationIds.length,
+
+          updated_participants:
+            updatedParticipants,
+
+          skipped_submitted:
+            skippedSubmitted,
+
+          skipped_with_draft:
+            skippedWithDraft,
+
+          already_on_target:
+            alreadyOnTarget,
+        };
+      },
+    );
   }
 
   // =========================================================
@@ -350,21 +672,33 @@ export class SurveyVersionsService {
       );
     }
 
+    /*
+     * A version is considered used if ANY persisted
+     * evaluation history references it.
+     *
+     * This includes:
+     *
+     * - evaluation base version
+     * - participant effective version
+     * - saved draft version
+     * - submitted response version
+     *
+     * Checking all four prevents historical data from
+     * being orphaned or deleted.
+     */
     if (
-      version._count.evaluations > 0
+      version._count.evaluations > 0 ||
+      version._count
+        .evaluation_participants > 0 ||
+      version._count
+        .assessment_drafts > 0 ||
+      version._count.responses > 0
     ) {
       throw new ConflictException(
-        'Survey version is used by evaluations and cannot be deleted',
+        'Survey version is already used by evaluations, participants, drafts, or responses and cannot be deleted',
       );
     }
 
-    /*
-     * Delete options first, then questions,
-     * then the survey version.
-     *
-     * This avoids foreign-key problems if
-     * question_options do not use cascade delete.
-     */
     await this.prisma.$transaction(
       async (tx) => {
         const questions =
@@ -417,13 +751,19 @@ export class SurveyVersionsService {
   // EDITABILITY CHECK
   // =========================================================
 
-  /*
+  /**
    * Used by the Questions feature.
    *
-   * Editable only while:
+   * A version is editable only when:
    *
-   * - survey version is DRAFT
-   * - no evaluation using it has been opened
+   * - it is still DRAFT
+   * - no non-DRAFT evaluation directly uses it
+   * - no participant is pinned to it
+   * - no draft references it
+   * - no submitted response references it
+   *
+   * Once participant/history data references the
+   * version, questions must remain immutable.
    */
   async assertEditable(
     versionId: bigint,
@@ -446,6 +786,19 @@ export class SurveyVersionsService {
               id: true,
             },
           },
+
+          _count: {
+            select: {
+              evaluation_participants:
+                true,
+
+              assessment_drafts:
+                true,
+
+              responses:
+                true,
+            },
+          },
         },
       });
 
@@ -457,10 +810,15 @@ export class SurveyVersionsService {
 
     if (
       version.status !== 'DRAFT' ||
-      version.evaluations.length > 0
+      version.evaluations.length > 0 ||
+      version._count
+        .evaluation_participants > 0 ||
+      version._count
+        .assessment_drafts > 0 ||
+      version._count.responses > 0
     ) {
       throw new ConflictException(
-        'This survey version is locked and its questions cannot be changed',
+        'This survey version is locked or already referenced by participant history and its questions cannot be changed',
       );
     }
 

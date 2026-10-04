@@ -3,7 +3,11 @@ import {
   ConflictException,
   Injectable,
 } from '@nestjs/common';
-import { question_type, questions } from '@prisma/client';
+import {
+  question_type,
+  questions,
+} from '@prisma/client';
+
 import { PrismaService } from '../prisma/prisma.service';
 import { StudentAccessService } from '../student-access/student-access.service';
 import {
@@ -42,67 +46,164 @@ export class SubmissionsService {
     studentId: bigint,
     dto: SubmitResponseDto,
   ) {
-    // 1. Same eligibility rules as viewing the survey.
-    const { evaluation, participant } =
+    /*
+     * 1. Apply the same access rules used when viewing the
+     * questionnaire.
+     *
+     * effectiveSurveyVersionId is participant-specific.
+     * For historical participant rows whose version is NULL,
+     * StudentAccessService falls back to the evaluation's base
+     * survey version.
+     */
+    const {
+      participant,
+      effectiveSurveyVersionId,
+    } =
       await this.studentAccess.getAnswerableEvaluation(
         evaluationId,
         studentId,
       );
 
-    // 2. Load all questions and their selectable options.
-    const questionList = await this.prisma.questions.findMany({
-      where: {
-        survey_version_id: evaluation.survey_version_id,
-      },
-      include: {
-        question_options: true,
-      },
-    });
+    /*
+     * 2. Load questions only from the exact version currently
+     * assigned to this participant.
+     */
+    const questionList =
+      await this.prisma.questions.findMany({
+        where: {
+          survey_version_id:
+            effectiveSurveyVersionId,
+        },
+        include: {
+          question_options: true,
+        },
+      });
 
-    // 3. Validate every answer before any write.
+    /*
+     * 3. Validate every answer before any database write.
+     */
     const answersToSave = this.buildAnswers(
       questionList,
       dto.answers,
     );
 
-    // 4. All or nothing.
+    /*
+     * 4. Final submission is all-or-nothing.
+     */
     const day = startOfUtcDay(new Date());
 
     await this.prisma.$transaction(async (tx) => {
-      // Re-check the evaluation is still open.
-      const current = await tx.evaluations.findUnique({
-        where: {
-          id: evaluationId,
-        },
-        select: {
-          status: true,
-          start_at: true,
-          end_at: true,
-        },
-      });
+      /*
+       * Re-check the evaluation lifecycle inside the transaction.
+       *
+       * The evaluation could have been closed after the first
+       * StudentAccessService check but before this transaction.
+       */
+      const currentEvaluation =
+        await tx.evaluations.findUnique({
+          where: {
+            id: evaluationId,
+          },
+          select: {
+            status: true,
+            start_at: true,
+            end_at: true,
+            survey_version_id: true,
+          },
+        });
 
       const now = new Date();
 
       if (
-        !current ||
-        current.status !== 'OPEN' ||
-        !current.start_at ||
-        !current.end_at ||
-        now < current.start_at ||
-        now >= current.end_at
+        !currentEvaluation ||
+        currentEvaluation.status !== 'OPEN' ||
+        !currentEvaluation.start_at ||
+        !currentEvaluation.end_at ||
+        now < currentEvaluation.start_at ||
+        now >= currentEvaluation.end_at
       ) {
         throw new ConflictException(
           'This evaluation is not open',
         );
       }
 
-      // Mark as submitted ONLY if not already submitted.
-      // This protects against double-clicks / concurrent submissions.
+      /*
+       * Re-read the participant inside the transaction.
+       *
+       * This protects against a participant/version change between
+       * initial questionnaire validation and the final write.
+       */
+      const currentParticipant =
+        await tx.evaluation_participants.findUnique({
+          where: {
+            id: participant.id,
+          },
+          select: {
+            id: true,
+            evaluation_id: true,
+            student_id: true,
+            survey_version_id: true,
+            has_submitted: true,
+          },
+        });
+
+      if (
+        !currentParticipant ||
+        currentParticipant.evaluation_id !==
+          evaluationId ||
+        currentParticipant.student_id !== studentId
+      ) {
+        throw new ConflictException(
+          'You are no longer eligible for this evaluation',
+        );
+      }
+
+      if (currentParticipant.has_submitted) {
+        throw new ConflictException(
+          'You have already submitted this evaluation',
+        );
+      }
+
+      /*
+       * NULL participant survey_version_id means a historical
+       * participant that still uses the evaluation's base version.
+       */
+      const currentEffectiveSurveyVersionId =
+        currentParticipant.survey_version_id ??
+        currentEvaluation.survey_version_id;
+
+      /*
+       * Do not accept answers validated against an old version if
+       * the participant was moved to another version before the
+       * transaction started.
+       */
+      if (
+        currentEffectiveSurveyVersionId !==
+        effectiveSurveyVersionId
+      ) {
+        throw new ConflictException(
+          'The questionnaire version changed before submission. Please reload the evaluation before submitting.',
+        );
+      }
+
+      /*
+       * Mark as submitted only if the participant is still
+       * unsubmitted AND still has the same participant-level
+       * version state that we just checked.
+       *
+       * Including survey_version_id in updateMany protects against
+       * a concurrent version change between the participant read
+       * and this update.
+       *
+       * Prisma treats null explicitly here for historical rows.
+       */
       const marked =
         await tx.evaluation_participants.updateMany({
           where: {
             id: participant.id,
             has_submitted: false,
+            survey_version_id:
+              currentParticipant.survey_version_id,
           },
           data: {
             has_submitted: true,
@@ -112,15 +213,24 @@ export class SubmissionsService {
 
       if (marked.count === 0) {
         throw new ConflictException(
-          'You have already submitted this evaluation',
+          'The evaluation assignment changed or was already submitted. Please reload the evaluation.',
         );
       }
 
-      // Anonymous response:
-      // intentionally no student_id and no participant_id.
+      /*
+       * Anonymous response:
+       *
+       * There is intentionally no student_id and no participant_id.
+       * survey_version_id records only which questionnaire version
+       * produced this anonymous response.
+       */
       const response = await tx.responses.create({
         data: {
           evaluation_id: evaluationId,
+
+          survey_version_id:
+            effectiveSurveyVersionId,
+
           submitted_at: day,
           created_at: day,
         },
@@ -136,14 +246,20 @@ export class SubmissionsService {
         const answer = await tx.answers.create({
           data: {
             response_id: response.id,
-            question_id: answerToSave.question_id,
-            rating_value: answerToSave.rating_value,
-            text_value: answerToSave.text_value,
+            question_id:
+              answerToSave.question_id,
+            rating_value:
+              answerToSave.rating_value,
+            text_value:
+              answerToSave.text_value,
             created_at: day,
           },
         });
 
-        if (answerToSave.selected_option_ids.length > 0) {
+        if (
+          answerToSave.selected_option_ids
+            .length > 0
+        ) {
           await tx.answer_options.createMany({
             data: answerToSave.selected_option_ids.map(
               (optionId) => ({
@@ -159,8 +275,14 @@ export class SubmissionsService {
        * The final response is now safely stored anonymously.
        *
        * Remove the identifiable unfinished draft in the SAME
-       * transaction. If any part of this transaction fails,
-       * Prisma rolls everything back and the draft remains.
+       * transaction.
+       *
+       * If any part of this transaction fails, Prisma rolls
+       * everything back, so:
+       *
+       * - the participant remains unsubmitted;
+       * - no partial response remains;
+       * - the saved draft remains.
        */
       await tx.assessment_drafts.deleteMany({
         where: {
@@ -171,8 +293,11 @@ export class SubmissionsService {
 
     return {
       evaluation_id: evaluationId,
+      survey_version_id:
+        effectiveSurveyVersionId,
       submitted: true,
-      message: 'Evaluation submitted successfully.',
+      message:
+        'Evaluation submitted successfully.',
     };
   }
 
@@ -200,7 +325,10 @@ export class SubmissionsService {
     const toSave: AnswerToSave[] = [];
 
     for (const answer of answers) {
-      const key = BigInt(answer.question_id).toString();
+      const key = BigInt(
+        answer.question_id,
+      ).toString();
+
       const question = byId.get(key);
 
       if (!question) {
@@ -224,7 +352,9 @@ export class SubmissionsService {
             question.display_order,
           );
 
-          if (answer.rating_value === undefined) {
+          if (
+            answer.rating_value === undefined
+          ) {
             break;
           }
 
@@ -235,7 +365,8 @@ export class SubmissionsService {
 
           toSave.push({
             question_id: question.id,
-            rating_value: answer.rating_value,
+            rating_value:
+              answer.rating_value,
             text_value: null,
             selected_option_ids: [],
           });
@@ -249,7 +380,9 @@ export class SubmissionsService {
             question.display_order,
           );
 
-          if (answer.rating_value === undefined) {
+          if (
+            answer.rating_value === undefined
+          ) {
             break;
           }
 
@@ -264,7 +397,8 @@ export class SubmissionsService {
 
           toSave.push({
             question_id: question.id,
-            rating_value: answer.rating_value,
+            rating_value:
+              answer.rating_value,
             text_value: null,
             selected_option_ids: [],
           });
@@ -272,19 +406,25 @@ export class SubmissionsService {
           break;
 
         case question_type.TEXT: {
-          if (answer.rating_value !== undefined) {
+          if (
+            answer.rating_value !== undefined
+          ) {
             throw new BadRequestException(
               `Question ${question.display_order} takes text, not a rating`,
             );
           }
 
-          if (answer.selected_option_ids !== undefined) {
+          if (
+            answer.selected_option_ids !==
+            undefined
+          ) {
             throw new BadRequestException(
               `Question ${question.display_order} takes text, not selected options`,
             );
           }
 
-          const text = answer.text_value?.trim();
+          const text =
+            answer.text_value?.trim();
 
           // Empty optional text = unanswered.
           if (!text) {
@@ -303,22 +443,30 @@ export class SubmissionsService {
 
         case question_type.MULTIPLE_CHOICE:
         case question_type.CHECKBOX: {
-          if (answer.rating_value !== undefined) {
+          if (
+            answer.rating_value !== undefined
+          ) {
             throw new BadRequestException(
               `Question ${question.display_order} takes selected options, not a rating`,
             );
           }
 
-          if (answer.text_value !== undefined) {
+          if (
+            answer.text_value !== undefined
+          ) {
             throw new BadRequestException(
               `Question ${question.display_order} takes selected options, not text`,
             );
           }
 
-          const selected = answer.selected_option_ids;
+          const selected =
+            answer.selected_option_ids;
 
           // No options = unanswered.
-          if (!selected || selected.length === 0) {
+          if (
+            !selected ||
+            selected.length === 0
+          ) {
             break;
           }
 
@@ -328,7 +476,10 @@ export class SubmissionsService {
             ),
           );
 
-          if (uniqueIds.size !== selected.length) {
+          if (
+            uniqueIds.size !==
+            selected.length
+          ) {
             throw new BadRequestException(
               `Question ${question.display_order} contains duplicate selected options`,
             );
@@ -345,18 +496,21 @@ export class SubmissionsService {
           }
 
           const validOptionIds = new Set(
-            question.question_options.map((option) =>
-              option.id.toString(),
+            question.question_options.map(
+              (option) =>
+                option.id.toString(),
             ),
           );
 
-          const selectedIds = selected.map((id) =>
-            BigInt(id),
+          const selectedIds = selected.map(
+            (id) => BigInt(id),
           );
 
           for (const optionId of selectedIds) {
             if (
-              !validOptionIds.has(optionId.toString())
+              !validOptionIds.has(
+                optionId.toString(),
+              )
             ) {
               throw new BadRequestException(
                 `Option ${optionId.toString()} does not belong to question ${question.display_order}`,
@@ -368,7 +522,8 @@ export class SubmissionsService {
             question_id: question.id,
             rating_value: null,
             text_value: null,
-            selected_option_ids: selectedIds,
+            selected_option_ids:
+              selectedIds,
           });
 
           break;
@@ -381,7 +536,10 @@ export class SubmissionsService {
       }
     }
 
-    // Check all required questions after validating submitted answers.
+    /*
+     * Check all required questions after validating submitted
+     * answers.
+     */
     const answered = new Set(
       toSave.map((answer) =>
         answer.question_id.toString(),
@@ -391,12 +549,17 @@ export class SubmissionsService {
     const missing = questionList.filter(
       (question) =>
         question.is_required &&
-        !answered.has(question.id.toString()),
+        !answered.has(
+          question.id.toString(),
+        ),
     );
 
     if (missing.length > 0) {
       const numbers = missing
-        .map((question) => question.display_order)
+        .map(
+          (question) =>
+            question.display_order,
+        )
         .join(', ');
 
       throw new BadRequestException(
@@ -434,7 +597,9 @@ export class SubmissionsService {
       );
     }
 
-    if (answer.selected_option_ids !== undefined) {
+    if (
+      answer.selected_option_ids !== undefined
+    ) {
       throw new BadRequestException(
         `Question ${displayOrder} takes a rating, not selected options`,
       );

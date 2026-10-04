@@ -7,7 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
 model answers {
   id             BigInt           @id @default(autoincrement())
   response_id    BigInt
@@ -22,7 +21,6 @@ model answers {
   @@unique([response_id, question_id], map: "answers_response_id_question_id_idx")
 }
 
-/// Stores selected options for MULTIPLE_CHOICE and CHECKBOX answers.
 model answer_options {
   answer_id BigInt
   option_id BigInt
@@ -33,32 +31,33 @@ model answer_options {
   @@id([answer_id, option_id])
 }
 
-/// Stores a student's temporary unfinished evaluation answers.
-/// The draft is identifiable while editing, but the final response remains anonymous.
 model assessment_drafts {
-  id             BigInt   @id @default(autoincrement())
-  participant_id BigInt   @unique
-  answers_json   Json
-  created_at     DateTime @db.Timestamp(6)
-  updated_at     DateTime @db.Timestamp(6)
+  id                BigInt   @id @default(autoincrement())
+  participant_id    BigInt   @unique
+  survey_version_id BigInt?
+  answers_json      Json
+  created_at        DateTime @db.Timestamp(6)
+  updated_at        DateTime @db.Timestamp(6)
 
   evaluation_participants evaluation_participants @relation(fields: [participant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  survey_versions         survey_versions?        @relation("DraftSurveyVersion", fields: [survey_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
-/// NEW: Independently managed academic years.
 model academic_years {
   id         BigInt    @id @default(autoincrement())
   name       String    @unique @db.VarChar(20)
+  start_year Int?
   start_date DateTime? @db.Date
   end_date   DateTime? @db.Date
   is_active  Boolean   @default(false)
   created_at DateTime  @default(now()) @db.Timestamp(6)
   updated_at DateTime  @updatedAt @db.Timestamp(6)
 
-  semesters semesters[]
+  semesters                semesters[]
+  student_generations      student_generations[]
+  student_academic_records student_academic_records[]
 }
 
-/// NEW: Departments such as AMS.
 model departments {
   id         BigInt            @id @default(autoincrement())
   code       String            @unique @db.VarChar(30)
@@ -69,9 +68,9 @@ model departments {
 
   user_departments user_departments[]
   courses          courses[]
+  majors           majors[]
 }
 
-/// NEW: Many-to-many relationship between users and departments.
 model user_departments {
   user_id       BigInt
   department_id BigInt
@@ -84,180 +83,282 @@ model user_departments {
   @@id([user_id, department_id])
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
+model majors {
+  id            BigInt   @id @default(autoincrement())
+  code          String   @unique @db.VarChar(30)
+  name          String   @db.VarChar(150)
+  department_id BigInt
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+  updated_at    DateTime @updatedAt @db.Timestamp(6)
+
+  departments              departments                @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  student_academic_records student_academic_records[]
+  course_year_rules        course_year_rules[]
+
+  @@unique([department_id, name], map: "majors_department_id_name_idx")
+}
+
+model student_generations {
+  id                     BigInt   @id @default(autoincrement())
+  name                   String   @unique @db.VarChar(100)
+  entry_academic_year_id BigInt
+  starting_year_level    Int      @default(1)
+  created_at             DateTime @default(now()) @db.Timestamp(6)
+  updated_at             DateTime @updatedAt @db.Timestamp(6)
+
+  entry_academic_year academic_years                  @relation(fields: [entry_academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  students            students[]
+  evaluation_targets  evaluation_generation_targets[]
+}
+
+model students {
+  id            BigInt   @id @default(autoincrement())
+  user_id       BigInt   @unique
+  student_code  String   @unique @db.VarChar(50)
+  generation_id BigInt
+  notes         String?
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+  updated_at    DateTime @updatedAt @db.Timestamp(6)
+
+  users                    users                      @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  student_generations      student_generations        @relation(fields: [generation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  student_academic_records student_academic_records[]
+}
+
+model student_academic_records {
+  id               BigInt   @id @default(autoincrement())
+  student_id       BigInt
+  academic_year_id BigInt
+  year_level       Int
+  major_id         BigInt
+  class_group      String?  @db.VarChar(50)
+  created_at       DateTime @default(now()) @db.Timestamp(6)
+  updated_at       DateTime @updatedAt @db.Timestamp(6)
+
+  students       students       @relation(fields: [student_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  academic_years academic_years @relation(fields: [academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  majors         majors         @relation(fields: [major_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([student_id, academic_year_id], map: "student_academic_records_student_id_academic_year_id_idx")
+}
+
 model course_offerings {
-  id           BigInt        @id @default(autoincrement())
+  id           BigInt      @id @default(autoincrement())
   course_id    BigInt
   lecturer_id  BigInt
   semester_id  BigInt
-  section_code String?       @db.VarChar(50)
-  created_at   DateTime      @db.Timestamp(6)
-  updated_at   DateTime      @db.Timestamp(6)
-  courses      courses       @relation(fields: [course_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  users        users         @relation(fields: [lecturer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  semesters    semesters     @relation(fields: [semester_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  enrollments  enrollments[]
-  evaluations  evaluations[]
+  year_level   Int?
+  class_type   class_type?
+  section_code String?     @db.VarChar(50)
+  created_at   DateTime    @db.Timestamp(6)
+  updated_at   DateTime    @db.Timestamp(6)
 
-  @@unique([course_id, lecturer_id, semester_id, section_code], map: "course_offerings_course_id_lecturer_id_semester_id_section__idx")
+  courses     courses       @relation(fields: [course_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users       users         @relation(fields: [lecturer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  semesters   semesters     @relation(fields: [semester_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  enrollments enrollments[]
+  evaluations evaluations[]
+
+  @@unique([course_id, lecturer_id, semester_id, year_level, class_type, section_code], map: "course_offerings_assignment_unique_idx")
 }
 
-/// UPDATED: Every course belongs to one department.
 model courses {
-  id               BigInt             @id @default(autoincrement())
-  course_code      String             @unique @db.VarChar(30)
-  course_name      String             @db.VarChar(150)
-  description      String?
-  department_id    BigInt
-  created_at       DateTime           @db.Timestamp(6)
-  updated_at       DateTime           @db.Timestamp(6)
-  departments      departments        @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  course_offerings course_offerings[]
+  id            BigInt   @id @default(autoincrement())
+  course_code   String   @unique @db.VarChar(30)
+  course_name   String   @db.VarChar(150)
+  description   String?
+  department_id BigInt
+  created_at    DateTime @db.Timestamp(6)
+  updated_at    DateTime @db.Timestamp(6)
+
+  departments       departments         @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  course_offerings  course_offerings[]
+  course_year_rules course_year_rules[]
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
+model course_year_rules {
+  id         BigInt   @id @default(autoincrement())
+  course_id  BigInt
+  major_id   BigInt
+  year_level Int
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  updated_at DateTime @updatedAt @db.Timestamp(6)
+
+  courses courses @relation(fields: [course_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  majors  majors  @relation(fields: [major_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([course_id, major_id, year_level], map: "course_year_rules_course_major_year_idx")
+}
+
 model enrollments {
-  id                 BigInt           @id @default(autoincrement())
+  id                 BigInt   @id @default(autoincrement())
   student_id         BigInt
   course_offering_id BigInt
-  enrolled_at        DateTime         @db.Timestamp(6)
-  course_offerings   course_offerings @relation(fields: [course_offering_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  users              users            @relation(fields: [student_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  enrolled_at        DateTime @db.Timestamp(6)
+
+  course_offerings course_offerings @relation(fields: [course_offering_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users            users            @relation(fields: [student_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([student_id, course_offering_id], map: "enrollments_student_id_course_offering_id_idx")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
 model evaluation_participants {
-  id                BigInt             @id @default(autoincrement())
+  id                BigInt    @id @default(autoincrement())
   evaluation_id     BigInt
   student_id        BigInt
-  has_submitted     Boolean            @default(false)
-  submitted_at      DateTime?          @db.Timestamp(6)
-  created_at        DateTime           @db.Timestamp(6)
+  survey_version_id BigInt?
+  has_submitted     Boolean   @default(false)
+  submitted_at      DateTime? @db.Timestamp(6)
+  created_at        DateTime  @db.Timestamp(6)
+
   evaluations       evaluations        @relation(fields: [evaluation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   users             users              @relation(fields: [student_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  survey_versions   survey_versions?   @relation("ParticipantSurveyVersion", fields: [survey_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   assessment_drafts assessment_drafts?
 
   @@unique([evaluation_id, student_id], map: "evaluation_participants_evaluation_id_student_id_idx")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
 model evaluations {
-  id                      BigInt                    @id @default(autoincrement())
-  course_offering_id      BigInt
-  survey_version_id       BigInt
-  status                  evaluation_status         @default(DRAFT)
-  start_at                DateTime?                 @db.Timestamp(6)
-  end_at                  DateTime?                 @db.Timestamp(6)
-  created_by              BigInt
-  created_at              DateTime                  @db.Timestamp(6)
-  updated_at              DateTime                  @db.Timestamp(6)
+  id                 BigInt                       @id @default(autoincrement())
+  course_offering_id BigInt
+  survey_version_id  BigInt
+  participant_scope  evaluation_participant_scope @default(ALL_ENROLLED)
+  status             evaluation_status            @default(DRAFT)
+  start_at           DateTime?                    @db.Timestamp(6)
+  end_at             DateTime?                    @db.Timestamp(6)
+  created_by         BigInt
+  created_at         DateTime                     @db.Timestamp(6)
+  updated_at         DateTime                     @db.Timestamp(6)
+
   evaluation_participants evaluation_participants[]
-  course_offerings        course_offerings          @relation(fields: [course_offering_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  users                   users                     @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  survey_versions         survey_versions           @relation(fields: [survey_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  generation_targets      evaluation_generation_targets[]
+  course_offerings        course_offerings                @relation(fields: [course_offering_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                   users                           @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  survey_versions         survey_versions                 @relation(fields: [survey_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   responses               responses[]
 
   @@unique([course_offering_id, survey_version_id], map: "evaluations_course_offering_id_survey_version_id_idx")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
+model evaluation_generation_targets {
+  evaluation_id BigInt
+  generation_id BigInt
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+
+  evaluations         evaluations         @relation(fields: [evaluation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  student_generations student_generations @relation(fields: [generation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([evaluation_id, generation_id])
+}
+
 model questions {
-  id                BigInt             @id @default(autoincrement())
+  id                BigInt        @id @default(autoincrement())
   survey_version_id BigInt
   question_text     String
   question_text_km  String?
   question_type     question_type
-  category          String?            @db.VarChar(100)
-  is_required       Boolean            @default(true)
+  category          String?       @db.VarChar(100)
+  is_required       Boolean       @default(true)
   min_rating        Int?
   max_rating        Int?
   display_order     Int
-  created_at        DateTime           @db.Timestamp(6)
-  updated_at        DateTime           @db.Timestamp(6)
-  answers           answers[]
-  question_options  question_options[]
-  survey_versions   survey_versions    @relation(fields: [survey_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  created_at        DateTime      @db.Timestamp(6)
+  updated_at        DateTime      @db.Timestamp(6)
+
+  answers          answers[]
+  question_options question_options[]
+  survey_versions  survey_versions    @relation(fields: [survey_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([survey_version_id, display_order], map: "questions_survey_version_id_display_order_idx")
 }
 
-/// Stores options for MULTIPLE_CHOICE and CHECKBOX questions.
 model question_options {
-  id             BigInt           @id @default(autoincrement())
-  question_id    BigInt
-  option_text    String
-  display_order  Int
+  id            BigInt @id @default(autoincrement())
+  question_id   BigInt
+  option_text   String
+  display_order Int
+
   questions      questions        @relation(fields: [question_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   answer_options answer_options[]
 
   @@unique([question_id, display_order], map: "question_options_question_id_display_order_idx")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
 model responses {
-  id            BigInt      @id @default(autoincrement())
-  evaluation_id BigInt
-  submitted_at  DateTime    @db.Timestamp(6)
-  created_at    DateTime    @db.Timestamp(6)
-  answers       answers[]
-  evaluations   evaluations @relation(fields: [evaluation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id                BigInt   @id @default(autoincrement())
+  evaluation_id     BigInt
+  survey_version_id BigInt?
+  submitted_at      DateTime @db.Timestamp(6)
+  created_at        DateTime @db.Timestamp(6)
+
+  answers         answers[]
+  evaluations     evaluations      @relation(fields: [evaluation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  survey_versions survey_versions? @relation("ResponseSurveyVersion", fields: [survey_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
-/// UPDATED: academic_year text is now an AcademicYear relationship.
 model semesters {
-  id               BigInt             @id @default(autoincrement())
-  semester_name    String             @db.VarChar(50)
+  id               BigInt    @id @default(autoincrement())
+  semester_name    String    @db.VarChar(50)
+  semester_number  Int?
   academic_year_id BigInt
-  start_date       DateTime?          @db.Date
-  end_date         DateTime?          @db.Date
-  created_at       DateTime           @db.Timestamp(6)
-  updated_at       DateTime           @db.Timestamp(6)
+  start_date       DateTime? @db.Date
+  end_date         DateTime? @db.Date
+  created_at       DateTime  @db.Timestamp(6)
+  updated_at       DateTime  @db.Timestamp(6)
+
   academic_years   academic_years     @relation(fields: [academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   course_offerings course_offerings[]
 
   @@unique([academic_year_id, semester_name], map: "semesters_academic_year_id_semester_name_idx")
+  @@unique([academic_year_id, semester_number], map: "semesters_academic_year_id_semester_number_idx")
 }
 
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations.
 model surveys {
-  id              BigInt            @id @default(autoincrement())
-  title           String            @db.VarChar(200)
-  description     String?
-  created_by      BigInt
-  created_at      DateTime          @db.Timestamp(6)
-  updated_at      DateTime          @db.Timestamp(6)
+  id          BigInt    @id @default(autoincrement())
+  title       String    @db.VarChar(200)
+  description String?
+  archived_at DateTime? @db.Timestamp(6)
+  created_by  BigInt
+  created_at  DateTime  @db.Timestamp(6)
+  updated_at  DateTime  @db.Timestamp(6)
+
   survey_versions survey_versions[]
   users           users             @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
 model survey_versions {
-  id          BigInt                @id @default(autoincrement())
-  survey_id   BigInt
-  version_no  Int
-  status      survey_version_status @default(DRAFT)
-  locked_at   DateTime?
-  created_by  BigInt
-  created_at  DateTime              @db.Timestamp(6)
-  surveys     surveys               @relation(fields: [survey_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  users       users                 @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  questions   questions[]
-  evaluations evaluations[]
+  id         BigInt                @id @default(autoincrement())
+  survey_id  BigInt
+  version_no Int
+  status     survey_version_status @default(DRAFT)
+  locked_at  DateTime?
+  created_by BigInt
+  created_at DateTime              @db.Timestamp(6)
+
+  surveys                 surveys                   @relation(fields: [survey_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                   users                     @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  questions               questions[]
+  evaluations             evaluations[]
+  evaluation_participants evaluation_participants[] @relation("ParticipantSurveyVersion")
+  assessment_drafts       assessment_drafts[]       @relation("DraftSurveyVersion")
+  responses               responses[]               @relation("ResponseSurveyVersion")
 
   @@unique([survey_id, version_no], map: "survey_versions_survey_id_version_no_idx")
 }
 
-/// UPDATED: users can belong to multiple departments.
 model users {
-  id                      BigInt                    @id @default(autoincrement())
-  email                   String                    @unique @db.VarChar(255)
-  password_hash           String                    @db.VarChar(255)
-  full_name               String                    @db.VarChar(150)
-  role                    user_role
-  status                  user_status               @default(ACTIVE)
-  created_at              DateTime                  @db.Timestamp(6)
-  updated_at              DateTime                  @db.Timestamp(6)
+  id            BigInt      @id @default(autoincrement())
+  email         String?     @unique @db.VarChar(255)
+  password_hash String      @db.VarChar(255)
+  full_name     String      @db.VarChar(150)
+  gender        gender?
+  role          user_role
+  status        user_status @default(ACTIVE)
+  auth_version  Int         @default(0)
+  created_at    DateTime    @db.Timestamp(6)
+  updated_at    DateTime    @db.Timestamp(6)
+
   course_offerings        course_offerings[]
   enrollments             enrollments[]
   evaluation_participants evaluation_participants[]
@@ -265,12 +366,24 @@ model users {
   surveys                 surveys[]
   survey_versions         survey_versions[]
   user_departments        user_departments[]
+  student                 students?
 }
 
 enum evaluation_status {
   DRAFT
   OPEN
   CLOSED
+}
+
+enum evaluation_participant_scope {
+  ALL_ENROLLED
+  SELECTED_GENERATIONS
+}
+
+enum class_type {
+  COURSE
+  TD
+  TP
 }
 
 enum question_type {
@@ -299,8 +412,13 @@ enum survey_version_status {
   ARCHIVED
 }
 
-/// NEW
 enum department_status {
   ACTIVE
   INACTIVE
+}
+
+enum gender {
+  MALE
+  FEMALE
+  OTHER
 }

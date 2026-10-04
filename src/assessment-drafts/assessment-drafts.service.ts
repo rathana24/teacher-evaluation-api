@@ -9,6 +9,7 @@ import {
   question_type,
   questions,
 } from '@prisma/client';
+
 import { PrismaService } from '../prisma/prisma.service';
 import { StudentAccessService } from '../student-access/student-access.service';
 import {
@@ -43,17 +44,24 @@ export class AssessmentDraftsService {
    * Save a new draft or replace the student's existing draft.
    *
    * Drafts may be incomplete, but every answer that is present
-   * must be valid for the evaluation's survey.
+   * must be valid for the participant's effective survey version.
    *
    * One participant can have only one draft because
    * assessment_drafts.participant_id is unique.
+   *
+   * The draft also stores the exact survey version used when
+   * its answers were validated. This prevents saved answers
+   * from being silently reinterpreted against another version.
    */
   async save(
     evaluationId: bigint,
     studentId: bigint,
     dto: SaveAssessmentDraftDto,
   ) {
-    const { evaluation, participant } =
+    const {
+      participant,
+      effectiveSurveyVersionId,
+    } =
       await this.studentAccess.getAnswerableEvaluation(
         evaluationId,
         studentId,
@@ -65,11 +73,50 @@ export class AssessmentDraftsService {
       );
     }
 
+    /*
+     * If a historical draft already exists, make sure that it
+     * belongs to the participant's current effective version.
+     *
+     * A NULL survey_version_id represents a draft created before
+     * draft-version tracking was introduced. We do not silently
+     * attach or reinterpret such a draft here.
+     */
+    const existingDraft =
+      await this.prisma.assessment_drafts.findUnique({
+        where: {
+          participant_id: participant.id,
+        },
+        select: {
+          id: true,
+          survey_version_id: true,
+        },
+      });
+
+    if (
+      existingDraft &&
+      existingDraft.survey_version_id !== null &&
+      existingDraft.survey_version_id !==
+        effectiveSurveyVersionId
+    ) {
+      throw new ConflictException(
+        'The saved draft belongs to a different survey version and cannot be overwritten automatically',
+      );
+    }
+
+    if (
+      existingDraft &&
+      existingDraft.survey_version_id === null
+    ) {
+      throw new ConflictException(
+        'The saved draft was created before survey-version tracking and must be reviewed before it can be updated',
+      );
+    }
+
     const questionList =
       await this.prisma.questions.findMany({
         where: {
           survey_version_id:
-            evaluation.survey_version_id,
+            effectiveSurveyVersionId,
         },
         include: {
           question_options: true,
@@ -87,16 +134,21 @@ export class AssessmentDraftsService {
     const answersJson =
       validatedAnswers.map((answer) => ({
         question_id: answer.question_id,
+
         ...(answer.rating_value !== undefined
           ? {
-              rating_value: answer.rating_value,
+              rating_value:
+                answer.rating_value,
             }
           : {}),
+
         ...(answer.text_value !== undefined
           ? {
-              text_value: answer.text_value,
+              text_value:
+                answer.text_value,
             }
           : {}),
+
         ...(answer.selected_option_ids !== undefined
           ? {
               selected_option_ids:
@@ -110,12 +162,21 @@ export class AssessmentDraftsService {
         where: {
           participant_id: participant.id,
         },
+
         update: {
+          survey_version_id:
+            effectiveSurveyVersionId,
+
           answers_json: answersJson,
           updated_at: now,
         },
+
         create: {
           participant_id: participant.id,
+
+          survey_version_id:
+            effectiveSurveyVersionId,
+
           answers_json: answersJson,
           created_at: now,
           updated_at: now,
@@ -124,8 +185,16 @@ export class AssessmentDraftsService {
 
     return {
       evaluation_id: evaluationId,
+
+      survey_version_id:
+        effectiveSurveyVersionId,
+
       draft: {
         id: draft.id,
+
+        survey_version_id:
+          draft.survey_version_id,
+
         answers: draft.answers_json,
         created_at: draft.created_at,
         updated_at: draft.updated_at,
@@ -135,12 +204,18 @@ export class AssessmentDraftsService {
 
   /**
    * Load the current student's saved draft.
+   *
+   * The saved draft must belong to the same effective survey
+   * version that the participant is currently allowed to answer.
    */
   async findMyDraft(
     evaluationId: bigint,
     studentId: bigint,
   ) {
-    const { participant } =
+    const {
+      participant,
+      effectiveSurveyVersionId,
+    } =
       await this.studentAccess.getAnswerableEvaluation(
         evaluationId,
         studentId,
@@ -159,10 +234,42 @@ export class AssessmentDraftsService {
       );
     }
 
+    /*
+     * Do not silently reinterpret an old draft whose exact
+     * version was never recorded.
+     */
+    if (draft.survey_version_id === null) {
+      throw new ConflictException(
+        'The saved draft was created before survey-version tracking and cannot be loaded automatically',
+      );
+    }
+
+    /*
+     * A participant may later become eligible for a newer version.
+     * If that happens, the old draft must not be interpreted using
+     * the newer question IDs/options.
+     */
+    if (
+      draft.survey_version_id !==
+      effectiveSurveyVersionId
+    ) {
+      throw new ConflictException(
+        'The saved draft belongs to a different survey version and cannot be loaded automatically',
+      );
+    }
+
     return {
       evaluation_id: evaluationId,
+
+      survey_version_id:
+        effectiveSurveyVersionId,
+
       draft: {
         id: draft.id,
+
+        survey_version_id:
+          draft.survey_version_id,
+
         answers: draft.answers_json,
         created_at: draft.created_at,
         updated_at: draft.updated_at,
@@ -172,6 +279,9 @@ export class AssessmentDraftsService {
 
   /**
    * Delete the current student's saved draft.
+   *
+   * Access is rechecked before deletion. Deleting the draft is
+   * explicit; no version-update process silently removes it.
    */
   async remove(
     evaluationId: bigint,
@@ -199,6 +309,7 @@ export class AssessmentDraftsService {
     return {
       evaluation_id: evaluationId,
       deleted: true,
+
       message:
         'Assessment draft deleted successfully.',
     };
@@ -222,6 +333,7 @@ export class AssessmentDraftsService {
     );
 
     const seenQuestionIds = new Set<string>();
+
     const validatedAnswers: ValidatedDraftAnswer[] =
       [];
 
