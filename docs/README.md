@@ -1,114 +1,167 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Teacher Evaluation API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Backend API for an academic teaching-evaluation system. It supports administration of academic structure and teaching assignments, student enrollment and placement, versioned evaluation questionnaires, exact participant targeting, anonymous student submissions, and lecturer/admin result access.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Core stack
 
-## Description
+- NestJS 12
+- TypeScript
+- Prisma ORM
+- PostgreSQL
+- JWT + Passport
+- Swagger / OpenAPI
+- Jest + Supertest
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Roles
 
-## Project setup
+### ADMIN
+Manages academic structure, users/students, placements, curriculum rules, courses, offerings, group scopes, enrollments, surveys, questions, evaluations, imports/exports, and administrative results.
 
-```bash
-$ npm install
+### LECTURER
+Views owned teaching assignments/evaluations and anonymous aggregate results/comments.
+
+### STUDENT
+Views assigned evaluations, manages an unfinished draft, submits once, and views evaluation history/status.
+
+## Main backend flow
+
+```text
+Academic Setup
+    ↓
+Student Placement + Course Curriculum
+    ↓
+Course Offering + Explicit Group Scope
+    ↓
+Enrollment Preview → Exact Confirmation
+    ↓
+Survey → Version → Questions
+    ↓
+Evaluation Participant Preview → Exact Confirmation
+    ↓
+Frozen Group Targets + Frozen Participants
+    ↓
+DRAFT → OPEN → CLOSED
+    ↓
+Student Draft / Anonymous Submission
+    ↓
+Lecturer / Admin Anonymous Results
 ```
 
-## Compile and run the project
+## Important domain rules
 
-```bash
-# development
-$ npm run start
+- A class group belongs to a student's academic-year placement, not globally to the user.
+- Group labels are scoped by academic year, generation, major, and year context.
+- `section_code` is only a display/section label; explicit group-scope records define offering groups.
+- Enrollment and evaluation bulk selection use preview + exact-ID confirmation.
+- Stale confirmation fails with conflict rather than silently including a changed population.
+- Evaluation group targets and participants are frozen so later placement changes do not rewrite history.
+- Student group changes do not automatically move enrollments or evaluation participants.
+- Survey versions preserve questionnaire history.
+- Completed participants and participants with saved drafts are protected from unsafe survey-version changes.
+- Final responses are anonymous and separated from participant identity.
+- Duplicate final submission is prevented transactionally.
 
-# watch mode
-$ npm run start:dev
+## Main modules
 
-# production mode
-$ npm run start:prod
+```text
+src/
+├── auth/
+├── users/
+├── academic-years/
+├── semesters/
+├── departments/
+├── majors/
+├── student-generations/
+├── students/
+├── student-academic-records/
+├── courses/
+├── course-year-rules/
+├── course-offerings/
+├── enrollments/
+├── surveys/
+├── survey-versions/
+├── questions/
+├── evaluations/
+├── student-access/
+├── assessment-drafts/
+├── submissions/
+├── lecturer-dashboard/
+├── comments/
+└── results/
 ```
 
-## Run tests
+Shared infrastructure includes Prisma, role guards/decorators, BigInt parsing, DTO validation, and class-group normalization.
+
+## Database concepts
+
+Important persisted concepts include:
+
+- users and student profiles;
+- academic years, semesters, departments, majors, generations;
+- student academic records (`year_level`, `major_id`, `class_group`);
+- courses and course-year rules;
+- course offerings and explicit `course_offering_group_scopes`;
+- enrollments;
+- surveys, survey versions, questions/options;
+- evaluations, frozen `evaluation_group_targets`, and evaluation participants;
+- assessment drafts;
+- anonymous responses and answers.
+
+## Setup
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npm install
+npx prisma generate
+npx prisma migrate dev
+npm run start:dev
 ```
 
-## Deployment
+Swagger is served by the application at:
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+```text
+/api/docs
+```
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+## Useful commands
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm run start:dev
+npm run build
+npm run lint
+npm test
+npm run test:e2e
+npm run test:cov
+npx tsc --noEmit
+npx prisma validate
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+The Jest script already includes Node's `--experimental-vm-modules` flag, so targeted tests should be run through `npm test`, for example:
 
-## Observability
+```bash
+npm test -- src/enrollments/enrollments.service.spec.ts --runInBand
+```
 
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
+## Validation baseline
 
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
+The completed backend has been checked with TypeScript compilation, Prisma validation, NestJS build, and the automated test suite.
 
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
+```text
+Test suites: 39 passed
+Tests:       453 passed
+```
 
-## Resources
+## Documentation
 
-Check out a few resources that may come in handy when working with NestJS:
+- `Backend_Requirements.md` — functional requirements and business rules derived from the implemented backend.
+- `README_BACKEND_WORKFLOW.md` — end-to-end operational/domain workflow and module responsibilities.
+- `Assessment_System_Technical_Functional_Documentation.docx` — technical and functional reference for integration, review, and defense preparation.
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observer](https://observer.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+## Design principle
 
-## Support
+The backend favors explicit, reviewable state over implicit inference:
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```text
+Preview → Review exact scope → Confirm → Freeze history
+```
 
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+That principle is used for group enrollment, evaluation participants, group targets, questionnaire history, and protected reassignment.
