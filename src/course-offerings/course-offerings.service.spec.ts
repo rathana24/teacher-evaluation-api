@@ -19,12 +19,18 @@ describe('CourseOfferingsService', () => {
   let courseFindUnique: AsyncMock;
   let userFindUnique: AsyncMock;
   let semesterFindUnique: AsyncMock;
+  let academicYearFindUnique: AsyncMock;
+  let generationFindUnique: AsyncMock;
+  let majorFindUnique: AsyncMock;
   let offeringFindUnique: AsyncMock;
   let offeringFindFirst: AsyncMock;
   let offeringFindMany: AsyncMock;
   let offeringCreate: AsyncMock;
   let offeringUpdate: AsyncMock;
   let offeringDelete: AsyncMock;
+  let groupScopeCreateMany: AsyncMock;
+  let groupScopeDeleteMany: AsyncMock;
+  let transactionResult: unknown;
 
   beforeEach(() => {
     courseFindUnique =
@@ -34,6 +40,15 @@ describe('CourseOfferingsService', () => {
       jest.fn<(...args: any[]) => Promise<any>>();
 
     semesterFindUnique =
+      jest.fn<(...args: any[]) => Promise<any>>();
+
+    academicYearFindUnique =
+      jest.fn<(...args: any[]) => Promise<any>>();
+
+    generationFindUnique =
+      jest.fn<(...args: any[]) => Promise<any>>();
+
+    majorFindUnique =
       jest.fn<(...args: any[]) => Promise<any>>();
 
     offeringFindUnique =
@@ -54,6 +69,14 @@ describe('CourseOfferingsService', () => {
     offeringDelete =
       jest.fn<(...args: any[]) => Promise<any>>();
 
+    groupScopeCreateMany =
+      jest.fn<(...args: any[]) => Promise<any>>();
+
+    groupScopeDeleteMany =
+      jest.fn<(...args: any[]) => Promise<any>>();
+
+    transactionResult = undefined;
+
     const prismaMock = {
       courses: {
         findUnique: courseFindUnique,
@@ -67,6 +90,18 @@ describe('CourseOfferingsService', () => {
         findUnique: semesterFindUnique,
       },
 
+      academic_years: {
+        findUnique: academicYearFindUnique,
+      },
+
+      student_generations: {
+        findUnique: generationFindUnique,
+      },
+
+      majors: {
+        findUnique: majorFindUnique,
+      },
+
       course_offerings: {
         findUnique: offeringFindUnique,
         findFirst: offeringFindFirst,
@@ -75,6 +110,31 @@ describe('CourseOfferingsService', () => {
         update: offeringUpdate,
         delete: offeringDelete,
       },
+
+      $transaction: jest.fn(
+        async (callback: (tx: any) => Promise<any>) =>
+          callback({
+            course_offerings: {
+              create: async (...args: any[]) => {
+                transactionResult =
+                  await offeringCreate(...args);
+                return transactionResult;
+              },
+              update: async (...args: any[]) => {
+                transactionResult =
+                  await offeringUpdate(...args);
+                return transactionResult;
+              },
+              findUniqueOrThrow: async () =>
+                transactionResult,
+              delete: offeringDelete,
+            },
+            course_offering_group_scopes: {
+              createMany: groupScopeCreateMany,
+              deleteMany: groupScopeDeleteMany,
+            },
+          }),
+      ),
     };
 
     service = new CourseOfferingsService(
@@ -115,6 +175,312 @@ describe('CourseOfferingsService', () => {
               },
             }),
             users: expect.any(Object),
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('findOwnedByLecturer', () => {
+    it('returns explicit group scopes separately from section_code', async () => {
+      offeringFindMany.mockResolvedValue([
+        {
+          id: 1n,
+          lecturer_id: 20n,
+          section_code: 'TD-01',
+          year_level: 4,
+          class_type: class_type.TD,
+          group_scopes: [
+            {
+              id: 100n,
+              academic_year_id: 40n,
+              generation_id: 50n,
+              major_id: 60n,
+              year_level: 4,
+              class_group: 'A',
+            },
+            {
+              id: 101n,
+              academic_year_id: 40n,
+              generation_id: 50n,
+              major_id: 60n,
+              year_level: 4,
+              class_group: 'B',
+            },
+          ],
+          evaluations: [],
+        },
+      ]);
+
+      const result =
+        await service.findOwnedByLecturer(
+          20n,
+          {},
+        );
+
+      expect(
+        result.items[0].section_code,
+      ).toBe('TD-01');
+
+      expect(
+        result.items[0].group_scopes,
+      ).toEqual([
+        expect.objectContaining({
+          academic_year_id: 40n,
+          generation_id: 50n,
+          major_id: 60n,
+          year_level: 4,
+          class_group: 'A',
+        }),
+        expect.objectContaining({
+          academic_year_id: 40n,
+          generation_id: 50n,
+          major_id: 60n,
+          year_level: 4,
+          class_group: 'B',
+        }),
+      ]);
+
+      expect(
+        offeringFindMany,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            group_scopes: expect.any(Object),
+          }),
+        }),
+      );
+    });
+
+    it('returns only the authenticated lecturer assignments including offerings with and without evaluations', async () => {
+      const offerings = [
+        {
+          id: 1n,
+          lecturer_id: 20n,
+          year_level: 4,
+          class_type: class_type.COURSE,
+          section_code: 'A',
+          evaluations: [
+            {
+              id: 100n,
+              status: 'OPEN',
+              start_at: new Date(
+                '2026-10-01T00:00:00.000Z',
+              ),
+              end_at: new Date(
+                '2026-10-31T23:59:59.000Z',
+              ),
+              survey_version_id: 101n,
+            },
+          ],
+        },
+        {
+          id: 2n,
+          lecturer_id: 20n,
+          year_level: 4,
+          class_type: class_type.TD,
+          section_code: 'A',
+          evaluations: [],
+        },
+      ];
+
+      offeringFindMany.mockResolvedValue(
+        offerings,
+      );
+
+      const result =
+        await service.findOwnedByLecturer(
+          20n,
+          {},
+        );
+
+      expect(result).toEqual({
+        items: offerings,
+        total: 2,
+        complete: true,
+      });
+
+      expect(
+        result.items[0].evaluations,
+      ).toHaveLength(1);
+
+      expect(
+        result.items[1].evaluations,
+      ).toEqual([]);
+
+      expect(
+        offeringFindMany,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            lecturer_id: 20n,
+          }),
+        }),
+      );
+    });
+
+    it('applies search and assignment filters while preserving lecturer ownership', async () => {
+      offeringFindMany.mockResolvedValue([]);
+
+      await service.findOwnedByLecturer(
+        20n,
+        {
+          search: 'data',
+          academic_year_id: '70',
+          semester_id: '60',
+          year_level: 4,
+          class_type: class_type.TD,
+        },
+      );
+
+      expect(
+        offeringFindMany,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            lecturer_id: 20n,
+            semester_id: 60n,
+            year_level: 4,
+            class_type: class_type.TD,
+
+            semesters: {
+              academic_year_id: 70n,
+            },
+
+            OR: expect.arrayContaining([
+              expect.objectContaining({
+                courses: {
+                  is: {
+                    course_code: {
+                      contains: 'data',
+                      mode: 'insensitive',
+                    },
+                  },
+                },
+              }),
+
+              expect.objectContaining({
+                courses: {
+                  is: {
+                    course_name: {
+                      contains: 'data',
+                      mode: 'insensitive',
+                    },
+                  },
+                },
+              }),
+
+              expect.objectContaining({
+                section_code: {
+                  contains: 'data',
+                  mode: 'insensitive',
+                },
+              }),
+            ]),
+          }),
+        }),
+      );
+    });
+
+    it('ignores blank search text without broadening lecturer ownership', async () => {
+      offeringFindMany.mockResolvedValue([]);
+
+      await service.findOwnedByLecturer(
+        20n,
+        {
+          search: '   ',
+        },
+      );
+
+      expect(
+        offeringFindMany,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            lecturer_id: 20n,
+            OR: undefined,
+          }),
+        }),
+      );
+    });
+
+    it('loads evaluation metadata without requiring an evaluation to exist', async () => {
+      offeringFindMany.mockResolvedValue([]);
+
+      await service.findOwnedByLecturer(
+        20n,
+        {},
+      );
+
+      expect(
+        offeringFindMany,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            courses: true,
+
+            semesters: {
+              include: {
+                academic_years: true,
+              },
+            },
+
+            evaluations: {
+              select: {
+                id: true,
+                status: true,
+                start_at: true,
+                end_at: true,
+                survey_version_id: true,
+
+                group_targets: {
+                  include: {
+                    academic_years: {
+                      select: {
+                        id: true,
+                        name: true,
+                        start_year: true,
+                        is_active: true,
+                      },
+                    },
+
+                    student_generations: {
+                      select: {
+                        id: true,
+                        name: true,
+                      },
+                    },
+
+                    majors: {
+                      select: {
+                        id: true,
+                        code: true,
+                        name: true,
+                      },
+                    },
+                  },
+
+                  orderBy: [
+                    {
+                      generation_id: 'asc',
+                    },
+                    {
+                      major_id: 'asc',
+                    },
+                    {
+                      year_level: 'asc',
+                    },
+                    {
+                      class_group: 'asc',
+                    },
+                  ],
+                },
+              },
+
+              orderBy: {
+                created_at: 'desc',
+              },
+            },
           }),
         }),
       );
@@ -205,7 +571,145 @@ describe('CourseOfferingsService', () => {
       );
     });
 
-    it('allows optional year level and class type to be null', async () => {
+    it('creates explicit normalized group scopes for multiple class groups', async () => {
+      const created = {
+        id: 1n,
+        course_id: 10n,
+        lecturer_id: 20n,
+        semester_id: 30n,
+        section_code: 'TD-01',
+        year_level: 4,
+        class_type: class_type.TD,
+      };
+
+      offeringCreate.mockResolvedValue(created);
+
+      semesterFindUnique.mockResolvedValue({
+        id: 30n,
+        academic_year_id: 40n,
+      });
+
+      academicYearFindUnique.mockResolvedValue({
+        id: 40n,
+      });
+
+      generationFindUnique.mockResolvedValue({
+        id: 50n,
+      });
+
+      majorFindUnique.mockResolvedValue({
+        id: 60n,
+      });
+
+      await service.create({
+        course_id: '10',
+        lecturer_id: '20',
+        semester_id: '30',
+        section_code: 'TD-01',
+        year_level: 4,
+        class_type: class_type.TD,
+        group_scopes: [
+          {
+            academic_year_id: '40',
+            generation_id: '50',
+            major_id: '60',
+            year_level: 4,
+            class_groups: [' a ', 'b'],
+          },
+        ],
+      });
+
+      expect(groupScopeCreateMany).toHaveBeenCalledWith({
+        data: [
+          {
+            course_offering_id: 1n,
+            academic_year_id: 40n,
+            generation_id: 50n,
+            major_id: 60n,
+            year_level: 4,
+            class_group: 'A',
+          },
+          {
+            course_offering_id: 1n,
+            academic_year_id: 40n,
+            generation_id: 50n,
+            major_id: 60n,
+            year_level: 4,
+            class_group: 'B',
+          },
+        ],
+      });
+    });
+
+    it('rejects a group scope from a different academic year than the offering semester', async () => {
+      semesterFindUnique.mockResolvedValue({
+        id: 30n,
+        academic_year_id: 40n,
+      });
+
+      await expect(
+        service.create({
+          course_id: '10',
+          lecturer_id: '20',
+          semester_id: '30',
+          year_level: 4,
+          class_type: class_type.TD,
+          group_scopes: [
+            {
+              academic_year_id: '99',
+              generation_id: '50',
+              major_id: '60',
+              year_level: 4,
+              class_groups: ['A'],
+            },
+          ],
+        }),
+      ).rejects.toThrow(
+        'Group scope academic_year_id must match the course offering semester academic year',
+      );
+
+      expect(
+        groupScopeCreateMany,
+      ).not.toHaveBeenCalled();
+
+      expect(offeringCreate).not.toHaveBeenCalled();
+    });
+
+    it('rejects a group scope whose year level does not match the offering year level', async () => {
+      semesterFindUnique.mockResolvedValue({
+        id: 30n,
+        academic_year_id: 40n,
+      });
+
+      await expect(
+        service.create({
+          course_id: '10',
+          lecturer_id: '20',
+          semester_id: '30',
+          year_level: 4,
+          class_type: class_type.TD,
+          group_scopes: [
+            {
+              academic_year_id: '40',
+              generation_id: '50',
+              major_id: '60',
+              year_level: 3,
+              class_groups: ['A'],
+            },
+          ],
+        }),
+      ).rejects.toThrow(
+        'Group scope year_level must match the course offering year_level',
+      );
+
+      expect(
+        groupScopeCreateMany,
+      ).not.toHaveBeenCalled();
+
+      expect(offeringCreate).not.toHaveBeenCalled();
+    });
+
+    it('allows an optional year level with a required class type', async () => {
       offeringCreate.mockResolvedValue({
         id: 1n,
       });
@@ -214,13 +718,14 @@ describe('CourseOfferingsService', () => {
         course_id: '10',
         lecturer_id: '20',
         semester_id: '30',
+        class_type: class_type.COURSE,
       });
 
       expect(offeringCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             year_level: null,
-            class_type: null,
+            class_type: class_type.COURSE,
             section_code: null,
           }),
         }),
@@ -235,6 +740,7 @@ describe('CourseOfferingsService', () => {
           course_id: '10',
           lecturer_id: '20',
           semester_id: '30',
+          class_type: class_type.COURSE,
         }),
       ).rejects.toThrow(
         'course_id does not match any course',
@@ -251,6 +757,7 @@ describe('CourseOfferingsService', () => {
           course_id: '10',
           lecturer_id: '20',
           semester_id: '30',
+          class_type: class_type.COURSE,
         }),
       ).rejects.toThrow(
         'semester_id does not match any semester',
@@ -270,6 +777,7 @@ describe('CourseOfferingsService', () => {
           course_id: '10',
           lecturer_id: '20',
           semester_id: '30',
+          class_type: class_type.COURSE,
         }),
       ).rejects.toThrow(
         'lecturer_id must refer to a user with role LECTURER',
@@ -289,6 +797,7 @@ describe('CourseOfferingsService', () => {
           course_id: '10',
           lecturer_id: '20',
           semester_id: '30',
+          class_type: class_type.COURSE,
         }),
       ).rejects.toThrow(
         'lecturer_id must refer to an ACTIVE lecturer',
@@ -308,6 +817,7 @@ describe('CourseOfferingsService', () => {
           lecturer_id: '20',
           semester_id: '30',
           section_code: 'A',
+          class_type: class_type.COURSE,
         }),
       ).rejects.toBeInstanceOf(ConflictException);
 
@@ -324,6 +834,7 @@ describe('CourseOfferingsService', () => {
           course_id: '10',
           lecturer_id: '20',
           semester_id: '30',
+          class_type: class_type.COURSE,
         }),
       ).rejects.toBeInstanceOf(ConflictException);
     });
@@ -338,6 +849,7 @@ describe('CourseOfferingsService', () => {
           course_id: '10',
           lecturer_id: '20',
           semester_id: '30',
+          class_type: class_type.COURSE,
         }),
       ).rejects.toBeInstanceOf(
         BadRequestException,
@@ -354,6 +866,7 @@ describe('CourseOfferingsService', () => {
       section_code: 'A',
       year_level: 3,
       class_type: class_type.COURSE,
+      group_scopes: [],
     };
 
     beforeEach(() => {
@@ -429,6 +942,205 @@ describe('CourseOfferingsService', () => {
           }),
         }),
       );
+    });
+
+    it('preserves existing group scopes when group_scopes is omitted', async () => {
+      const existingWithScopes = {
+        ...existingOffering,
+        year_level: 4,
+        group_scopes: [
+          {
+            id: 100n,
+            course_offering_id: 1n,
+            academic_year_id: 40n,
+            generation_id: 50n,
+            major_id: 60n,
+            year_level: 4,
+            class_group: 'A',
+          },
+        ],
+      };
+
+      offeringFindUnique.mockResolvedValue(
+        existingWithScopes,
+      );
+
+      semesterFindUnique.mockResolvedValue({
+        id: 30n,
+        academic_year_id: 40n,
+      });
+
+      academicYearFindUnique.mockResolvedValue({
+        id: 40n,
+      });
+
+      generationFindUnique.mockResolvedValue({
+        id: 50n,
+      });
+
+      majorFindUnique.mockResolvedValue({
+        id: 60n,
+      });
+
+      offeringUpdate.mockResolvedValue(
+        existingWithScopes,
+      );
+
+      await service.update(1n, {
+        section_code: 'TD-01',
+      });
+
+      expect(
+        groupScopeDeleteMany,
+      ).not.toHaveBeenCalled();
+
+      expect(
+        groupScopeCreateMany,
+      ).not.toHaveBeenCalled();
+
+      expect(offeringUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: 1n,
+          },
+          data: expect.objectContaining({
+            section_code: 'TD-01',
+          }),
+        }),
+      );
+    });
+
+    it('clears existing group scopes when group_scopes is an empty array', async () => {
+      const existingWithScopes = {
+        ...existingOffering,
+        group_scopes: [
+          {
+            id: 100n,
+            course_offering_id: 1n,
+            academic_year_id: 40n,
+            generation_id: 50n,
+            major_id: 60n,
+            year_level: 3,
+            class_group: 'A',
+          },
+        ],
+      };
+
+      offeringFindUnique.mockResolvedValue(
+        existingWithScopes,
+      );
+
+      semesterFindUnique.mockResolvedValue({
+        id: 30n,
+        academic_year_id: 40n,
+      });
+
+      offeringUpdate.mockResolvedValue({
+        ...existingWithScopes,
+        group_scopes: [],
+      });
+
+      await service.update(1n, {
+        group_scopes: [],
+      });
+
+      expect(
+        groupScopeDeleteMany,
+      ).toHaveBeenCalledWith({
+        where: {
+          course_offering_id: 1n,
+        },
+      });
+
+      expect(
+        groupScopeCreateMany,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('replaces existing group scopes when new group_scopes are provided', async () => {
+      const existingWithScopes = {
+        ...existingOffering,
+        year_level: 3,
+        group_scopes: [
+          {
+            id: 100n,
+            course_offering_id: 1n,
+            academic_year_id: 40n,
+            generation_id: 50n,
+            major_id: 60n,
+            year_level: 3,
+            class_group: 'A',
+          },
+        ],
+      };
+
+      offeringFindUnique.mockResolvedValue(
+        existingWithScopes,
+      );
+
+      semesterFindUnique.mockResolvedValue({
+        id: 30n,
+        academic_year_id: 40n,
+      });
+
+      academicYearFindUnique.mockResolvedValue({
+        id: 40n,
+      });
+
+      generationFindUnique.mockResolvedValue({
+        id: 50n,
+      });
+
+      majorFindUnique.mockResolvedValue({
+        id: 60n,
+      });
+
+      offeringUpdate.mockResolvedValue({
+        ...existingWithScopes,
+      });
+
+      await service.update(1n, {
+        group_scopes: [
+          {
+            academic_year_id: '40',
+            generation_id: '50',
+            major_id: '60',
+            year_level: 3,
+            class_groups: [' b ', 'C'],
+          },
+        ],
+      });
+
+      expect(
+        groupScopeDeleteMany,
+      ).toHaveBeenCalledWith({
+        where: {
+          course_offering_id: 1n,
+        },
+      });
+
+      expect(
+        groupScopeCreateMany,
+      ).toHaveBeenCalledWith({
+        data: [
+          {
+            course_offering_id: 1n,
+            academic_year_id: 40n,
+            generation_id: 50n,
+            major_id: 60n,
+            year_level: 3,
+            class_group: 'B',
+          },
+          {
+            course_offering_id: 1n,
+            academic_year_id: 40n,
+            generation_id: 50n,
+            major_id: 60n,
+            year_level: 3,
+            class_group: 'C',
+          },
+        ],
+      });
     });
 
     it('excludes the current offering from duplicate checking', async () => {

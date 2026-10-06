@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsString,
   Matches,
+  MaxLength,
 } from 'class-validator';
 
 export class StudentExportQueryDto {
@@ -27,7 +28,7 @@ export class StudentExportQueryDto {
     example: '1',
     type: String,
     description:
-      'Optional academic year ID used to scope evaluation progress',
+      'Optional academic year ID used to scope evaluation progress and student placement',
   })
   @IsOptional()
   @IsString()
@@ -36,6 +37,32 @@ export class StudentExportQueryDto {
       'academic_year_id must be a positive integer',
   })
   academic_year_id?: string;
+
+  @ApiPropertyOptional({
+    example: '1',
+    type: String,
+    description:
+      'Optional major ID used to filter the selected academic-year placement',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^[1-9]\d*$/, {
+    message:
+      'major_id must be a positive integer',
+  })
+  major_id?: string;
+
+  @ApiPropertyOptional({
+    example: 'A',
+    type: String,
+    maxLength: 50,
+    description:
+      'Optional class group filter. Requires academic_year_id, generation_id, and major_id.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  class_group?: string;
 
   @ApiPropertyOptional({
     example: 1,

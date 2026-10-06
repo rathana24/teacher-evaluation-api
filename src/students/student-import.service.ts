@@ -7,6 +7,7 @@ import {
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
+import { normalizeClassGroup } from '../common/utils/class-group.util';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   ImportStudentRowDto,
@@ -288,9 +289,9 @@ export class StudentImportService {
               dto.year_level,
             majorId:
               resolvedMajor.major.id,
-            classGroup:
-              dto.class_group?.trim() ||
-              null,
+            classGroup: normalizeClassGroup(
+              dto.class_group,
+            ),
           });
 
         results.push({

@@ -2,8 +2,34 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
+
+type EvaluationGenerationTarget =
+  Prisma.evaluationsGetPayload<{
+    include: {
+      generation_targets: {
+        include: {
+          student_generations: {
+            select: {
+              id: true;
+              name: true;
+              entry_academic_year_id: true;
+              starting_year_level: true;
+              entry_academic_year: {
+                select: {
+                  id: true;
+                  name: true;
+                  start_year: true;
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+  }>['generation_targets'][number];
 
 @Injectable()
 export class ResultsService {
@@ -18,6 +44,12 @@ export class ResultsService {
   async getAdminResults() {
     const evaluations =
       await this.prisma.evaluations.findMany({
+        where: {
+          status: {
+            not: 'DRAFT',
+          },
+        },
+
         include: this.evaluationInclude(),
 
         orderBy: {
@@ -60,6 +92,10 @@ export class ResultsService {
     const evaluations =
       await this.prisma.evaluations.findMany({
         where: {
+          status: {
+            not: 'DRAFT',
+          },
+
           course_offerings: {
             lecturer_id: lecturerId,
           },
@@ -118,6 +154,10 @@ export class ResultsService {
     const evaluations =
       await this.prisma.evaluations.findMany({
         where: {
+          status: {
+            not: 'DRAFT',
+          },
+
           course_offerings: {
             lecturer_id: lecturerId,
           },
@@ -176,30 +216,98 @@ export class ResultsService {
         },
       },
 
+      /*
+       * Keep the evaluation's base version.
+       *
+       * This remains useful as assignment/history metadata,
+       * but it is NOT used as the only source of questions
+       * when aggregating submitted responses.
+       */
       survey_versions: {
         include: {
           surveys: true,
+        },
+      },
 
-          questions: {
+      generation_targets: {
+        include: {
+          student_generations: {
+            select: {
+              id: true,
+              name: true,
+              entry_academic_year_id: true,
+              starting_year_level: true,
+              entry_academic_year: {
+                select: {
+                  id: true,
+                  name: true,
+                  start_year: true,
+                },
+              },
+            },
+          },
+        },
+      },
+
+      group_targets: {
+        include: {
+          academic_years: {
+            select: {
+              id: true,
+              name: true,
+              start_year: true,
+            },
+          },
+
+          student_generations: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+
+          majors: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+            },
+          },
+        },
+      },
+
+      /*
+       * Every submitted response may belong to a different
+       * survey version.
+       *
+       * We therefore load the exact version attached to
+       * each response, together with that version's
+       * original questions and options.
+       */
+      responses: {
+        include: {
+          survey_versions: {
             include: {
-              question_options: {
+              surveys: true,
+
+              questions: {
+                include: {
+                  question_options: {
+                    orderBy: {
+                      display_order:
+                        'asc' as const,
+                    },
+                  },
+                },
+
                 orderBy: {
                   display_order:
                     'asc' as const,
                 },
               },
             },
-
-            orderBy: {
-              display_order:
-                'asc' as const,
-            },
           },
-        },
-      },
 
-      responses: {
-        include: {
           answers: {
             include: {
               answer_options: {
@@ -236,12 +344,80 @@ export class ResultsService {
     const semester =
       offering.semesters;
 
-    const questions =
-      evaluation.survey_versions
-        .questions;
-
     const responses =
       evaluation.responses;
+
+    /*
+     * Group submitted responses by their ACTUAL saved
+     * survey_version_id.
+     *
+     * We intentionally do not fall back to the evaluation
+     * base version for a response whose survey_version_id
+     * is NULL. Doing so would guess historical data and
+     * could produce incorrect aggregates.
+     */
+    const versionGroups =
+      new Map<
+        string,
+        {
+          surveyVersion: any;
+          responses: any[];
+        }
+      >();
+
+    const unversionedResponses: any[] =
+      [];
+
+    for (const response of responses) {
+      if (
+        response.survey_version_id ===
+          null ||
+        response.survey_versions === null
+      ) {
+        unversionedResponses.push(
+          response,
+        );
+        continue;
+      }
+
+      const key =
+        response.survey_version_id.toString();
+
+      const existing =
+        versionGroups.get(key);
+
+      if (existing) {
+        existing.responses.push(
+          response,
+        );
+      } else {
+        versionGroups.set(key, {
+          surveyVersion:
+            response.survey_versions,
+
+          responses: [response],
+        });
+      }
+    }
+
+    const versionResults =
+      Array.from(
+        versionGroups.values(),
+      )
+        .sort(
+          (
+            a,
+            b,
+          ) =>
+            a.surveyVersion.version_no -
+            b.surveyVersion.version_no,
+        )
+        .map((group) =>
+          this.buildVersionResult(
+            group.surveyVersion,
+            group.responses,
+          ),
+        );
 
     return {
       evaluation: {
@@ -255,6 +431,15 @@ export class ResultsService {
 
         end_at:
           evaluation.end_at,
+
+        participant_scope:
+          evaluation.participant_scope,
+      },
+
+      offering: {
+        id: offering.id,
+        class_type: offering.class_type,
+        year_level: offering.year_level,
       },
 
       lecturer: {
@@ -305,6 +490,9 @@ export class ResultsService {
         name:
           semester.semester_name,
 
+        semester_number:
+          semester.semester_number,
+
         academic_year: {
           id:
             semester.academic_years.id,
@@ -312,9 +500,23 @@ export class ResultsService {
           name:
             semester.academic_years
               .name,
+
+          start_year:
+            semester.academic_years
+              .start_year,
+
+          is_active:
+            semester.academic_years
+              .is_active,
         },
       },
 
+      /*
+       * This is the evaluation's original/base question-set
+       * assignment. It remains useful metadata even when
+       * unfinished participants later move to a newer
+       * version of the same named set.
+       */
       survey: {
         id:
           evaluation.survey_versions
@@ -324,13 +526,119 @@ export class ResultsService {
           evaluation.survey_versions
             .surveys.title,
 
-        version_id:
+        base_version_id:
           evaluation.survey_versions
             .id,
 
-        version_no:
+        base_version_no:
           evaluation.survey_versions
             .version_no,
+      },
+
+      target_scope: {
+        participant_scope:
+          evaluation.participant_scope,
+
+        generations_complete:
+          evaluation.participant_scope ===
+            'SELECTED_GENERATIONS' &&
+          evaluation.generation_targets.length > 0,
+
+        generations_unavailable_reason:
+          evaluation.participant_scope ===
+          'ALL_ENROLLED'
+            ? 'SCOPE_NOT_GENERATION_ONLY'
+            : evaluation.generation_targets.length ===
+                0
+              ? 'NO_FROZEN_GENERATION_TARGETS'
+              : null,
+
+        generations:
+          evaluation.generation_targets.map(
+            (target: EvaluationGenerationTarget) => ({
+              id:
+                target.student_generations
+                  .id,
+
+              name:
+                target.student_generations
+                  .name,
+
+              entry_academic_year_id:
+                target.student_generations
+                  .entry_academic_year_id,
+
+              starting_year_level:
+                target.student_generations
+                  .starting_year_level,
+
+              entry_academic_year: {
+                id:
+                  target.student_generations
+                    .entry_academic_year.id,
+
+                name:
+                  target.student_generations
+                    .entry_academic_year.name,
+
+                start_year:
+                  target.student_generations
+                    .entry_academic_year
+                    .start_year,
+              },
+            }),
+          ),
+
+        groups_complete:
+          evaluation.group_targets.length > 0,
+
+        groups_unavailable_reason:
+          evaluation.group_targets.length === 0
+            ? 'NO_FROZEN_GROUP_TARGETS'
+            : null,
+
+        groups:
+          evaluation.group_targets.map(
+            (target: any) => ({
+              academic_year: {
+                id:
+                  target.academic_years.id,
+
+                name:
+                  target.academic_years.name,
+
+                start_year:
+                  target.academic_years
+                    .start_year,
+              },
+
+              generation: {
+                id:
+                  target.student_generations.id,
+
+                name:
+                  target.student_generations
+                    .name,
+              },
+
+              major: {
+                id:
+                  target.majors.id,
+
+                code:
+                  target.majors.code,
+
+                name:
+                  target.majors.name,
+              },
+
+              year_level:
+                target.year_level,
+
+              class_group:
+                target.class_group,
+            }),
+          ),
       },
 
       participant_count:
@@ -342,13 +650,56 @@ export class ResultsService {
 
       response_rate:
         this.calculateResponseRate(
-          evaluation._count.responses,
           evaluation._count
             .evaluation_participants,
+          evaluation._count.responses,
         ),
 
+      /*
+       * Results are now separated by the exact version
+       * actually used for each submitted response.
+       */
+      version_results:
+        versionResults,
+
+      /*
+       * Historical responses with no saved version are
+       * reported explicitly instead of being silently
+       * assigned to the evaluation base version.
+       *
+       * No response/student identity is exposed.
+       */
+      unversioned_submission_count:
+        unversionedResponses.length,
+    };
+  }
+
+  // =========================================================
+  // BUILD ONE VERSION RESULT
+  // =========================================================
+
+  private buildVersionResult(
+    surveyVersion: any,
+    responses: any[],
+  ) {
+    return {
+      survey_id:
+        surveyVersion.survey_id,
+
+      survey_title:
+        surveyVersion.surveys.title,
+
+      survey_version_id:
+        surveyVersion.id,
+
+      version_no:
+        surveyVersion.version_no,
+
+      submission_count:
+        responses.length,
+
       questions:
-        questions.map(
+        surveyVersion.questions.map(
           (question: any) =>
             this.buildQuestionResult(
               question,
@@ -367,9 +718,13 @@ export class ResultsService {
     responses: any[],
   ) {
     /*
-     * Get all anonymous answers for this question.
+     * Only responses belonging to this exact survey
+     * version reach this method.
      *
-     * We intentionally do not return:
+     * We aggregate by immutable question_id rather than
+     * question text.
+     *
+     * We intentionally do not expose:
      * - student_id
      * - participant_id
      * - response_id
@@ -401,6 +756,15 @@ export class ResultsService {
 
       category:
         question.category,
+
+      is_required:
+        question.is_required,
+
+      min_rating:
+        question.min_rating,
+
+      max_rating:
+        question.max_rating,
 
       display_order:
         question.display_order,
@@ -448,14 +812,6 @@ export class ResultsService {
       const distribution:
         Record<string, number> = {};
 
-      /*
-       * RATING, AGREEMENT and FREQUENCY
-       * should have min/max values.
-       *
-       * We initialize every possible value
-       * so the frontend can display zero-count
-       * values too.
-       */
       if (
         question.min_rating !==
           null &&
@@ -487,12 +843,6 @@ export class ResultsService {
       return {
         ...base,
 
-        min_rating:
-          question.min_rating,
-
-        max_rating:
-          question.max_rating,
-
         average:
           average === null
             ? null
@@ -512,12 +862,6 @@ export class ResultsService {
       question.question_type ===
       'TEXT'
     ) {
-      /*
-       * Return anonymous written feedback.
-       *
-       * No student or response identity
-       * is attached to each comment.
-       */
       const feedback: string[] =
         answers
           .map(
@@ -607,21 +951,24 @@ export class ResultsService {
   // =========================================================
 
   private calculateResponseRate(
-    submissionCount: number,
     participantCount: number,
+    submissionCount: number,
   ) {
-    if (
-      participantCount === 0
-    ) {
-      return 0;
+    if (participantCount === 0) {
+      return {
+        value: null,
+        unavailable_reason: 'NO_PARTICIPANTS',
+      };
     }
 
-    return Number(
-      (
-        (submissionCount /
-          participantCount) *
-        100
-      ).toFixed(2),
-    );
+    return {
+      value: Number(
+        (
+          (submissionCount / participantCount) *
+          100
+        ).toFixed(2),
+      ),
+      unavailable_reason: null,
+    };
   }
 }

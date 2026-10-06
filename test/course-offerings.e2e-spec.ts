@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { class_type } from '@prisma/client';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 
@@ -18,7 +19,13 @@ describe('Course Offerings (e2e)', () => {
   // Seeded data: course 2 = CS402, lecturer 2 = Sok Dara, semester 1, student 4 = student1
   // Unique section per run, so re-running never collides with a leftover row
   const testSection = `E2E-${Date.now()}`;
-  const validBody = { course_id: '2', lecturer_id: '2', semester_id: '1', section_code: testSection };
+  const validBody = {
+    course_id: '2',
+    lecturer_id: '2',
+    semester_id: '1',
+    class_type: class_type.COURSE,
+    section_code: testSection,
+  };
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -33,7 +40,7 @@ describe('Course Offerings (e2e)', () => {
     const login = (email: string) =>
       request(app.getHttpServer())
         .post('/api/auth/login')
-        .send({ email, password: 'Password123' })
+        .send({ identifier: email, password: 'Password123' })
         .then((res) => res.body.access_token);
 
     adminToken = await login('admin@itc.edu.kh');
@@ -46,6 +53,20 @@ describe('Course Offerings (e2e)', () => {
   });
 
   describe('POST /api/course-offerings', () => {
+    it('rejects a new offering without class_type -> 400', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/course-offerings')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          course_id: '2',
+          lecturer_id: '2',
+          semester_id: '1',
+          section_code: `${testSection}-NO-TYPE`,
+        });
+
+      expect(res.status).toBe(400);
+    });
+
     it('ADMIN can create an offering -> 201', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/course-offerings')
@@ -124,7 +145,12 @@ describe('Course Offerings (e2e)', () => {
 
   describe('Duplicate check when section_code is empty', () => {
     let noSectionId: string;
-    const noSectionBody = { course_id: '1', lecturer_id: '3', semester_id: '1' };
+    const noSectionBody = {
+      course_id: '1',
+      lecturer_id: '3',
+      semester_id: '1',
+      class_type: class_type.COURSE,
+    };
 
     it('first offering without a section -> 201', async () => {
       const res = await request(app.getHttpServer())

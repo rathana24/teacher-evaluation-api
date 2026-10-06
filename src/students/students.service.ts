@@ -7,6 +7,10 @@ import {
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
+import {
+  normalizeClassGroup,
+  normalizeClassGroups,
+} from '../common/utils/class-group.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
@@ -411,13 +415,18 @@ export class StudentsService {
     };
   }
 
-  async selectStudentsForEnrollment(filters: {
-    generation_id?: string;
-    academic_year_id: string;
-    year_level?: number;
-    major_id?: string;
-    class_group?: string;
-  }) {
+  async selectStudentsForEnrollment(
+    filters: {
+      generation_id?: string;
+      academic_year_id: string;
+      year_level?: number;
+      major_id?: string;
+      class_groups?: string[];
+    },
+    tx?: Prisma.TransactionClient,
+  ) {
+    const prisma = tx ?? this.prisma;
+
     const generationId =
       filters.generation_id !== undefined
         ? BigInt(filters.generation_id)
@@ -437,7 +446,7 @@ export class StudentsService {
      * placement are evaluated in the correct context.
      */
     const selectedAcademicYear =
-      await this.prisma.academic_years.findUnique({
+      await prisma.academic_years.findUnique({
         where: {
           id: academicYearId,
         },
@@ -457,7 +466,7 @@ export class StudentsService {
 
     if (generationId !== undefined) {
       const generation =
-        await this.prisma.student_generations.findUnique({
+        await prisma.student_generations.findUnique({
           where: {
             id: generationId,
           },
@@ -475,7 +484,7 @@ export class StudentsService {
 
     if (majorId !== undefined) {
       const major =
-        await this.prisma.majors.findUnique({
+        await prisma.majors.findUnique({
           where: {
             id: majorId,
           },
@@ -500,7 +509,7 @@ export class StudentsService {
      * shared academic-context calculation below.
      */
     const students =
-      await this.prisma.students.findMany({
+      await prisma.students.findMany({
         where: {
           ...(generationId !== undefined && {
             generation_id: generationId,
@@ -567,26 +576,212 @@ export class StudentsService {
          * Class/group is also an explicit academic
          * placement value for the selected academic year.
          */
-        if (filters.class_group !== undefined) {
-          const expectedClassGroup =
-            filters.class_group
-              .trim()
-              .toLowerCase();
+        if (filters.class_groups !== undefined) {
+          const expectedClassGroups =
+            normalizeClassGroups(
+              filters.class_groups,
+            );
 
           const actualClassGroup =
-            context.academic_record?.class_group
-              ?.trim()
-              .toLowerCase() ?? null;
+            normalizeClassGroup(
+              context.academic_record
+                ?.class_group,
+            );
 
           if (
-            actualClassGroup !==
-            expectedClassGroup
+            actualClassGroup === null ||
+            !expectedClassGroups.includes(
+              actualClassGroup,
+            )
           ) {
             return false;
           }
         }
 
         return true;
+      },
+    );
+  }
+
+  async getGroupOptions(
+    academicYearId: bigint,
+    generationId: bigint,
+    majorId: bigint,
+  ) {
+    const records =
+      await this.prisma.student_academic_records.findMany({
+        where: {
+          academic_year_id: academicYearId,
+          major_id: majorId,
+
+          students: {
+            generation_id: generationId,
+          },
+
+          class_group: {
+            not: null,
+          },
+        },
+
+        select: {
+          class_group: true,
+        },
+      });
+
+    const groups = [
+      ...new Set(
+        records
+          .map((record) =>
+            normalizeClassGroup(
+              record.class_group,
+            ),
+          )
+          .filter(
+            (group): group is string =>
+              group !== null,
+          ),
+      ),
+    ].sort((a, b) =>
+      a.localeCompare(b),
+    );
+
+    return {
+      academic_year_id:
+        academicYearId.toString(),
+
+      generation_id:
+        generationId.toString(),
+
+      major_id:
+        majorId.toString(),
+
+      groups,
+
+      total: groups.length,
+    };
+  }
+
+  async bulkUpdateClassGroup(
+    academicYearId: bigint,
+    studentIds: bigint[],
+    classGroupValue: string,
+  ) {
+    const classGroup =
+      normalizeClassGroup(
+        classGroupValue,
+      );
+
+    if (classGroup === null) {
+      throw new BadRequestException(
+        'class_group must not be empty',
+      );
+    }
+
+    const uniqueStudentIds = [
+      ...new Set(
+        studentIds.map(
+          (id) => id.toString(),
+        ),
+      ),
+    ].map(
+      (id) => BigInt(id),
+    );
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        /*
+         * Only existing placements may be changed. Missing
+         * records abort the transaction before any updates.
+         */
+        const records =
+          await tx.student_academic_records.findMany(
+            {
+              where: {
+                academic_year_id:
+                  academicYearId,
+
+                student_id: {
+                  in: uniqueStudentIds,
+                },
+              },
+
+              select: {
+                id: true,
+                student_id: true,
+                academic_year_id: true,
+                year_level: true,
+                major_id: true,
+                class_group: true,
+              },
+            },
+          );
+
+        const foundStudentIds =
+          new Set(
+            records.map((record) =>
+              record.student_id.toString(),
+            ),
+          );
+
+        const missingStudentIds =
+          uniqueStudentIds
+            .filter(
+              (studentId) =>
+                !foundStudentIds.has(
+                  studentId.toString(),
+                ),
+            )
+            .map((studentId) =>
+              studentId.toString(),
+            );
+
+        if (
+          missingStudentIds.length > 0
+        ) {
+          throw new BadRequestException({
+            message:
+              'Some students do not have an existing placement for the selected academic year',
+            missing_student_ids:
+              missingStudentIds,
+          });
+        }
+
+        await tx.student_academic_records.updateMany(
+          {
+            where: {
+              academic_year_id:
+                academicYearId,
+
+              student_id: {
+                in: uniqueStudentIds,
+              },
+            },
+
+            data: {
+              class_group:
+                classGroup,
+            },
+          },
+        );
+
+        return {
+          academic_year_id:
+            academicYearId.toString(),
+
+          class_group:
+            classGroup,
+
+          updated_student_ids:
+            uniqueStudentIds.map(
+              (studentId) =>
+                studentId.toString(),
+            ),
+
+          updated_count:
+            uniqueStudentIds.length,
+
+          complete: true,
+        };
       },
     );
   }
@@ -693,6 +888,7 @@ export class StudentsService {
     let calculationStatus:
       | 'CALCULATED'
       | 'NOT_STARTED'
+      | 'BEYOND_PROGRAM'
       | 'UNAVAILABLE' = 'UNAVAILABLE';
 
     if (
@@ -706,11 +902,22 @@ export class StudentsService {
       if (yearDifference < 0) {
         calculationStatus = 'NOT_STARTED';
       } else {
-        calculatedYearLevel =
+        const candidateYearLevel =
           generation.starting_year_level +
           yearDifference;
 
-        calculationStatus = 'CALCULATED';
+        if (
+          candidateYearLevel >= 1 &&
+          candidateYearLevel <= 5
+        ) {
+          calculatedYearLevel =
+            candidateYearLevel;
+
+          calculationStatus = 'CALCULATED';
+        } else {
+          calculationStatus =
+            'BEYOND_PROGRAM';
+        }
       }
     }
 
@@ -737,6 +944,9 @@ export class StudentsService {
           : calculationStatus ===
                 'NOT_STARTED'
             ? 'NOT_STARTED'
+            : calculationStatus ===
+                  'BEYOND_PROGRAM'
+              ? 'BEYOND_PROGRAM'
             : 'UNAVAILABLE';
 
     return {
@@ -766,6 +976,30 @@ export class StudentsService {
 
         academic_record:
           academicRecord,
+
+        placement: {
+          academic_year_id:
+            selectedAcademicYear.id,
+
+          source:
+            academicRecord !== null
+              ? 'ACADEMIC_RECORD'
+              : calculatedYearLevel !== null
+                ? 'GENERATION_CALCULATION'
+                : calculationStatus,
+
+          year_level:
+            effectiveYearLevel,
+
+          major_id:
+            academicRecord?.major_id ??
+            null,
+
+          class_group:
+            normalizeClassGroup(
+              academicRecord?.class_group,
+            ),
+        },
       },
     };
   }

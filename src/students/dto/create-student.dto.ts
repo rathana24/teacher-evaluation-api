@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
   Min,
   MinLength,
@@ -94,9 +95,11 @@ export class CreateStudentDto {
     description:
       'Student year level for the initial academic placement',
     minimum: 1,
+    maximum: 5,
   })
   @IsInt()
   @Min(1)
+  @Max(5)
   year_level!: number;
 
   @ApiProperty({

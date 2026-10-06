@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals';
 
 import {
+  BadRequestException,
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
@@ -138,6 +139,23 @@ type TxMock = {
     create: jest.Mock<
       () => Promise<IdResult>
     >;
+    findMany: jest.Mock<
+      () => Promise<
+        Array<{
+          id: bigint;
+          student_id: bigint;
+          academic_year_id: bigint;
+          year_level: number;
+          major_id: bigint;
+          class_group: string | null;
+        }>
+      >
+    >;
+    updateMany: jest.Mock<
+      () => Promise<{
+        count: number;
+      }>
+    >;
   };
 };
 
@@ -266,6 +284,36 @@ describe('StudentsService', () => {
       () => Promise<IdResult>
     >();
 
+  const transactionAcademicRecordFindManyMock =
+    jest.fn<
+      () => Promise<
+        Array<{
+          id: bigint;
+          student_id: bigint;
+          academic_year_id: bigint;
+          year_level: number;
+          major_id: bigint;
+          class_group: string | null;
+        }>
+      >
+    >();
+
+  const academicRecordUpdateManyMock =
+    jest.fn<
+      () => Promise<{
+        count: number;
+      }>
+    >();
+
+  const academicRecordFindManyMock =
+    jest.fn<
+      () => Promise<
+        Array<{
+          class_group: string | null;
+        }>
+      >
+    >();
+
   const txMock: TxMock = {
     users: {
       create: usersCreateMock,
@@ -283,6 +331,10 @@ describe('StudentsService', () => {
 
     student_academic_records: {
       create: academicRecordCreateMock,
+      findMany:
+        transactionAcademicRecordFindManyMock,
+      updateMany:
+        academicRecordUpdateManyMock,
     },
   };
 
@@ -299,6 +351,11 @@ describe('StudentsService', () => {
     >();
 
   const prismaMock = {
+    student_academic_records: {
+      findMany:
+        academicRecordFindManyMock,
+    },
+
     student_generations: {
       findUnique:
         studentGenerationFindUniqueMock,
@@ -949,6 +1006,47 @@ describe('StudentsService', () => {
       );
     });
 
+    it('should return normalized explicit placement metadata without changing the stored record', async () => {
+      const studentWithUnnormalizedGroup = {
+        ...createdStudent,
+
+        student_academic_records:
+          createdStudent.student_academic_records.map(
+            (record) => ({
+              ...record,
+              class_group: '  a  ',
+            }),
+          ),
+      };
+
+      studentsFindManyMock
+        .mockResolvedValueOnce([
+          studentWithUnnormalizedGroup,
+        ]);
+
+      const result =
+        await service.selectStudentsForEnrollment({
+          generation_id: '1',
+          academic_year_id: '1',
+        });
+
+      expect(
+        result[0].academic_context.placement,
+      ).toEqual({
+        academic_year_id: BigInt(1),
+        source: 'ACADEMIC_RECORD',
+        year_level: 2,
+        major_id: BigInt(1),
+        class_group: 'A',
+      });
+
+      expect(
+        studentWithUnnormalizedGroup
+          .student_academic_records[0]
+          .class_group,
+      ).toBe('  a  ');
+    });
+
     it('should not calculate evaluation progress during enrollment selection', async () => {
       await service.selectStudentsForEnrollment({
         generation_id: '1',
@@ -1111,6 +1209,163 @@ describe('StudentsService', () => {
       );
     });
 
+    it('should mark automatic progression beyond year 5 as beyond program', async () => {
+      const studentWithoutRecord = {
+        ...createdStudent,
+        student_academic_records: [],
+      };
+
+      studentsFindManyMock.mockResolvedValue([
+        studentWithoutRecord,
+      ]);
+
+      /*
+       * Generation entry:
+       * 2025, starting at Year 1
+       *
+       * Selected year:
+       * 2030
+       *
+       * 1 + (2030 - 2025) = Year 6
+       */
+      academicYearFindUniqueMock.mockResolvedValue({
+        id: 6n,
+        name: '2030-2031',
+        start_year: 2030,
+        is_active: false,
+      });
+
+      const result =
+        await service.selectStudentsForEnrollment({
+          generation_id: '1',
+          academic_year_id: '6',
+        });
+
+      expect(result).toHaveLength(1);
+
+      expect(
+        result[0].academic_context
+          .calculated_year_level,
+      ).toBeNull();
+
+      expect(
+        result[0].academic_context
+          .effective_year_level,
+      ).toBeNull();
+
+      expect(
+        result[0].academic_context
+          .calculation_status,
+      ).toBe('BEYOND_PROGRAM');
+
+      expect(
+        result[0].academic_context
+          .year_level_source,
+      ).toBe('BEYOND_PROGRAM');
+    });
+
+    it('should allow an explicit valid academic record to override beyond-program automatic progression', async () => {
+      const repeatingStudent = {
+        ...createdStudent,
+
+        student_academic_records: [
+          {
+            ...createdStudent
+              .student_academic_records[0],
+
+            academic_year_id: 6n,
+            year_level: 5,
+          },
+        ],
+      };
+
+      studentsFindManyMock.mockResolvedValue([
+        repeatingStudent,
+      ]);
+
+      academicYearFindUniqueMock.mockResolvedValue({
+        id: 6n,
+        name: '2030-2031',
+        start_year: 2030,
+        is_active: false,
+      });
+
+      const result =
+        await service.selectStudentsForEnrollment({
+          generation_id: '1',
+          academic_year_id: '6',
+          year_level: 5,
+        });
+
+      expect(result).toHaveLength(1);
+
+      expect(
+        result[0].academic_context
+          .calculated_year_level,
+      ).toBeNull();
+
+      expect(
+        result[0].academic_context
+          .calculation_status,
+      ).toBe('BEYOND_PROGRAM');
+
+      expect(
+        result[0].academic_context
+          .effective_year_level,
+      ).toBe(5);
+
+      expect(
+        result[0].academic_context
+          .year_level_source,
+      ).toBe('ACADEMIC_RECORD');
+    });
+
+    it('should mark a student as not started before the generation entry academic year', async () => {
+      const studentWithoutRecord = {
+        ...createdStudent,
+        student_academic_records: [],
+      };
+
+      studentsFindManyMock.mockResolvedValue([
+        studentWithoutRecord,
+      ]);
+
+      academicYearFindUniqueMock.mockResolvedValue({
+        id: 7n,
+        name: '2024-2025',
+        start_year: 2024,
+        is_active: false,
+      });
+
+      const result =
+        await service.selectStudentsForEnrollment({
+          generation_id: '1',
+          academic_year_id: '7',
+        });
+
+      expect(result).toHaveLength(1);
+
+      expect(
+        result[0].academic_context
+          .calculated_year_level,
+      ).toBeNull();
+
+      expect(
+        result[0].academic_context
+          .effective_year_level,
+      ).toBeNull();
+
+      expect(
+        result[0].academic_context
+          .calculation_status,
+      ).toBe('NOT_STARTED');
+
+      expect(
+        result[0].academic_context
+          .year_level_source,
+      ).toBe('NOT_STARTED');
+    });
+
     it('should filter students by major from the explicit academic record', async () => {
       const matching =
         await service.selectStudentsForEnrollment({
@@ -1136,13 +1391,14 @@ describe('StudentsService', () => {
       expect(notMatching).toEqual([]);
     });
 
-    it('should filter class group case-insensitively and ignore surrounding spaces', async () => {
+    it('should filter normalized class groups case-insensitively and ignore surrounding spaces', async () => {
       const matching =
         await service.selectStudentsForEnrollment({
           generation_id: '1',
           academic_year_id: '1',
-          class_group:
+          class_groups: [
             '  ams2-a  ',
+          ],
         });
 
       expect(matching).toHaveLength(1);
@@ -1151,8 +1407,9 @@ describe('StudentsService', () => {
         await service.selectStudentsForEnrollment({
           generation_id: '1',
           academic_year_id: '1',
-          class_group:
+          class_groups: [
             'AMS2-B',
+          ],
         });
 
       expect(notMatching).toEqual([]);
@@ -1186,5 +1443,202 @@ describe('StudentsService', () => {
         }),
       );
     });
+  });
+
+  it('returns normalized and deduplicated class group options for the exact placement scope', async () => {
+    academicRecordFindManyMock
+      .mockResolvedValue([
+        { class_group: 'A' },
+        { class_group: ' a ' },
+        { class_group: 'B' },
+        { class_group: ' b ' },
+        { class_group: null },
+      ]);
+
+    const result =
+      await service.getGroupOptions(
+        1n,
+        5n,
+        2n,
+      );
+
+    expect(
+      academicRecordFindManyMock,
+    ).toHaveBeenCalledWith({
+      where: {
+        academic_year_id: 1n,
+        major_id: 2n,
+
+        students: {
+          generation_id: 5n,
+        },
+
+        class_group: {
+          not: null,
+        },
+      },
+
+      select: {
+        class_group: true,
+      },
+    });
+
+    expect(result).toEqual({
+      academic_year_id: '1',
+      generation_id: '5',
+      major_id: '2',
+      groups: ['A', 'B'],
+      total: 2,
+    });
+  });
+
+  it('returns an empty group option list when the placement scope has no known groups', async () => {
+    academicRecordFindManyMock
+      .mockResolvedValue([]);
+
+    const result =
+      await service.getGroupOptions(
+        1n,
+        5n,
+        2n,
+      );
+
+    expect(result).toEqual({
+      academic_year_id: '1',
+      generation_id: '5',
+      major_id: '2',
+      groups: [],
+      total: 0,
+    });
+  });
+
+  it('atomically updates only class_group for all confirmed existing placements', async () => {
+    transactionAcademicRecordFindManyMock
+      .mockResolvedValue([
+        {
+          id: 101n,
+          student_id: 10n,
+          academic_year_id: 1n,
+          year_level: 4,
+          major_id: 2n,
+          class_group: 'B',
+        },
+        {
+          id: 102n,
+          student_id: 11n,
+          academic_year_id: 1n,
+          year_level: 4,
+          major_id: 2n,
+          class_group: 'B',
+        },
+      ]);
+
+    academicRecordUpdateManyMock
+      .mockResolvedValue({
+        count: 2,
+      });
+
+    const result =
+      await service.bulkUpdateClassGroup(
+        1n,
+        [10n, 11n],
+        '  a  ',
+      );
+
+    expect(
+      transactionAcademicRecordFindManyMock,
+    ).toHaveBeenCalledWith({
+      where: {
+        academic_year_id: 1n,
+        student_id: {
+          in: [10n, 11n],
+        },
+      },
+
+      select: {
+        id: true,
+        student_id: true,
+        academic_year_id: true,
+        year_level: true,
+        major_id: true,
+        class_group: true,
+      },
+    });
+
+    expect(
+      academicRecordUpdateManyMock,
+    ).toHaveBeenCalledWith({
+      where: {
+        academic_year_id: 1n,
+        student_id: {
+          in: [10n, 11n],
+        },
+      },
+
+      data: {
+        class_group: 'A',
+      },
+    });
+
+    expect(result).toEqual({
+      academic_year_id: '1',
+      class_group: 'A',
+      updated_student_ids: ['10', '11'],
+      updated_count: 2,
+      complete: true,
+    });
+  });
+
+  it('fails atomically when any confirmed student has no placement in the selected academic year', async () => {
+    transactionAcademicRecordFindManyMock
+      .mockResolvedValue([
+        {
+          id: 101n,
+          student_id: 10n,
+          academic_year_id: 1n,
+          year_level: 4,
+          major_id: 2n,
+          class_group: 'B',
+        },
+      ]);
+
+    await expect(
+      service.bulkUpdateClassGroup(
+        1n,
+        [10n, 11n],
+        'A',
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        message:
+          'Some students do not have an existing placement for the selected academic year',
+
+        missing_student_ids: [
+          '11',
+        ],
+      },
+    });
+
+    expect(
+      academicRecordUpdateManyMock,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('rejects a blank class group before starting a transaction', async () => {
+    await expect(
+      service.bulkUpdateClassGroup(
+        1n,
+        [10n],
+        '   ',
+      ),
+    ).rejects.toThrow(
+      new BadRequestException(
+        'class_group must not be empty',
+      ),
+    );
+
+    expect(
+      transactionMock,
+    ).not.toHaveBeenCalled();
   });
 });

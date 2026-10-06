@@ -53,9 +53,11 @@ model academic_years {
   created_at DateTime  @default(now()) @db.Timestamp(6)
   updated_at DateTime  @updatedAt @db.Timestamp(6)
 
-  semesters                semesters[]
-  student_generations      student_generations[]
-  student_academic_records student_academic_records[]
+  semesters                    semesters[]
+  student_generations          student_generations[]
+  student_academic_records     student_academic_records[]
+  course_offering_group_scopes course_offering_group_scopes[]
+  evaluation_group_targets     evaluation_group_targets[]
 }
 
 model departments {
@@ -91,9 +93,11 @@ model majors {
   created_at    DateTime @default(now()) @db.Timestamp(6)
   updated_at    DateTime @updatedAt @db.Timestamp(6)
 
-  departments              departments                @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  student_academic_records student_academic_records[]
-  course_year_rules        course_year_rules[]
+  departments                  departments                    @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  student_academic_records     student_academic_records[]
+  course_year_rules            course_year_rules[]
+  course_offering_group_scopes course_offering_group_scopes[]
+  evaluation_group_targets     evaluation_group_targets[]
 
   @@unique([department_id, name], map: "majors_department_id_name_idx")
 }
@@ -106,9 +110,11 @@ model student_generations {
   created_at             DateTime @default(now()) @db.Timestamp(6)
   updated_at             DateTime @updatedAt @db.Timestamp(6)
 
-  entry_academic_year academic_years                  @relation(fields: [entry_academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  students            students[]
-  evaluation_targets  evaluation_generation_targets[]
+  entry_academic_year          academic_years                  @relation(fields: [entry_academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  students                     students[]
+  evaluation_targets           evaluation_generation_targets[]
+  course_offering_group_scopes course_offering_group_scopes[]
+  evaluation_group_targets     evaluation_group_targets[]
 }
 
 model students {
@@ -153,13 +159,33 @@ model course_offerings {
   created_at   DateTime    @db.Timestamp(6)
   updated_at   DateTime    @db.Timestamp(6)
 
-  courses     courses       @relation(fields: [course_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  users       users         @relation(fields: [lecturer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  semesters   semesters     @relation(fields: [semester_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  enrollments enrollments[]
-  evaluations evaluations[]
+  courses      courses                        @relation(fields: [course_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users        users                          @relation(fields: [lecturer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  semesters    semesters                      @relation(fields: [semester_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  enrollments  enrollments[]
+  evaluations  evaluations[]
+  group_scopes course_offering_group_scopes[]
 
   @@unique([course_id, lecturer_id, semester_id, year_level, class_type, section_code], map: "course_offerings_assignment_unique_idx")
+}
+
+model course_offering_group_scopes {
+  id                 BigInt   @id @default(autoincrement())
+  course_offering_id BigInt
+  academic_year_id   BigInt
+  generation_id      BigInt
+  major_id           BigInt
+  year_level         Int
+  class_group        String   @db.VarChar(50)
+  created_at         DateTime @default(now()) @db.Timestamp(6)
+
+  course_offerings    course_offerings    @relation(fields: [course_offering_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  academic_years      academic_years      @relation(fields: [academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  student_generations student_generations @relation(fields: [generation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  majors              majors              @relation(fields: [major_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([course_offering_id, academic_year_id, generation_id, major_id, year_level, class_group], map: "course_offering_group_scope_unique_idx")
+  @@index([academic_year_id, generation_id, major_id, year_level], map: "course_offering_group_scope_context_idx")
 }
 
 model courses {
@@ -233,6 +259,7 @@ model evaluations {
 
   evaluation_participants evaluation_participants[]
   generation_targets      evaluation_generation_targets[]
+  group_targets           evaluation_group_targets[]
   course_offerings        course_offerings                @relation(fields: [course_offering_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   users                   users                           @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   survey_versions         survey_versions                 @relation(fields: [survey_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -250,6 +277,25 @@ model evaluation_generation_targets {
   student_generations student_generations @relation(fields: [generation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@id([evaluation_id, generation_id])
+}
+
+model evaluation_group_targets {
+  id               BigInt   @id @default(autoincrement())
+  evaluation_id    BigInt
+  academic_year_id BigInt
+  generation_id    BigInt
+  major_id         BigInt
+  year_level       Int
+  class_group      String   @db.VarChar(50)
+  created_at       DateTime @default(now()) @db.Timestamp(6)
+
+  evaluations         evaluations         @relation(fields: [evaluation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  academic_years      academic_years      @relation(fields: [academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  student_generations student_generations @relation(fields: [generation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  majors              majors              @relation(fields: [major_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([evaluation_id, academic_year_id, generation_id, major_id, year_level, class_group], map: "evaluation_group_target_unique_idx")
+  @@index([academic_year_id, generation_id, major_id, year_level], map: "evaluation_group_target_context_idx")
 }
 
 model questions {

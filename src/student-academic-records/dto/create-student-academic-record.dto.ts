@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -39,9 +40,11 @@ export class CreateStudentAcademicRecordDto {
     description:
       'Actual year level of the student for this academic year',
     minimum: 1,
+    maximum: 5,
   })
   @IsInt()
   @Min(1)
+  @Max(5)
   year_level!: number;
 
   @ApiProperty({

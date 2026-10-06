@@ -62,6 +62,12 @@ describe('EvaluationsService', () => {
   const generationTargetDeleteManyMock =
     jest.fn<() => Promise<{ count: number }>>();
 
+  const groupTargetCreateManyMock =
+    jest.fn<() => Promise<{ count: number }>>();
+
+  const groupTargetDeleteManyMock =
+    jest.fn<() => Promise<{ count: number }>>();
+
   const studentGenerationFindManyMock =
     jest.fn<() => Promise<any[]>>();
 
@@ -134,6 +140,14 @@ describe('EvaluationsService', () => {
 
       deleteMany:
         generationTargetDeleteManyMock,
+    },
+
+    evaluation_group_targets: {
+      createMany:
+        groupTargetCreateManyMock,
+
+      deleteMany:
+        groupTargetDeleteManyMock,
     },
 
     student_generations: {
@@ -251,6 +265,7 @@ describe('EvaluationsService', () => {
     surveyFindUniqueMock
       .mockResolvedValue({
         id: BigInt(2),
+        archived_at: null,
       });
 
     surveyVersionFindFirstMock
@@ -258,6 +273,10 @@ describe('EvaluationsService', () => {
         id: BigInt(3),
         survey_id: BigInt(2),
         status: 'DRAFT',
+
+        surveys: {
+          archived_at: null,
+        },
 
         _count: {
           questions: 5,
@@ -318,6 +337,16 @@ describe('EvaluationsService', () => {
         count: 0,
       });
 
+    groupTargetCreateManyMock
+      .mockResolvedValue({
+        count: 0,
+      });
+
+    groupTargetDeleteManyMock
+      .mockResolvedValue({
+        count: 0,
+      });
+
     studentGenerationFindManyMock
       .mockResolvedValue([]);
 
@@ -350,6 +379,7 @@ describe('EvaluationsService', () => {
 
         select: {
           id: true,
+          archived_at: true,
         },
       });
 
@@ -498,6 +528,12 @@ describe('EvaluationsService', () => {
           survey_id: true,
           status: true,
 
+          surveys: {
+            select: {
+              archived_at: true,
+            },
+          },
+
           _count: {
             select: {
               questions: true,
@@ -544,6 +580,12 @@ describe('EvaluationsService', () => {
           id: true,
           survey_id: true,
           status: true,
+
+          surveys: {
+            select: {
+              archived_at: true,
+            },
+          },
 
           _count: {
             select: {
@@ -636,6 +678,10 @@ describe('EvaluationsService', () => {
           survey_id: BigInt(2),
           status: 'ARCHIVED',
 
+          surveys: {
+            archived_at: null,
+          },
+
           _count: {
             questions: 5,
           },
@@ -667,6 +713,10 @@ describe('EvaluationsService', () => {
           survey_id: BigInt(2),
           status: 'DRAFT',
 
+          surveys: {
+            archived_at: null,
+          },
+
           _count: {
             questions: 0,
           },
@@ -697,6 +747,10 @@ describe('EvaluationsService', () => {
           id: BigInt(3),
           survey_id: BigInt(2),
           status: 'LOCKED',
+
+          surveys: {
+            archived_at: null,
+          },
 
           _count: {
             questions: 5,
@@ -850,6 +904,9 @@ describe('EvaluationsService', () => {
         })
         .mockResolvedValueOnce(
           eligibleOffering,
+        )
+        .mockResolvedValueOnce(
+          eligibleOffering,
         );
 
       enrollmentFindManyMock
@@ -895,6 +952,9 @@ describe('EvaluationsService', () => {
         .mockResolvedValueOnce({
           id: BigInt(1),
         })
+        .mockResolvedValueOnce(
+          eligibleOffering,
+        )
         .mockResolvedValueOnce(
           eligibleOffering,
         );
@@ -977,7 +1037,7 @@ describe('EvaluationsService', () => {
         ),
       ).rejects.toThrow(
         new BadRequestException(
-          'confirmed_student_ids is required after previewing SELECTED_GENERATIONS',
+          'confirmed_student_ids is required after previewing the selected participant scope',
         ),
       );
 
@@ -1024,6 +1084,207 @@ describe('EvaluationsService', () => {
       expect(
         evaluationCreateMock,
       ).not.toHaveBeenCalled();
+    });
+
+    it('should reject group-targeted creation when eligible students change after preview', async () => {
+      const groupScopedOffering = {
+        ...eligibleOffering,
+
+        group_scopes: [
+          {
+            academic_year_id: BigInt(10),
+            generation_id: BigInt(5),
+            major_id: BigInt(2),
+            year_level: 4,
+            class_group: 'A',
+          },
+        ],
+      };
+
+      courseOfferingFindUniqueMock
+        .mockResolvedValueOnce({
+          id: BigInt(1),
+        })
+        .mockResolvedValueOnce(
+          groupScopedOffering,
+        )
+        .mockResolvedValueOnce(
+          groupScopedOffering,
+        );
+
+      enrollmentFindManyMock
+        .mockResolvedValueOnce([
+          eligibleEnrollment,
+        ])
+        .mockResolvedValueOnce([
+          {
+            ...eligibleEnrollment,
+
+            users: {
+              ...eligibleEnrollment.users,
+
+              student: {
+                ...eligibleEnrollment.users.student,
+
+                student_academic_records: [
+                  {
+                    academic_year_id:
+                      BigInt(10),
+
+                    year_level: 4,
+
+                    major_id:
+                      BigInt(2),
+
+                    class_group: 'B',
+                  },
+                ],
+              },
+            },
+          },
+        ]);
+
+      await expect(
+        service.create(
+          {
+            course_offering_id: '1',
+            survey_id: '2',
+
+            participant_scope:
+              evaluation_participant_scope.ALL_ENROLLED,
+
+            group_scope: {
+              academic_year_id: '10',
+              generation_id: '5',
+              major_id: '2',
+              year_level: 4,
+              class_groups: ['A'],
+            },
+
+            confirmed_student_ids: [
+              '21',
+            ],
+          },
+          BigInt(10),
+        ),
+      ).rejects.toThrow(
+        new ConflictException(
+          'Eligible students changed after the preview. Preview and review the participant list again before creating the evaluation.',
+        ),
+      );
+
+      expect(
+        evaluationCreateMock,
+      ).not.toHaveBeenCalled();
+
+      expect(
+        participantCreateManyMock,
+      ).not.toHaveBeenCalled();
+
+      expect(
+        groupTargetCreateManyMock,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('should freeze group targets and confirmed participants for a group-targeted evaluation', async () => {
+      const groupScopedOffering = {
+        ...eligibleOffering,
+
+        group_scopes: [
+          {
+            academic_year_id: BigInt(10),
+            generation_id: BigInt(5),
+            major_id: BigInt(2),
+            year_level: 4,
+            class_group: 'A',
+          },
+        ],
+      };
+
+      courseOfferingFindUniqueMock
+        .mockResolvedValueOnce({
+          id: BigInt(1),
+        })
+        .mockResolvedValueOnce(
+          groupScopedOffering,
+        )
+        .mockResolvedValueOnce(
+          groupScopedOffering,
+        );
+
+      enrollmentFindManyMock
+        .mockResolvedValue([
+          eligibleEnrollment,
+        ]);
+
+      await service.create(
+        {
+          course_offering_id: '1',
+          survey_id: '2',
+
+          participant_scope:
+            evaluation_participant_scope.ALL_ENROLLED,
+
+          group_scope: {
+            academic_year_id: '10',
+            generation_id: '5',
+            major_id: '2',
+            year_level: 4,
+            class_groups: ['A'],
+          },
+
+          confirmed_student_ids: [
+            '21',
+          ],
+        },
+        BigInt(10),
+      );
+
+      expect(
+        groupTargetCreateManyMock,
+      ).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            evaluation_id:
+              BigInt(50),
+
+            academic_year_id:
+              BigInt(10),
+
+            generation_id:
+              BigInt(5),
+
+            major_id:
+              BigInt(2),
+
+            year_level:
+              4,
+
+            class_group:
+              'A',
+          }),
+        ],
+      });
+
+      expect(
+        participantCreateManyMock,
+      ).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            evaluation_id:
+              BigInt(50),
+
+            student_id:
+              BigInt(21),
+
+            survey_version_id:
+              BigInt(3),
+
+            has_submitted:
+              false,
+          }),
+        ],
+      });
     });
   });
 
@@ -1091,6 +1352,290 @@ describe('EvaluationsService', () => {
             'ACADEMIC_RECORD',
         }),
       ]);
+    });
+
+    it('should include Group A and exclude Group B when both are enrolled in the same offering', async () => {
+      const groupScopedOffering = {
+        ...eligibleOffering,
+
+        group_scopes: [
+          {
+            academic_year_id: BigInt(10),
+            generation_id: BigInt(5),
+            major_id: BigInt(2),
+            year_level: 4,
+            class_group: 'A',
+          },
+          {
+            academic_year_id: BigInt(10),
+            generation_id: BigInt(5),
+            major_id: BigInt(2),
+            year_level: 4,
+            class_group: 'B',
+          },
+        ],
+      };
+
+      const groupBEnrollment = {
+        ...eligibleEnrollment,
+
+        student_id: BigInt(22),
+
+        users: {
+          ...eligibleEnrollment.users,
+
+          id: BigInt(22),
+          full_name: 'Student Two',
+
+          student: {
+            ...eligibleEnrollment.users.student,
+
+            id: BigInt(102),
+            student_code: 'e20230002',
+
+            student_academic_records: [
+              {
+                academic_year_id:
+                  BigInt(10),
+
+                year_level: 4,
+
+                major_id:
+                  BigInt(2),
+
+                class_group: 'B',
+              },
+            ],
+          },
+        },
+      };
+
+      courseOfferingFindUniqueMock
+        .mockResolvedValue(
+          groupScopedOffering,
+        );
+
+      enrollmentFindManyMock
+        .mockResolvedValue([
+          eligibleEnrollment,
+          groupBEnrollment,
+        ]);
+
+      const result =
+        await service.previewParticipants({
+          course_offering_id: '1',
+
+          participant_scope:
+            evaluation_participant_scope.ALL_ENROLLED,
+
+          group_scope: {
+            academic_year_id: '10',
+            generation_id: '5',
+            major_id: '2',
+            year_level: 4,
+            class_groups: ['A'],
+          },
+        });
+
+      expect(
+        result.enrolled_count,
+      ).toBe(2);
+
+      expect(
+        result.eligible_count,
+      ).toBe(1);
+
+      expect(
+        result.ineligible_count,
+      ).toBe(1);
+
+      expect(
+        result.confirmed_student_ids,
+      ).toEqual([
+        '21',
+      ]);
+
+      expect(
+        result.eligible_students,
+      ).toHaveLength(1);
+
+      expect(
+        result.eligible_students[0],
+      ).toEqual(
+        expect.objectContaining({
+          user_id: '21',
+          student_id: '101',
+          class_group: 'A',
+          placement_academic_year_id:
+            '10',
+          placement_major_id: '2',
+        }),
+      );
+
+      expect(
+        result.ineligible_reasons
+          .class_group_mismatch,
+      ).toBe(1);
+
+      expect(
+        result.group_scope,
+      ).toEqual({
+        academic_year_id: '10',
+        generation_id: '5',
+        major_id: '2',
+        year_level: 4,
+        class_groups: ['A'],
+      });
+    });
+
+    it('should normalize class-group values when matching evaluation group scope', async () => {
+      const groupScopedOffering = {
+        ...eligibleOffering,
+
+        group_scopes: [
+          {
+            academic_year_id: BigInt(10),
+            generation_id: BigInt(5),
+            major_id: BigInt(2),
+            year_level: 4,
+            class_group: 'A',
+          },
+        ],
+      };
+
+      const studentWithUnnormalizedGroup = {
+        ...eligibleEnrollment,
+
+        users: {
+          ...eligibleEnrollment.users,
+
+          student: {
+            ...eligibleEnrollment.users.student,
+
+            student_academic_records: [
+              {
+                academic_year_id:
+                  BigInt(10),
+
+                year_level: 4,
+
+                major_id:
+                  BigInt(2),
+
+                class_group: '  a  ',
+              },
+            ],
+          },
+        },
+      };
+
+      courseOfferingFindUniqueMock
+        .mockResolvedValue(
+          groupScopedOffering,
+        );
+
+      enrollmentFindManyMock
+        .mockResolvedValue([
+          studentWithUnnormalizedGroup,
+        ]);
+
+      const result =
+        await service.previewParticipants({
+          course_offering_id: '1',
+
+          group_scope: {
+            academic_year_id: '10',
+            generation_id: '5',
+            major_id: '2',
+            year_level: 4,
+
+            class_groups: [
+              '  a  ',
+            ],
+          },
+        });
+
+      expect(
+        result.eligible_count,
+      ).toBe(1);
+
+      expect(
+        result.confirmed_student_ids,
+      ).toEqual([
+        '21',
+      ]);
+
+      expect(
+        result.group_scope?.class_groups,
+      ).toEqual([
+        'A',
+      ]);
+
+      expect(
+        result.eligible_students[0]
+          .class_group,
+      ).toBe('A');
+    });
+
+    it('should reject the same class-group name from a different generation or major scope', async () => {
+      const groupScopedOffering = {
+        ...eligibleOffering,
+
+        group_scopes: [
+          {
+            academic_year_id: BigInt(10),
+            generation_id: BigInt(5),
+            major_id: BigInt(2),
+            year_level: 4,
+            class_group: 'A',
+          },
+        ],
+      };
+
+      courseOfferingFindUniqueMock
+        .mockResolvedValue(
+          groupScopedOffering,
+        );
+
+      await expect(
+        service.previewParticipants({
+          course_offering_id: '1',
+
+          group_scope: {
+            academic_year_id: '10',
+            generation_id: '6',
+            major_id: '2',
+            year_level: 4,
+            class_groups: ['A'],
+          },
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'The course offering does not serve the requested group scope: A',
+        ),
+      );
+
+      await expect(
+        service.previewParticipants({
+          course_offering_id: '1',
+
+          group_scope: {
+            academic_year_id: '10',
+            generation_id: '5',
+            major_id: '3',
+            year_level: 4,
+            class_groups: ['A'],
+          },
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'The course offering does not serve the requested group scope: A',
+        ),
+      );
+
+      expect(
+        enrollmentFindManyMock,
+      ).not.toHaveBeenCalled();
     });
 
     it('should intersect selected generations with actual enrollments', async () => {
@@ -1357,6 +1902,127 @@ describe('EvaluationsService', () => {
         }),
       );
     });
+
+    it('should treat automatic progression beyond year 5 as unavailable for year-specific evaluation eligibility', async () => {
+      courseOfferingFindUniqueMock.mockResolvedValue({
+        ...eligibleOffering,
+
+        semesters: {
+          ...eligibleOffering.semesters,
+
+          academic_years: {
+            ...eligibleOffering.semesters
+              .academic_years,
+
+            start_year: 2030,
+          },
+        },
+
+        year_level: 5,
+      });
+
+      enrollmentFindManyMock.mockResolvedValue([
+        {
+          ...eligibleEnrollment,
+
+          users: {
+            ...eligibleEnrollment.users,
+
+            student: {
+              ...eligibleEnrollment.users
+                .student,
+
+              student_academic_records: [],
+            },
+          },
+        },
+      ]);
+
+      const result =
+        await service.previewParticipants({
+          course_offering_id: '1',
+        });
+
+      expect(
+        result.eligible_count,
+      ).toBe(0);
+
+      expect(
+        result.eligible_students,
+      ).toEqual([]);
+
+      expect(
+        result.ineligible_reasons
+          .year_level_unavailable,
+      ).toBe(1);
+    });
+
+    it('should allow an explicit year 5 academic record to override beyond-program automatic progression', async () => {
+      courseOfferingFindUniqueMock.mockResolvedValue({
+        ...eligibleOffering,
+
+        semesters: {
+          ...eligibleOffering.semesters,
+
+          academic_years: {
+            ...eligibleOffering.semesters
+              .academic_years,
+
+            start_year: 2030,
+          },
+        },
+
+        year_level: 5,
+      });
+
+      enrollmentFindManyMock.mockResolvedValue([
+        {
+          ...eligibleEnrollment,
+
+          users: {
+            ...eligibleEnrollment.users,
+
+            student: {
+              ...eligibleEnrollment.users
+                .student,
+
+              student_academic_records: [
+                {
+                  ...eligibleEnrollment.users
+                    .student
+                    .student_academic_records[0],
+
+                  year_level: 5,
+                },
+              ],
+            },
+          },
+        },
+      ]);
+
+      const result =
+        await service.previewParticipants({
+          course_offering_id: '1',
+        });
+
+      expect(
+        result.eligible_count,
+      ).toBe(1);
+
+      expect(
+        result.ineligible_count,
+      ).toBe(0);
+
+      expect(
+        result.eligible_students[0],
+      ).toEqual(
+        expect.objectContaining({
+          effective_year_level: 5,
+          year_level_source:
+            'ACADEMIC_RECORD',
+        }),
+      );
+    });
   });
 
   describe('findOne', () => {
@@ -1467,6 +2133,92 @@ describe('EvaluationsService', () => {
     });
   });
 
+  describe('open', () => {
+    it('should reject a group-targeted evaluation with no frozen participants instead of falling back to ALL_ENROLLED', async () => {
+      evaluationFindUniqueMock
+        .mockResolvedValue({
+          id: BigInt(50),
+
+          course_offering_id:
+            BigInt(1),
+
+          survey_version_id:
+            BigInt(3),
+
+          participant_scope:
+            evaluation_participant_scope.ALL_ENROLLED,
+
+          status: 'DRAFT',
+
+          start_at:
+            new Date(
+              '2099-10-01T00:00:00.000Z',
+            ),
+
+          end_at:
+            new Date(
+              '2099-10-14T00:00:00.000Z',
+            ),
+
+          survey_versions: {
+            id: BigInt(3),
+            status: 'DRAFT',
+            locked_at: null,
+
+            _count: {
+              questions: 5,
+            },
+          },
+
+          generation_targets: [],
+
+          group_targets: [
+            {
+              academic_year_id:
+                BigInt(10),
+
+              generation_id:
+                BigInt(5),
+
+              major_id:
+                BigInt(2),
+
+              year_level: 4,
+
+              class_group: 'A',
+            },
+          ],
+
+          _count: {
+            evaluation_participants:
+              0,
+          },
+        });
+
+      await expect(
+        service.open(
+          BigInt(50),
+        ),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'This targeted evaluation has no confirmed participants. Preview and confirm the eligible students before opening.',
+        ),
+      );
+
+      expect(
+        enrollmentFindManyMock,
+      ).not.toHaveBeenCalled();
+
+      expect(
+        participantCreateManyMock,
+      ).not.toHaveBeenCalled();
+
+      expect(
+        evaluationUpdateManyMock,
+      ).not.toHaveBeenCalled();
+    });
+  });
+
   describe('remove', () => {
     it('should delete a DRAFT evaluation and its frozen targeting rows', async () => {
       evaluationFindUniqueMock
@@ -1490,6 +2242,15 @@ describe('EvaluationsService', () => {
 
       expect(
         generationTargetDeleteManyMock,
+      ).toHaveBeenCalledWith({
+        where: {
+          evaluation_id:
+            BigInt(50),
+        },
+      });
+
+      expect(
+        groupTargetDeleteManyMock,
       ).toHaveBeenCalledWith({
         where: {
           evaluation_id:

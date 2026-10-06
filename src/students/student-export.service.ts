@@ -5,6 +5,9 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
+import {
+  normalizeClassGroup,
+} from '../common/utils/class-group.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { StudentExportQueryDto } from './dto/student-export-query.dto';
 
@@ -21,8 +24,13 @@ type StudentProgress = {
 type ExportScope = {
   generation_id: string | null;
   generation_name: string | null;
+
   academic_year_id: string | null;
   academic_year_name: string | null;
+
+  major_id: string | null;
+  class_group: string | null;
+
   semester_id: string | null;
   semester_number: number | null;
   semester_name: string | null;
@@ -55,6 +63,14 @@ const exportStudentSelect = {
       major_id: true,
       year_level: true,
       class_group: true,
+
+      academic_years: {
+        select: {
+          id: true,
+          name: true,
+          start_year: true,
+        },
+      },
 
       majors: {
         select: {
@@ -93,6 +109,38 @@ export class StudentExportService {
       query.academic_year_id !== undefined
         ? BigInt(query.academic_year_id)
         : undefined;
+
+    const majorId =
+      query.major_id !== undefined
+        ? BigInt(query.major_id)
+        : undefined;
+
+    const classGroup =
+      normalizeClassGroup(
+        query.class_group,
+      );
+
+    if (
+      query.class_group !== undefined &&
+      classGroup === null
+    ) {
+      throw new BadRequestException(
+        'class_group must not be empty',
+      );
+    }
+
+    if (
+      classGroup !== null &&
+      (
+        academicYearId === undefined ||
+        generationId === undefined ||
+        majorId === undefined
+      )
+    ) {
+      throw new BadRequestException(
+        'academic_year_id, generation_id, and major_id are required when class_group is provided',
+      );
+    }
 
     /*
      * Semester numbers are scoped to academic years.
@@ -232,6 +280,12 @@ export class StudentExportService {
       academic_year_name:
         academicYear?.name ?? null,
 
+      major_id:
+        majorId?.toString() ?? null,
+
+      class_group:
+        classGroup,
+
       semester_id:
         semester?.id.toString() ?? null,
 
@@ -257,6 +311,8 @@ export class StudentExportService {
         generationId,
         academicYearId,
         semester?.id,
+        majorId,
+        classGroup,
       );
 
     const progressByUserId =
@@ -319,6 +375,35 @@ export class StudentExportService {
                     academicRecord.majors.name,
                 }
               : null,
+
+          placement: academicRecord
+            ? {
+                academic_year: {
+                  id:
+                    academicRecord.academic_years.id.toString(),
+
+                  name:
+                    academicRecord.academic_years.name,
+
+                  start_year:
+                    academicRecord.academic_years.start_year,
+                },
+
+                year_level:
+                  academicRecord.year_level,
+
+                major_id:
+                  academicRecord.major_id.toString(),
+
+                class_group:
+                  normalizeClassGroup(
+                    academicRecord.class_group,
+                  ),
+
+                source:
+                  'ACADEMIC_RECORD' as const,
+              }
+            : null,
 
           generation: {
             id:
@@ -394,12 +479,27 @@ export class StudentExportService {
     generationId: bigint | undefined,
     academicYearId: bigint | undefined,
     semesterId: bigint | undefined,
+    majorId: bigint | undefined,
+    classGroup: string | null,
   ): Promise<ExportStudent[]> {
     const where: Prisma.studentsWhereInput = {
       ...(generationId !== undefined && {
         generation_id:
           generationId,
       }),
+
+      ...(academicYearId !== undefined &&
+        majorId !== undefined && {
+          student_academic_records: {
+            some: {
+              academic_year_id:
+                academicYearId,
+
+              major_id:
+                majorId,
+            },
+          },
+        }),
 
       /*
        * When a period is selected, the export group
@@ -450,17 +550,50 @@ export class StudentExportService {
       }),
     };
 
-    return this.prisma.students.findMany({
-      where,
+    const students =
+      await this.prisma.students.findMany({
+        where,
 
-      select:
-        exportStudentSelect,
+        select:
+          exportStudentSelect,
 
-      orderBy: {
-        student_code:
-          'asc',
+        orderBy: {
+          student_code:
+            'asc',
+        },
+      });
+
+    if (
+      classGroup === null ||
+      academicYearId === undefined ||
+      majorId === undefined
+    ) {
+      return students;
+    }
+
+    /*
+     * Historical class-group values may contain different
+     * casing or whitespace. Compare using the shared
+     * normalization policy without rewriting history.
+     */
+    return students.filter(
+      (student) => {
+        const placement =
+          student.student_academic_records.find(
+            (record) =>
+              record.academic_year_id ===
+                academicYearId &&
+              record.major_id ===
+                majorId,
+          );
+
+        return (
+          normalizeClassGroup(
+            placement?.class_group,
+          ) === classGroup
+        );
       },
-    });
+    );
   }
 
   private async getScopedProgress(

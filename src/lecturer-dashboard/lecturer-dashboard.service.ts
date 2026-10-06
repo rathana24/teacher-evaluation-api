@@ -19,6 +19,54 @@ const contextSelect = {
   end_at: true,
   survey_version_id: true,
 
+  group_targets: {
+    select: {
+      academic_year_id: true,
+      generation_id: true,
+      major_id: true,
+      year_level: true,
+      class_group: true,
+
+      academic_years: {
+        select: {
+          id: true,
+          name: true,
+          start_year: true,
+        },
+      },
+
+      student_generations: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+
+      majors: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+        },
+      },
+    },
+
+    orderBy: [
+      {
+        generation_id: 'asc' as const,
+      },
+      {
+        major_id: 'asc' as const,
+      },
+      {
+        year_level: 'asc' as const,
+      },
+      {
+        class_group: 'asc' as const,
+      },
+    ],
+  },
+
   course_offerings: {
     select: {
       lecturer_id: true,
@@ -120,6 +168,60 @@ function toContext(
 
       version_no:
         e.survey_versions.version_no,
+    },
+
+    group_scope: {
+      complete:
+        e.group_targets.length > 0,
+
+      unavailable_reason:
+        e.group_targets.length === 0
+          ? 'NO_FROZEN_GROUP_TARGETS'
+          : null,
+
+      groups:
+        e.group_targets.map(
+          (target) => ({
+            academic_year: {
+              id:
+                target.academic_years.id,
+
+              name:
+                target.academic_years.name,
+
+              start_year:
+                target.academic_years
+                  .start_year,
+            },
+
+            generation: {
+              id:
+                target.student_generations
+                  .id,
+
+              name:
+                target.student_generations
+                  .name,
+            },
+
+            major: {
+              id:
+                target.majors.id,
+
+              code:
+                target.majors.code,
+
+              name:
+                target.majors.name,
+            },
+
+            year_level:
+              target.year_level,
+
+            class_group:
+              target.class_group,
+          }),
+        ),
     },
   };
 }

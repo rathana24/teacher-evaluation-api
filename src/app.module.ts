@@ -17,7 +17,7 @@ import { QuestionsModule } from './questions/questions.module';
 import { EvaluationsModule } from './evaluations/evaluations.module';
 import { StudentAccessModule } from './student-access/student-access.module';
 import { SubmissionsModule } from './submissions/submissions.module';
-
+import { CourseYearRulesModule } from './course-year-rules/course-year-rules.module';
 // Day5 modules
 import { AssessmentDraftsModule } from './assessment-drafts/assessment-drafts.module';
 import { AcademicYearsModule } from './academic-years/academic-years.module';
@@ -51,7 +51,7 @@ import { StudentAcademicRecordsModule } from './student-academic-records/student
     EvaluationsModule,
     StudentAccessModule,
     SubmissionsModule,
-
+    CourseYearRulesModule,
     // Day5
     AssessmentDraftsModule,
     AcademicYearsModule,

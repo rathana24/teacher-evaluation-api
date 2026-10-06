@@ -7,6 +7,7 @@ import {
   MaxLength,
   IsInt,
   Min,
+  Max,
 } from 'class-validator';
 
 export class CreateSemesterDto {
@@ -23,6 +24,17 @@ export class CreateSemesterDto {
   @IsInt()
   @Min(1)
   academic_year_id!: number;
+
+  @ApiProperty({
+    example: 1,
+    minimum: 1,
+    maximum: 2,
+    description: 'Semester number within the academic year',
+  })
+  @IsInt()
+  @Min(1)
+  @Max(2)
+  semester_number!: number;
 
   @ApiPropertyOptional({ example: '2026-10-01' })
   @IsOptional()

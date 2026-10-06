@@ -5,6 +5,7 @@ import {
 import {
   evaluation_participant_scope,
 } from '@prisma/client';
+import { Type } from 'class-transformer';
 import {
   ArrayNotEmpty,
   ArrayUnique,
@@ -14,7 +15,12 @@ import {
   IsString,
   Matches,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
+
+import {
+  EvaluationGroupScopeDto,
+} from './evaluation-group-scope.dto';
 
 export class PreviewEvaluationParticipantsDto {
   @ApiProperty({
@@ -36,7 +42,7 @@ export class PreviewEvaluationParticipantsDto {
     default:
       evaluation_participant_scope.ALL_ENROLLED,
     description:
-      'Participant scope. When omitted, ALL_ENROLLED is used.',
+      'Base participant scope. When omitted, ALL_ENROLLED is used. An optional group scope further restricts the enrolled population.',
   })
   @IsOptional()
   @IsEnum(evaluation_participant_scope)
@@ -65,4 +71,21 @@ export class PreviewEvaluationParticipantsDto {
       'Each generation_id must be a positive integer',
   })
   generation_ids?: string[];
+
+  @ApiPropertyOptional({
+    type: EvaluationGroupScopeDto,
+    description:
+      'Optional explicit class-group restriction applied within the selected academic year, generation, major, and year level.',
+    example: {
+      academic_year_id: '10',
+      generation_id: '5',
+      major_id: '2',
+      year_level: 4,
+      class_groups: ['A'],
+    },
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EvaluationGroupScopeDto)
+  group_scope?: EvaluationGroupScopeDto;
 }

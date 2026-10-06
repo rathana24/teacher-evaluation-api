@@ -56,6 +56,7 @@ export class SemestersService {
       return await this.prisma.semesters.create({
         data: {
           semester_name: dto.semester_name,
+          semester_number: dto.semester_number,
           academic_year_id: BigInt(dto.academic_year_id),
           start_date: startDate,
           end_date: endDate,
@@ -69,7 +70,7 @@ export class SemestersService {
     } catch (e: any) {
       if (e.code === 'P2002') {
         throw new ConflictException(
-          'This semester already exists for that academic year',
+          'Semester name or semester number already exists for this academic year',
         );
       }
 
@@ -110,6 +111,11 @@ export class SemestersService {
         data: {
           semester_name: dto.semester_name,
 
+          semester_number:
+            dto.semester_number !== undefined
+              ? dto.semester_number
+              : undefined,
+
           academic_year_id:
             dto.academic_year_id !== undefined
               ? BigInt(dto.academic_year_id)
@@ -126,7 +132,7 @@ export class SemestersService {
     } catch (e: any) {
       if (e.code === 'P2002') {
         throw new ConflictException(
-          'This semester already exists for that academic year',
+          'Semester name or semester number already exists for this academic year',
         );
       }
 

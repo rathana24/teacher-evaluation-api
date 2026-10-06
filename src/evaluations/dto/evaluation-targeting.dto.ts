@@ -4,6 +4,7 @@ import {
 import {
   evaluation_participant_scope,
 } from '@prisma/client';
+import { Type } from 'class-transformer';
 import {
   ArrayNotEmpty,
   ArrayUnique,
@@ -13,7 +14,12 @@ import {
   IsString,
   Matches,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
+
+import {
+  EvaluationGroupScopeDto,
+} from './evaluation-group-scope.dto';
 
 export class EvaluationTargetingDto {
   @ApiPropertyOptional({
@@ -23,7 +29,7 @@ export class EvaluationTargetingDto {
     default:
       evaluation_participant_scope.ALL_ENROLLED,
     description:
-      'Controls which enrolled students are eligible for the evaluation. When omitted, ALL_ENROLLED is used for backward compatibility.',
+      'Controls the base enrolled-student scope. Group scope, when supplied, further restricts this enrolled population.',
   })
   @IsOptional()
   @IsEnum(evaluation_participant_scope)
@@ -54,10 +60,27 @@ export class EvaluationTargetingDto {
   generation_ids?: string[];
 
   @ApiPropertyOptional({
+    type: EvaluationGroupScopeDto,
+    description:
+      'Optional explicit class-group restriction. The group is interpreted only within the supplied academic year, generation, major, and year level.',
+    example: {
+      academic_year_id: '10',
+      generation_id: '5',
+      major_id: '2',
+      year_level: 4,
+      class_groups: ['A'],
+    },
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EvaluationGroupScopeDto)
+  group_scope?: EvaluationGroupScopeDto;
+
+  @ApiPropertyOptional({
     type: [String],
     example: ['21', '24', '30'],
     description:
-      'Exact eligible student user IDs returned by the preview. The backend can use these IDs to detect whether eligibility changed after preview.',
+      'Exact eligible student user IDs returned by preview. Confirmation uses these IDs to detect eligibility drift after preview.',
   })
   @IsOptional()
   @IsArray()

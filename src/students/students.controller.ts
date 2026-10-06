@@ -26,6 +26,8 @@ import { StudentExportService } from './student-export.service';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { ImportStudentsDto } from './dto/import-students.dto';
 import { StudentExportQueryDto } from './dto/student-export-query.dto';
+import { StudentGroupOptionsQueryDto } from './dto/student-group-options-query.dto';
+import { BulkUpdateStudentGroupDto } from './dto/bulk-update-student-group.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
 import { StudentQueryDto } from './dto/student-query.dto';
 
@@ -129,6 +131,64 @@ export class StudentsController {
   ) {
     return this.studentExportService.getExportData(
       query,
+    );
+  }
+
+  @Get('group-options')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'List class group options for a student placement scope',
+    description:
+      'Returns normalized class groups found in existing student academic records for the selected academic year, generation, and major.',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Class group options returned successfully',
+  })
+  async getGroupOptions(
+    @Query()
+    query: StudentGroupOptionsQueryDto,
+  ) {
+    return this.studentsService.getGroupOptions(
+      BigInt(query.academic_year_id),
+      BigInt(query.generation_id),
+      BigInt(query.major_id),
+    );
+  }
+
+  @Put('bulk/class-group')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Bulk update student class group',
+    description:
+      'Atomically updates only the class group of confirmed students who already have placement records in the selected academic year. Missing placements are not created.',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Student class groups updated successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Invalid group or one or more students do not have an existing placement for the selected academic year',
+  })
+  async bulkUpdateClassGroup(
+    @Body()
+    dto: BulkUpdateStudentGroupDto,
+  ) {
+    return this.studentsService.bulkUpdateClassGroup(
+      BigInt(dto.academic_year_id),
+
+      dto.student_ids.map(
+        (studentId) =>
+          BigInt(studentId),
+      ),
+
+      dto.class_group,
     );
   }
 

@@ -73,6 +73,11 @@ const transactionMock =
 // =========================================================
 
 const tx = {
+  surveys: {
+    findUnique:
+      surveyFindUniqueMock,
+  },
+
   survey_versions: {
     findFirst:
       versionFindFirstMock,
@@ -82,6 +87,9 @@ const tx = {
 
     create:
       versionCreateMock,
+
+    update:
+      versionUpdateMock,
 
     updateMany:
       versionUpdateManyMock,
@@ -201,6 +209,12 @@ describe(
 
     beforeEach(async () => {
       jest.clearAllMocks();
+
+      surveyFindUniqueMock
+        .mockResolvedValue({
+          id: 1n,
+          archived_at: null,
+        });
 
       transactionMock.mockImplementation(
         async (
@@ -391,13 +405,6 @@ describe(
         it(
           'moves only safe unfinished participants and locks the target version',
           async () => {
-            /*
-             * First findFirst:
-             * pre-transaction validation.
-             *
-             * Second findFirst:
-             * transaction re-check.
-             */
             versionFindFirstMock
               .mockResolvedValueOnce({
                 id: 20n,
@@ -414,6 +421,7 @@ describe(
               })
               .mockResolvedValueOnce({
                 id: 20n,
+                survey_id: 1n,
                 version_no: 2,
                 status:
                   'DRAFT',
@@ -435,13 +443,6 @@ describe(
                 },
               ]);
 
-            /*
-             * Count call order:
-             *
-             * 1. submitted
-             * 2. draft holders
-             * 3. already target
-             */
             participantCountMock
               .mockResolvedValueOnce(
                 4,
@@ -484,11 +485,32 @@ describe(
               status:
                 'LOCKED',
 
+              operation:
+                'APPLIED_AND_LOCKED',
+
+              retry_safe:
+                true,
+
+              was_already_locked:
+                false,
+
               eligible_evaluations:
                 2,
 
+              moved_participants:
+                7,
+
               updated_participants:
                 7,
+
+              skipped_participants:
+                7,
+
+              skipped_reasons: {
+                submitted: 4,
+                protected_draft: 2,
+                already_on_target: 1,
+              },
 
               skipped_submitted:
                 4,
@@ -522,10 +544,6 @@ describe(
               },
             });
 
-            /*
-             * Verify the actual migration is restricted
-             * to unfinished participants with NO draft.
-             */
             expect(
               participantUpdateManyMock,
             ).toHaveBeenCalledWith({
@@ -556,9 +574,6 @@ describe(
               },
             });
 
-            /*
-             * The target version must become immutable.
-             */
             expect(
               versionUpdateManyMock,
             ).toHaveBeenCalledWith(
@@ -599,6 +614,7 @@ describe(
               })
               .mockResolvedValueOnce({
                 id: 20n,
+                survey_id: 1n,
                 version_no: 2,
                 status:
                   'DRAFT',
@@ -632,6 +648,14 @@ describe(
 
             expect(
               result.updated_participants,
+            ).toBe(0);
+
+            expect(
+              result.moved_participants,
+            ).toBe(0);
+
+            expect(
+              result.skipped_participants,
             ).toBe(0);
 
             expect(
@@ -672,7 +696,122 @@ describe(
         );
 
         it(
-          'rejects a non-DRAFT target version',
+          'safely retries an already LOCKED target version without locking it again',
+          async () => {
+            const lockedAt =
+              new Date(
+                '2026-10-05T00:00:00.000Z',
+              );
+
+            versionFindFirstMock
+              .mockResolvedValueOnce({
+                id: 20n,
+                survey_id: 1n,
+                version_no: 2,
+                status:
+                  'LOCKED',
+                locked_at:
+                  lockedAt,
+
+                _count: {
+                  questions: 5,
+                },
+              })
+              .mockResolvedValueOnce({
+                id: 20n,
+                survey_id: 1n,
+                version_no: 2,
+                status:
+                  'LOCKED',
+                locked_at:
+                  lockedAt,
+
+                _count: {
+                  questions: 5,
+                },
+              });
+
+            evaluationFindManyMock
+              .mockResolvedValue([
+                {
+                  id: 100n,
+                },
+              ]);
+
+            participantCountMock
+              .mockResolvedValueOnce(
+                2,
+              )
+              .mockResolvedValueOnce(
+                1,
+              )
+              .mockResolvedValueOnce(
+                5,
+              );
+
+            participantUpdateManyMock
+              .mockResolvedValue({
+                count: 0,
+              });
+
+            const result =
+              await service.applyToUnfinished(
+                1n,
+                20n,
+              );
+
+            expect(
+              result.status,
+            ).toBe(
+              'LOCKED',
+            );
+
+            expect(
+              result.operation,
+            ).toBe(
+              'RECONCILED_LOCKED_VERSION',
+            );
+
+            expect(
+              result.retry_safe,
+            ).toBe(true);
+
+            expect(
+              result.was_already_locked,
+            ).toBe(true);
+
+            expect(
+              result.moved_participants,
+            ).toBe(0);
+
+            expect(
+              result.updated_participants,
+            ).toBe(0);
+
+            expect(
+              result.already_on_target,
+            ).toBe(5);
+
+            expect(
+              result.skipped_reasons,
+            ).toEqual({
+              submitted: 2,
+              protected_draft: 1,
+              already_on_target: 5,
+            });
+
+            /*
+             * Retry must not attempt to lock
+             * the version a second time.
+             */
+            expect(
+              versionUpdateManyMock,
+            ).not.toHaveBeenCalled();
+          },
+        );
+
+        it(
+          'rejects an ARCHIVED target version',
           async () => {
             versionFindFirstMock
               .mockResolvedValue({
@@ -680,7 +819,7 @@ describe(
                 survey_id: 1n,
                 version_no: 2,
                 status:
-                  'LOCKED',
+                  'ARCHIVED',
                 locked_at:
                   new Date(),
 
@@ -700,6 +839,10 @@ describe(
 
             expect(
               transactionMock,
+            ).not.toHaveBeenCalled();
+
+            expect(
+              participantUpdateManyMock,
             ).not.toHaveBeenCalled();
           },
         );
@@ -738,8 +881,13 @@ describe(
         );
 
         it(
-          'rejects when target version changes before transaction reconciliation',
+          'treats DRAFT to LOCKED transition before reconciliation as a safe concurrent retry',
           async () => {
+            const lockedAt =
+              new Date(
+                '2026-10-05T00:00:00.000Z',
+              );
+
             versionFindFirstMock
               .mockResolvedValueOnce({
                 id: 20n,
@@ -756,28 +904,59 @@ describe(
               })
               .mockResolvedValueOnce({
                 id: 20n,
+                survey_id: 1n,
                 version_no: 2,
                 status:
                   'LOCKED',
                 locked_at:
-                  new Date(),
+                  lockedAt,
 
                 _count: {
                   questions: 5,
                 },
               });
 
-            await expect(
-              service.applyToUnfinished(
+            evaluationFindManyMock
+              .mockResolvedValue(
+                [],
+              );
+
+            const result =
+              await service.applyToUnfinished(
                 1n,
                 20n,
-              ),
-            ).rejects.toBeInstanceOf(
-              ConflictException,
+              );
+
+            expect(
+              result.status,
+            ).toBe(
+              'LOCKED',
             );
 
             expect(
-              participantUpdateManyMock,
+              result.operation,
+            ).toBe(
+              'RECONCILED_LOCKED_VERSION',
+            );
+
+            expect(
+              result.was_already_locked,
+            ).toBe(true);
+
+            expect(
+              result.retry_safe,
+            ).toBe(true);
+
+            expect(
+              result.moved_participants,
+            ).toBe(0);
+
+            expect(
+              result.updated_participants,
+            ).toBe(0);
+
+            expect(
+              versionUpdateManyMock,
             ).not.toHaveBeenCalled();
           },
         );
@@ -801,6 +980,7 @@ describe(
               })
               .mockResolvedValueOnce({
                 id: 20n,
+                survey_id: 1n,
                 version_no: 2,
                 status:
                   'DRAFT',
@@ -1158,6 +1338,9 @@ describe(
             versionFindUniqueMock
               .mockResolvedValue({
                 id: 10n,
+                surveys: {
+                  archived_at: null,
+                },
                 status:
                   'DRAFT',
 
@@ -1189,6 +1372,9 @@ describe(
             versionFindUniqueMock
               .mockResolvedValue({
                 id: 10n,
+                surveys: {
+                  archived_at: null,
+                },
                 status:
                   'LOCKED',
 
@@ -1219,6 +1405,9 @@ describe(
             versionFindUniqueMock
               .mockResolvedValue({
                 id: 10n,
+                surveys: {
+                  archived_at: null,
+                },
                 status:
                   'DRAFT',
 
@@ -1289,6 +1478,9 @@ describe(
             versionFindUniqueMock
               .mockResolvedValue({
                 id: 10n,
+                surveys: {
+                  archived_at: null,
+                },
                 status:
                   'DRAFT',
 

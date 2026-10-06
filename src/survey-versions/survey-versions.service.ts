@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSurveyVersionDto } from './dto/create-survey-version.dto';
@@ -99,21 +100,63 @@ export class SurveyVersionsService {
   }
 
   // =========================================================
-  // CREATE VERSION
+  // CREATE NEXT VERSION
   // =========================================================
 
+  /**
+   * Creates the next DRAFT version of an active question set.
+   *
+   * Rules:
+   *
+   * - archived question sets cannot receive new versions
+   * - version number is always latest + 1
+   * - optional question copying always copies from the
+   *   latest version
+   * - the transaction is serializable
+   * - concurrent creation returns 409 instead of silently
+   *   creating an unexpected version
+   */
   async create(
     surveyId: bigint,
     dto: CreateSurveyVersionDto,
     createdBy: bigint,
   ) {
-    await this.checkSurveyExists(
+    await this.checkSurveyActive(
       surveyId,
     );
 
     try {
       return await this.prisma.$transaction(
         async (tx) => {
+          /*
+           * Re-read the question set inside the transaction.
+           * This prevents creating a version after another
+           * request archives the whole set.
+           */
+          const survey =
+            await tx.surveys.findUnique({
+              where: {
+                id: surveyId,
+              },
+
+              select: {
+                id: true,
+                archived_at: true,
+              },
+            });
+
+          if (!survey) {
+            throw new NotFoundException(
+              'Question set not found',
+            );
+          }
+
+          if (survey.archived_at) {
+            throw new ConflictException(
+              'Archived question sets are read-only and cannot receive new versions',
+            );
+          }
+
           const latest =
             await tx.survey_versions.findFirst({
               where: {
@@ -141,24 +184,29 @@ export class SurveyVersionsService {
               },
             });
 
+          /*
+           * Requirement 2 creates V1 atomically with the
+           * question set itself.
+           *
+           * Therefore this endpoint creates V2, V3, ...
+           * for normal newly created sets.
+           *
+           * The fallback still safely supports historical
+           * data if an old set exists without a version.
+           */
+          const nextVersionNo =
+            (latest?.version_no ?? 0) + 1;
+
           const now = new Date();
 
           const version =
             await tx.survey_versions.create({
               data: {
                 survey_id: surveyId,
-
-                version_no:
-                  (latest?.version_no ?? 0) +
-                  1,
-
+                version_no: nextVersionNo,
                 status: 'DRAFT',
-
-                created_by:
-                  createdBy,
-
-                created_at:
-                  now,
+                created_by: createdBy,
+                created_at: now,
               },
             });
 
@@ -251,15 +299,26 @@ export class SurveyVersionsService {
             },
           });
         },
+        {
+          isolationLevel:
+            Prisma.TransactionIsolationLevel
+              .Serializable,
+        },
       );
-    } catch (e: any) {
-      if (e.code === 'P2002') {
+    } catch (error: any) {
+      if (error?.code === 'P2002') {
         throw new ConflictException(
-          'Another version was created at the same time, please try again',
+          'Another survey version was created at the same time. Please review the latest version and try again.',
         );
       }
 
-      throw e;
+      if (error?.code === 'P2034') {
+        throw new ConflictException(
+          'The question set changed while the new version was being created. Please review the latest version and try again.',
+        );
+      }
+
+      throw error;
     }
   }
 
@@ -268,34 +327,39 @@ export class SurveyVersionsService {
   // =========================================================
 
   /**
-   * Safely applies a newer version of the SAME named
-   * question set to unfinished participant assignments.
+   * Applies an exact version of the SAME named question
+   * set to safe unfinished participant assignments.
    *
-   * Important rules:
+   * Rules:
    *
-   * - the target version must belong to surveyId
-   * - the target version must still be DRAFT
-   * - the target version must contain questions
+   * - whole question set must still be active
+   * - target must belong to surveyId
+   * - target must contain questions
+   * - DRAFT target can be applied and is then LOCKED
+   * - LOCKED target can be safely retried/reconciled
+   * - ARCHIVED target cannot be applied
    * - completed participants never move
    * - participants with saved drafts never move
-   * - only unfinished participants without drafts move
-   * - only evaluations belonging to this same named set
-   *   are considered
-   * - evaluations.survey_version_id is NOT changed
-   * - the target version is locked after reconciliation
+   * - participants already on target do not move again
+   * - only DRAFT/OPEN evaluations using the same named
+   *   question set are considered
+   * - evaluations.survey_version_id never changes
+   * - no draft or historical submission is deleted
    *
-   * Keeping the evaluation's base version unchanged
-   * preserves the original evaluation context.
+   * Allowing a LOCKED target to pass through the same
+   * reconciliation makes retries idempotent:
    *
-   * The participant-level survey_version_id is the
-   * effective version used by student access, drafts,
-   * and submissions.
+   * first request:
+   *   DRAFT -> reconcile -> LOCKED
+   *
+   * retry:
+   *   LOCKED -> reconcile safely -> no duplicate move
    */
   async applyToUnfinished(
     surveyId: bigint,
     versionId: bigint,
   ) {
-    await this.checkSurveyExists(
+    await this.checkSurveyActive(
       surveyId,
     );
 
@@ -328,15 +392,17 @@ export class SurveyVersionsService {
     }
 
     if (
-      targetVersion.status !== 'DRAFT'
+      targetVersion.status ===
+      'ARCHIVED'
     ) {
       throw new ConflictException(
-        'Only a DRAFT survey version can be applied to unfinished participants',
+        'An ARCHIVED survey version cannot be applied to unfinished participants',
       );
     }
 
     if (
-      targetVersion._count.questions === 0
+      targetVersion._count.questions ===
+      0
     ) {
       throw new BadRequestException(
         'The survey version has no questions',
@@ -348,10 +414,37 @@ export class SurveyVersionsService {
     return this.prisma.$transaction(
       async (tx) => {
         /*
-         * Re-read the target version inside the transaction.
-         *
-         * This prevents a stale pre-transaction check from
-         * silently applying a version whose state changed.
+         * Re-read the whole set inside the transaction.
+         * This prevents reconciliation from continuing if
+         * the question set was archived concurrently.
+         */
+        const currentSurvey =
+          await tx.surveys.findUnique({
+            where: {
+              id: surveyId,
+            },
+
+            select: {
+              id: true,
+              archived_at: true,
+            },
+          });
+
+        if (!currentSurvey) {
+          throw new NotFoundException(
+            'Question set not found',
+          );
+        }
+
+        if (currentSurvey.archived_at) {
+          throw new ConflictException(
+            'Archived question sets are read-only and cannot be applied to unfinished participants',
+          );
+        }
+
+        /*
+         * Re-read inside the transaction so that all
+         * reconciliation decisions use current state.
          */
         const currentTarget =
           await tx.survey_versions.findFirst({
@@ -362,6 +455,7 @@ export class SurveyVersionsService {
 
             select: {
               id: true,
+              survey_id: true,
               version_no: true,
               status: true,
               locked_at: true,
@@ -381,11 +475,11 @@ export class SurveyVersionsService {
         }
 
         if (
-          currentTarget.status !==
-          'DRAFT'
+          currentTarget.status ===
+          'ARCHIVED'
         ) {
           throw new ConflictException(
-            'Only a DRAFT survey version can be applied to unfinished participants',
+            'An ARCHIVED survey version cannot be applied to unfinished participants',
           );
         }
 
@@ -398,17 +492,16 @@ export class SurveyVersionsService {
           );
         }
 
+        const wasAlreadyLocked =
+          currentTarget.status ===
+          'LOCKED';
+
         /*
-         * Find evaluations whose BASE survey version
-         * belongs to this same named question set.
+         * Only evaluations whose ORIGINAL/base version
+         * belongs to the same named set are considered.
          *
-         * CLOSED evaluations are intentionally excluded.
-         *
-         * DRAFT and OPEN evaluations can still contain
-         * unfinished participant assignments that may
-         * safely move forward.
-         *
-         * We never change evaluations.survey_version_id.
+         * CLOSED evaluations are historical and are not
+         * modified.
          */
         const evaluations =
           await tx.evaluations.findMany({
@@ -446,10 +539,8 @@ export class SurveyVersionsService {
           evaluationIds.length > 0
         ) {
           /*
-           * Count completed assignments.
-           *
-           * They are historical records and must never
-           * move to another question-set version.
+           * Completed participants are immutable
+           * historical records.
            */
           skippedSubmitted =
             await tx.evaluation_participants.count({
@@ -464,12 +555,11 @@ export class SurveyVersionsService {
             });
 
           /*
-           * Count unfinished participants that already
-           * have a saved server-side draft.
+           * Draft holders remain pinned to their
+           * existing version.
            *
-           * Their answers reference the exact question
-           * IDs of their current version, so we must not
-           * reinterpret or silently discard that draft.
+           * The draft is never reinterpreted,
+           * overwritten or deleted.
            */
           skippedWithDraft =
             await tx.evaluation_participants.count({
@@ -493,8 +583,11 @@ export class SurveyVersionsService {
             });
 
           /*
-           * Some participant rows may already point to
-           * the target version. They require no update.
+           * This count is important for retries.
+           *
+           * Participants already moved by a previous
+           * successful request are reported here and
+           * will not be updated again.
            */
           alreadyOnTarget =
             await tx.evaluation_participants.count({
@@ -512,16 +605,18 @@ export class SurveyVersionsService {
             });
 
           /*
-           * Safe migration:
+           * Safe reconciliation.
            *
-           * - unfinished only
-           * - no saved draft
-           * - not already on the target version
+           * Only:
+           * - unfinished
+           * - no draft
+           * - not already on target
            *
-           * Historical rows with NULL survey_version_id
-           * are also eligible when they have no draft.
-           * After this update they become explicitly
-           * pinned to the target version.
+           * can move.
+           *
+           * Historical NULL participant version rows
+           * may move only when they are unfinished and
+           * have no draft.
            */
           const changed =
             await tx.evaluation_participants.updateMany({
@@ -554,36 +649,52 @@ export class SurveyVersionsService {
         }
 
         /*
-         * Lock the target version only after the safe
-         * participant reconciliation succeeds.
+         * A DRAFT target becomes immutable after
+         * successful reconciliation.
          *
-         * The conditional update also protects against
-         * another request changing the version state
-         * concurrently.
+         * A LOCKED target means this may be a retry.
+         * In that case we do not try to lock it again.
          */
-        const locked =
-          await tx.survey_versions.updateMany({
-            where: {
-              id: versionId,
-              survey_id: surveyId,
-              status: 'DRAFT',
-            },
+        if (!wasAlreadyLocked) {
+          const locked =
+            await tx.survey_versions.updateMany({
+              where: {
+                id: versionId,
+                survey_id:
+                  surveyId,
+                status: 'DRAFT',
+              },
 
-            data: {
-              status: 'LOCKED',
-              locked_at:
-                currentTarget.locked_at ??
-                now,
-            },
-          });
+              data: {
+                status:
+                  'LOCKED',
 
-        if (
-          locked.count === 0
-        ) {
-          throw new ConflictException(
-            'The survey version changed while reconciliation was running. Please try again.',
-          );
+                locked_at:
+                  currentTarget.locked_at ??
+                  now,
+              },
+            });
+
+          /*
+           * Another request may have changed the state
+           * while this transaction was running.
+           *
+           * Throwing here causes this transaction's
+           * participant updates to roll back.
+           */
+          if (
+            locked.count === 0
+          ) {
+            throw new ConflictException(
+              'The survey version changed while reconciliation was running. Please retry the operation.',
+            );
+          }
         }
+
+        const totalSkipped =
+          skippedSubmitted +
+          skippedWithDraft +
+          alreadyOnTarget;
 
         return {
           survey_id:
@@ -598,12 +709,48 @@ export class SurveyVersionsService {
           status:
             'LOCKED',
 
+          operation:
+            wasAlreadyLocked
+              ? 'RECONCILED_LOCKED_VERSION'
+              : 'APPLIED_AND_LOCKED',
+
+          retry_safe:
+            true,
+
+          was_already_locked:
+            wasAlreadyLocked,
+
           eligible_evaluations:
             evaluationIds.length,
 
+          moved_participants:
+            updatedParticipants,
+
+          /*
+           * Keep the old response property too so
+           * existing callers are not broken.
+           */
           updated_participants:
             updatedParticipants,
 
+          skipped_participants:
+            totalSkipped,
+
+          skipped_reasons: {
+            submitted:
+              skippedSubmitted,
+
+            protected_draft:
+              skippedWithDraft,
+
+            already_on_target:
+              alreadyOnTarget,
+          },
+
+          /*
+           * Keep existing fields for backward
+           * compatibility.
+           */
           skipped_submitted:
             skippedSubmitted,
 
@@ -621,10 +768,21 @@ export class SurveyVersionsService {
   // ARCHIVE VERSION
   // =========================================================
 
+  /**
+   * Archives one version while keeping all historical
+   * references intact.
+   *
+   * The parent question set itself must still be active.
+   * Once the whole set is archived it becomes read-only.
+   */
   async archive(
     surveyId: bigint,
     versionId: bigint,
   ) {
+    await this.checkSurveyActive(
+      surveyId,
+    );
+
     const version =
       await this.findOne(
         surveyId,
@@ -639,25 +797,107 @@ export class SurveyVersionsService {
       );
     }
 
-    return this.prisma.survey_versions.update({
-      where: {
-        id: versionId,
-      },
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const survey =
+            await tx.surveys.findUnique({
+              where: {
+                id: surveyId,
+              },
 
-      data: {
-        status: 'ARCHIVED',
-      },
-    });
+              select: {
+                archived_at: true,
+              },
+            });
+
+          if (!survey) {
+            throw new NotFoundException(
+              'Question set not found',
+            );
+          }
+
+          if (survey.archived_at) {
+            throw new ConflictException(
+              'Archived question sets are read-only',
+            );
+          }
+
+          const current =
+            await tx.survey_versions.findFirst({
+              where: {
+                id: versionId,
+                survey_id: surveyId,
+              },
+
+              select: {
+                id: true,
+                status: true,
+              },
+            });
+
+          if (!current) {
+            throw new NotFoundException(
+              'Survey version not found',
+            );
+          }
+
+          if (
+            current.status ===
+            'ARCHIVED'
+          ) {
+            throw new ConflictException(
+              'Survey version is already archived',
+            );
+          }
+
+          return tx.survey_versions.update({
+            where: {
+              id: versionId,
+            },
+
+            data: {
+              status: 'ARCHIVED',
+            },
+          });
+        },
+        {
+          isolationLevel:
+            Prisma.TransactionIsolationLevel
+              .Serializable,
+        },
+      );
+    } catch (error: any) {
+      if (error?.code === 'P2034') {
+        throw new ConflictException(
+          'The survey version changed while it was being archived. Please review the latest data and try again.',
+        );
+      }
+
+      throw error;
+    }
   }
 
   // =========================================================
   // DELETE VERSION
   // =========================================================
 
+  /**
+   * Deletes an unused version only.
+   *
+   * Whole archived question sets are read-only.
+   *
+   * Historical evaluation, participant, draft, or response
+   * references always prevent deletion.
+   */
   async remove(
     surveyId: bigint,
     versionId: bigint,
   ) {
+    await this.checkSurveyActive(
+      surveyId,
+    );
+
     const version =
       await this.findOne(
         surveyId,
@@ -672,20 +912,6 @@ export class SurveyVersionsService {
       );
     }
 
-    /*
-     * A version is considered used if ANY persisted
-     * evaluation history references it.
-     *
-     * This includes:
-     *
-     * - evaluation base version
-     * - participant effective version
-     * - saved draft version
-     * - submitted response version
-     *
-     * Checking all four prevents historical data from
-     * being orphaned or deleted.
-     */
     if (
       version._count.evaluations > 0 ||
       version._count
@@ -699,52 +925,156 @@ export class SurveyVersionsService {
       );
     }
 
-    await this.prisma.$transaction(
-      async (tx) => {
-        const questions =
-          await tx.questions.findMany({
+    try {
+      await this.prisma.$transaction(
+        async (tx) => {
+          /*
+           * Re-check parent state inside the transaction.
+           */
+          const survey =
+            await tx.surveys.findUnique({
+              where: {
+                id: surveyId,
+              },
+
+              select: {
+                archived_at: true,
+              },
+            });
+
+          if (!survey) {
+            throw new NotFoundException(
+              'Question set not found',
+            );
+          }
+
+          if (survey.archived_at) {
+            throw new ConflictException(
+              'Archived question sets are read-only and their versions cannot be deleted',
+            );
+          }
+
+          /*
+           * Re-check usage inside the same transaction as
+           * deletion.
+           */
+          const current =
+            await tx.survey_versions.findFirst({
+              where: {
+                id: versionId,
+                survey_id: surveyId,
+              },
+
+              select: {
+                id: true,
+                status: true,
+
+                _count: {
+                  select: {
+                    evaluations: true,
+                    evaluation_participants:
+                      true,
+                    assessment_drafts: true,
+                    responses: true,
+                  },
+                },
+              },
+            });
+
+          if (!current) {
+            throw new NotFoundException(
+              'Survey version not found',
+            );
+          }
+
+          if (
+            current.status ===
+            'LOCKED'
+          ) {
+            throw new ConflictException(
+              'A locked survey version cannot be deleted',
+            );
+          }
+
+          if (
+            current._count.evaluations >
+              0 ||
+            current._count
+              .evaluation_participants >
+              0 ||
+            current._count
+              .assessment_drafts > 0 ||
+            current._count.responses > 0
+          ) {
+            throw new ConflictException(
+              'Survey version is already used by evaluations, participants, drafts, or responses and cannot be deleted',
+            );
+          }
+
+          const questions =
+            await tx.questions.findMany({
+              where: {
+                survey_version_id:
+                  versionId,
+              },
+
+              select: {
+                id: true,
+              },
+            });
+
+          const questionIds =
+            questions.map(
+              (question) =>
+                question.id,
+            );
+
+          if (
+            questionIds.length > 0
+          ) {
+            await tx.question_options.deleteMany({
+              where: {
+                question_id: {
+                  in: questionIds,
+                },
+              },
+            });
+          }
+
+          await tx.questions.deleteMany({
             where: {
               survey_version_id:
                 versionId,
             },
-
-            select: {
-              id: true,
-            },
           });
 
-        const questionIds =
-          questions.map(
-            (question) =>
-              question.id,
-          );
-
-        if (
-          questionIds.length > 0
-        ) {
-          await tx.question_options.deleteMany({
+          await tx.survey_versions.delete({
             where: {
-              question_id: {
-                in: questionIds,
-              },
+              id: versionId,
             },
           });
-        }
+        },
+        {
+          isolationLevel:
+            Prisma.TransactionIsolationLevel
+              .Serializable,
+        },
+      );
+    } catch (error: any) {
+      if (error?.code === 'P2034') {
+        throw new ConflictException(
+          'The survey version changed while deletion was being processed. Please review the latest data and try again.',
+        );
+      }
 
-        await tx.questions.deleteMany({
-          where: {
-            survey_version_id:
-              versionId,
-          },
-        });
+      if (error?.code === 'P2003') {
+        throw new ConflictException(
+          'Survey version is referenced by historical data and cannot be deleted',
+        );
+      }
 
-        await tx.survey_versions.delete({
-          where: {
-            id: versionId,
-          },
-        });
-      },
-    );
+      throw error;
+    }
   }
 
   // =========================================================
@@ -752,18 +1082,29 @@ export class SurveyVersionsService {
   // =========================================================
 
   /**
-   * Used by the Questions feature.
+   * Used by the Questions feature before every question
+   * mutation.
    *
    * A version is editable only when:
    *
+   * - its parent question set is active
+   * - it is the LATEST version of that named set
    * - it is still DRAFT
    * - no non-DRAFT evaluation directly uses it
    * - no participant is pinned to it
    * - no draft references it
    * - no submitted response references it
    *
-   * Once participant/history data references the
-   * version, questions must remain immutable.
+   * This is also the stale-editor safeguard.
+   *
+   * Example:
+   *
+   * Admin A opens V2.
+   * Admin B creates V3.
+   * Admin A later tries to edit V2.
+   *
+   * V2 is no longer latest, so the request receives 409
+   * and the admin must re-review the latest version.
    */
   async assertEditable(
     versionId: bigint,
@@ -775,6 +1116,13 @@ export class SurveyVersionsService {
         },
 
         include: {
+          surveys: {
+            select: {
+              id: true,
+              archived_at: true,
+            },
+          },
+
           evaluations: {
             where: {
               status: {
@@ -809,7 +1157,57 @@ export class SurveyVersionsService {
     }
 
     if (
-      version.status !== 'DRAFT' ||
+      version.surveys.archived_at
+    ) {
+      throw new ConflictException(
+        'Archived question sets are read-only and their questions cannot be changed',
+      );
+    }
+
+    /*
+     * Find the authoritative latest version at the moment
+     * the edit request is processed.
+     */
+    const latest =
+      await this.prisma.survey_versions.findFirst({
+        where: {
+          survey_id:
+            version.survey_id,
+        },
+
+        orderBy: {
+          version_no: 'desc',
+        },
+
+        select: {
+          id: true,
+          version_no: true,
+        },
+      });
+
+    if (!latest) {
+      throw new ConflictException(
+        'The latest survey version could not be determined. Please reload the question set.',
+      );
+    }
+
+    if (
+      latest.id !== version.id
+    ) {
+      throw new ConflictException(
+        `This is no longer the latest survey version. Version ${latest.version_no} is now the latest. Please reload and review the latest version before editing.`,
+      );
+    }
+
+    if (
+      version.status !== 'DRAFT'
+    ) {
+      throw new ConflictException(
+        'Only the latest DRAFT survey version can be edited',
+      );
+    }
+
+    if (
       version.evaluations.length > 0 ||
       version._count
         .evaluation_participants > 0 ||
@@ -818,7 +1216,7 @@ export class SurveyVersionsService {
       version._count.responses > 0
     ) {
       throw new ConflictException(
-        'This survey version is locked or already referenced by participant history and its questions cannot be changed',
+        'This survey version is already referenced by participant or evaluation history and its questions cannot be changed',
       );
     }
 
@@ -829,6 +1227,12 @@ export class SurveyVersionsService {
   // INTERNAL HELPERS
   // =========================================================
 
+  /**
+   * Read helper.
+   *
+   * Archived question sets are still considered existing
+   * because historical reads must continue to work.
+   */
   private async checkSurveyExists(
     surveyId: bigint,
   ) {
@@ -845,8 +1249,46 @@ export class SurveyVersionsService {
 
     if (!survey) {
       throw new NotFoundException(
-        'Survey not found',
+        'Question set not found',
       );
     }
+
+    return survey;
+  }
+
+  /**
+   * Mutation helper.
+   *
+   * Whole-set archive makes the named question set
+   * read-only while preserving historical reads.
+   */
+  private async checkSurveyActive(
+    surveyId: bigint,
+  ) {
+    const survey =
+      await this.prisma.surveys.findUnique({
+        where: {
+          id: surveyId,
+        },
+
+        select: {
+          id: true,
+          archived_at: true,
+        },
+      });
+
+    if (!survey) {
+      throw new NotFoundException(
+        'Question set not found',
+      );
+    }
+
+    if (survey.archived_at) {
+      throw new ConflictException(
+        'Archived question sets are read-only',
+      );
+    }
+
+    return survey;
   }
 }

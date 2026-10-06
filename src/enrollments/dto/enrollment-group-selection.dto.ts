@@ -1,13 +1,20 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ApiProperty,
+  ApiPropertyOptional,
+} from '@nestjs/swagger';
+import {
+  IsArray,
   IsInt,
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+
+import { CLASS_GROUP_MAX_LENGTH } from '../../common/utils/class-group.util';
 
 export class EnrollmentGroupSelectionDto {
   @ApiProperty({
@@ -37,6 +44,7 @@ export class EnrollmentGroupSelectionDto {
   @ApiPropertyOptional({
     example: 4,
     minimum: 1,
+    maximum: 5,
     description:
       'Select students by effective year level in the selected academic year',
   })
@@ -44,6 +52,7 @@ export class EnrollmentGroupSelectionDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(5)
   year_level?: number;
 
   @ApiPropertyOptional({
@@ -60,13 +69,32 @@ export class EnrollmentGroupSelectionDto {
   major_id?: string;
 
   @ApiPropertyOptional({
-    example: 'AMS1-A',
-    maxLength: 50,
+    example: ['AMS1-A', 'AMS1-B'],
+    type: [String],
     description:
-      'Select students by class/group in their academic record for the selected academic year',
+      'Select students by class/groups in their academic records for the selected academic year',
   })
   @IsOptional()
-  @IsString()
-  @MaxLength(50)
-  class_group?: string;
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(CLASS_GROUP_MAX_LENGTH, {
+    each: true,
+  })
+  class_groups?: string[];
+
+  @ApiPropertyOptional({
+    example: ['101', '102'],
+    type: [String],
+    description:
+      'Student user IDs returned by preview and required for enrollment confirmation',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @Matches(/^[1-9]\d*$/, {
+    each: true,
+    message:
+      'confirmed_student_ids must contain positive integers',
+  })
+  confirmed_student_ids?: string[];
 }

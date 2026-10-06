@@ -2,6 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { class_type } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -11,7 +12,9 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { CourseOfferingGroupScopeDto } from './course-offering-group-scope.dto';
 
 export class UpdateCourseOfferingDto {
   @ApiPropertyOptional({
@@ -71,4 +74,24 @@ export class UpdateCourseOfferingDto {
   @IsString()
   @MaxLength(50)
   section_code?: string;
+
+  @ApiPropertyOptional({
+    type: [CourseOfferingGroupScopeDto],
+    description:
+      'Replacement explicit group scopes for this offering. Omit to preserve existing scopes.',
+    example: [
+      {
+        academic_year_id: '1',
+        generation_id: '2',
+        major_id: '3',
+        year_level: 4,
+        class_groups: ['A', 'B'],
+      },
+    ],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CourseOfferingGroupScopeDto)
+  group_scopes?: CourseOfferingGroupScopeDto[];
 }

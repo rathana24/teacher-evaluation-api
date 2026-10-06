@@ -4,6 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+
+import { normalizeClassGroup } from '../common/utils/class-group.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStudentAcademicRecordDto } from './dto/create-student-academic-record.dto';
 import { UpdateStudentAcademicRecordDto } from './dto/update-student-academic-record.dto';
@@ -190,11 +192,9 @@ export class StudentAcademicRecordsService {
           academic_year_id: academicYearId,
           year_level: dto.year_level,
           major_id: majorId,
-          class_group:
-            dto.class_group === undefined ||
-            dto.class_group === null
-              ? null
-              : dto.class_group.trim() || null,
+          class_group: normalizeClassGroup(
+            dto.class_group,
+          ),
         },
         select: academicRecordSelect,
       });
@@ -270,10 +270,9 @@ export class StudentAcademicRecordsService {
           }),
 
           ...(dto.class_group !== undefined && {
-            class_group:
-              dto.class_group === null
-                ? null
-                : dto.class_group.trim() || null,
+            class_group: normalizeClassGroup(
+              dto.class_group,
+            ),
           }),
         },
         select: academicRecordSelect,

@@ -100,6 +100,12 @@ describe('StudentExportService', () => {
           year_level: 4,
           class_group: 'AMS1-A',
 
+          academic_years: {
+            id: 1n,
+            name: '2025-2026',
+            start_year: 2025,
+          },
+
           majors: {
             id: 1n,
             code: 'AMS',
@@ -238,6 +244,34 @@ describe('StudentExportService', () => {
     ).not.toHaveBeenCalled();
   });
 
+  it('requires academic year, generation, and major context when class_group is provided', async () => {
+    await expect(
+      service.getExportData({
+        class_group: 'A',
+      }),
+    ).rejects.toThrow(
+      new BadRequestException(
+        'academic_year_id, generation_id, and major_id are required when class_group is provided',
+      ),
+    );
+
+    await expect(
+      service.getExportData({
+        academic_year_id: '1',
+        generation_id: '1',
+        class_group: 'A',
+      }),
+    ).rejects.toThrow(
+      new BadRequestException(
+        'academic_year_id, generation_id, and major_id are required when class_group is provided',
+      ),
+    );
+
+    expect(
+      prisma.students.findMany,
+    ).not.toHaveBeenCalled();
+  });
+
   it('rejects an unknown generation', async () => {
     prisma.student_generations.findUnique.mockResolvedValue(
       null,
@@ -365,6 +399,135 @@ describe('StudentExportService', () => {
         }),
       }),
     );
+  });
+
+  it('filters export by normalized class group within the exact placement scope', async () => {
+    prisma.student_generations.findUnique.mockResolvedValue(
+      {
+        id: 1n,
+        name: 'Gen43',
+      },
+    );
+
+    mockAcademicYear();
+
+    prisma.students.findMany.mockResolvedValue([
+      makeStudent({
+        id: 1n,
+        user_id: 73n,
+        student_code: 'e20221111',
+
+        student_academic_records: [
+          {
+            academic_year_id: 1n,
+            major_id: 1n,
+            year_level: 4,
+            class_group: '  a  ',
+
+            academic_years: {
+              id: 1n,
+              name: '2025-2026',
+              start_year: 2025,
+            },
+
+            majors: {
+              id: 1n,
+              code: 'AMS',
+              name:
+                'Applied Mathematics & Statistics',
+            },
+          },
+        ],
+      }),
+
+      makeStudent({
+        id: 2n,
+        user_id: 74n,
+        student_code: 'e20221112',
+
+        student_academic_records: [
+          {
+            academic_year_id: 1n,
+            major_id: 1n,
+            year_level: 4,
+            class_group: 'B',
+
+            academic_years: {
+              id: 1n,
+              name: '2025-2026',
+              start_year: 2025,
+            },
+
+            majors: {
+              id: 1n,
+              code: 'AMS',
+              name:
+                'Applied Mathematics & Statistics',
+            },
+          },
+        ],
+      }),
+    ]);
+
+    prisma.evaluation_participants.findMany.mockResolvedValue(
+      [],
+    );
+
+    const result =
+      await service.getExportData({
+        academic_year_id: '1',
+        generation_id: '1',
+        major_id: '1',
+        class_group: '  a  ',
+      });
+
+    expect(result.data).toHaveLength(1);
+
+    expect(
+      result.data[0].student_code,
+    ).toBe('e20221111');
+
+    expect(
+      result.data[0].placement,
+    ).toEqual({
+      academic_year: {
+        id: '1',
+        name: '2025-2026',
+        start_year: 2025,
+      },
+
+      year_level: 4,
+      major_id: '1',
+      class_group: 'A',
+      source: 'ACADEMIC_RECORD',
+    });
+
+    expect(
+      result.report.scope,
+    ).toEqual(
+      expect.objectContaining({
+        academic_year_id: '1',
+        generation_id: '1',
+        major_id: '1',
+        class_group: 'A',
+      }),
+    );
+
+    const studentQuery =
+      prisma.students.findMany.mock.calls[0][0];
+
+    expect(
+      studentQuery.where.generation_id,
+    ).toBe(1n);
+
+    expect(
+      studentQuery.where.student_academic_records,
+    ).toEqual({
+      some: {
+        academic_year_id: 1n,
+        major_id: 1n,
+      },
+    });
   });
 
   it('uses assigned published evaluations for academic-year population', async () => {
@@ -779,6 +942,12 @@ describe('StudentExportService', () => {
             year_level: 5,
             class_group: 'DS-A',
 
+            academic_years: {
+              id: 2n,
+              name: '2026-2027',
+              start_year: 2026,
+            },
+
             majors: {
               id: 2n,
               code: 'DS',
@@ -791,6 +960,12 @@ describe('StudentExportService', () => {
             major_id: 1n,
             year_level: 4,
             class_group: 'AMS1-A',
+
+            academic_years: {
+              id: 1n,
+              name: '2025-2026',
+              start_year: 2025,
+            },
 
             majors: {
               id: 1n,
@@ -831,6 +1006,12 @@ describe('StudentExportService', () => {
             year_level: 5,
             class_group: 'DS-A',
 
+            academic_years: {
+              id: 2n,
+              name: '2026-2027',
+              start_year: 2026,
+            },
+
             majors: {
               id: 2n,
               code: 'DS',
@@ -843,6 +1024,12 @@ describe('StudentExportService', () => {
             major_id: 1n,
             year_level: 4,
             class_group: 'AMS1-A',
+
+            academic_years: {
+              id: 1n,
+              name: '2025-2026',
+              start_year: 2025,
+            },
 
             majors: {
               id: 1n,
@@ -868,6 +1055,75 @@ describe('StudentExportService', () => {
       id: '2',
       code: 'DS',
       name: 'Data Science',
+    });
+  });
+
+  it('labels the placement academic year for class group in an all-time export', async () => {
+    prisma.students.findMany.mockResolvedValue([
+      makeStudent({
+        student_academic_records: [
+          {
+            academic_year_id: 2n,
+            major_id: 2n,
+            year_level: 5,
+            class_group: ' ds-a ',
+
+            academic_years: {
+              id: 2n,
+              name: '2026-2027',
+              start_year: 2026,
+            },
+
+            majors: {
+              id: 2n,
+              code: 'DS',
+              name: 'Data Science',
+            },
+          },
+
+          {
+            academic_year_id: 1n,
+            major_id: 1n,
+            year_level: 4,
+            class_group: 'AMS1-A',
+
+            academic_years: {
+              id: 1n,
+              name: '2025-2026',
+              start_year: 2025,
+            },
+
+            majors: {
+              id: 1n,
+              code: 'AMS',
+              name:
+                'Applied Mathematics & Statistics',
+            },
+          },
+        ],
+      }),
+    ]);
+
+    prisma.evaluation_participants.findMany.mockResolvedValue(
+      [],
+    );
+
+    const result =
+      await service.getExportData({});
+
+    expect(
+      result.data[0].placement,
+    ).toEqual({
+      academic_year: {
+        id: '2',
+        name: '2026-2027',
+        start_year: 2026,
+      },
+
+      year_level: 5,
+      major_id: '2',
+      class_group: 'DS-A',
+      source: 'ACADEMIC_RECORD',
     });
   });
 

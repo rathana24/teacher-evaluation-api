@@ -22,6 +22,10 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CreateEnrollmentDto } from './dto/create-enrollment.dto';
 import { EnrollmentGroupSelectionDto } from './dto/enrollment-group-selection.dto';
+import {
+  ConfirmEnrollmentReassignmentDto,
+  EnrollmentReassignmentDto,
+} from './dto/enrollment-reassignment.dto';
 import { EnrollmentsService } from './enrollments.service';
 
 const enrollmentExample = {
@@ -41,7 +45,7 @@ const enrollmentGroupSelectionExample = {
   generation_id: '1',
   year_level: 4,
   major_id: '1',
-  class_group: 'AMS1-A',
+  class_groups: ['AMS1-A'],
 };
 
 const enrollmentPreviewExample = {
@@ -52,12 +56,13 @@ const enrollmentPreviewExample = {
     generation_id: '1',
     year_level: 4,
     major_id: '1',
-    class_group: 'AMS1-A',
+    class_groups: ['AMS1-A'],
   },
 
   matched_count: 30,
   already_enrolled_count: 3,
   new_enrollment_count: 27,
+  confirmed_student_ids: ['4'],
 
   students: [
     {
@@ -190,7 +195,7 @@ export class EnrollmentsController {
     summary:
       'Preview students matching a group before enrollment',
     description:
-      'Resolves the selected academic year, generation, effective year level, major, and class group into explicit ACTIVE student accounts. No enrollment rows are created.',
+      'Resolves the selected academic year, generation, effective year level, major, and class groups into explicit ACTIVE student accounts. Send the returned confirmed_student_ids unchanged to the bulk confirmation endpoint. No enrollment rows are created.',
   })
   @ApiResponse({
     status: 200,
@@ -227,7 +232,7 @@ export class EnrollmentsController {
     summary:
       'Confirm and enroll a selected student group',
     description:
-      'Re-resolves the selected group and stores explicit enrollment rows. Students who are already enrolled are skipped.',
+      'Requires the confirmed_student_ids returned by preview. Re-resolves the selected group transactionally and rejects confirmation if the student set changed. Students who are already enrolled are skipped.',
   })
   @ApiResponse({
     status: 201,
@@ -254,6 +259,82 @@ export class EnrollmentsController {
     dto: EnrollmentGroupSelectionDto,
   ) {
     return this.enrollmentsService.bulkCreate(
+      offeringId,
+      dto,
+    );
+  }
+
+  @Post('reassignment/preview')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Preview the impact of reassigning a student enrollment',
+    description:
+      'Validates the target offering against the student placement and reports frozen evaluation participants, drafts, and submissions. No enrollment or evaluation data is changed.',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Reassignment impact preview returned successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Invalid target offering or student placement does not match the target group scope',
+  })
+  @ApiResponse({
+    status: 404,
+    description:
+      'Source enrollment or target offering not found',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Student is already enrolled in the target offering',
+  })
+  previewReassignment(
+    @Param('offeringId', ParseBigIntPipe)
+    offeringId: bigint,
+
+    @Body()
+    dto: EnrollmentReassignmentDto,
+  ) {
+    return this.enrollmentsService.previewReassignment(
+      offeringId,
+      dto,
+    );
+  }
+
+  @Post('reassignment/confirm')
+  @ApiOperation({
+    summary:
+      'Confirm a previewed student enrollment reassignment',
+    description:
+      'Re-validates the source enrollment, target offering group scope, student placement, target enrollment state, and evaluation impact inside one transaction. The operation moves only the enrollment. Frozen evaluation participants and academic placement records are preserved.',
+  })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Student enrollment reassigned successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Invalid reassignment input',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'The reassignment state changed after preview, or the source offering contains a protected evaluation draft or submission',
+  })
+  confirmReassignment(
+    @Param('offeringId', ParseBigIntPipe)
+    offeringId: bigint,
+
+    @Body()
+    dto: ConfirmEnrollmentReassignmentDto,
+  ) {
+    return this.enrollmentsService.confirmReassignment(
       offeringId,
       dto,
     );

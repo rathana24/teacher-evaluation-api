@@ -14,6 +14,7 @@ import {
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
   Min,
   MinLength,
@@ -116,12 +117,14 @@ export class ImportStudentsDto {
     example: 1,
     default: 1,
     minimum: 1,
+    maximum: 5,
     description:
       'Starting year level used when a new generation must be created',
   })
   @IsOptional()
   @IsInt()
   @Min(1)
+  @Max(5)
   starting_year_level?: number;
 
   @ApiProperty({
@@ -141,11 +144,13 @@ export class ImportStudentsDto {
   @ApiProperty({
     example: 1,
     minimum: 1,
+    maximum: 5,
     description:
       'Initial year level applied to imported students',
   })
   @IsInt()
   @Min(1)
+  @Max(5)
   year_level!: number;
 
   @ApiPropertyOptional({
