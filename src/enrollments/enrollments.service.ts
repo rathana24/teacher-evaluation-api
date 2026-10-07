@@ -48,60 +48,108 @@ export class EnrollmentsService {
     });
   }
 
-  async create(
-    offeringId: bigint,
-    dto: CreateEnrollmentDto,
-  ) {
-    await this.checkOfferingExists(offeringId);
-
-    const studentId = BigInt(dto.student_id);
-
-    /*
-     * enrollments.student_id references users.id.
-     *
-     * Only an ACTIVE STUDENT account may be enrolled.
-     */
-    const student =
-      await this.prisma.users.findUnique({
-        where: {
-          id: studentId,
-        },
-        select: {
-          role: true,
-          status: true,
-        },
-      });
-
-    if (!student || student.role !== 'STUDENT') {
-      throw new BadRequestException(
-        'student_id must refer to a user with role STUDENT',
-      );
-    }
-
-    if (student.status !== 'ACTIVE') {
-      throw new BadRequestException(
-        'Student account must be ACTIVE',
-      );
-    }
+  async create(offeringId: bigint, dto: CreateEnrollmentDto) {
+    const studentId = BigInt(dto.student_id); // users.id, not students.id
 
     try {
-      return await this.prisma.enrollments.create({
-        data: {
-          student_id: studentId,
-          course_offering_id: offeringId,
-          enrolled_at: new Date(),
-        },
-        include: enrollmentInclude,
+      return await this.prisma.$transaction(async (tx) => {
+        const offering = await tx.course_offerings.findUnique({
+          where: { id: offeringId },
+          select: {
+            id: true,
+            semesters: { select: { academic_year_id: true } },
+            group_scopes: {
+              select: {
+                academic_year_id: true,
+                generation_id: true,
+                major_id: true,
+                year_level: true,
+                class_group: true,
+              },
+            },
+          },
+        });
+
+        if (!offering) {
+          throw new NotFoundException('Course offering not found');
+        }
+
+        await this.assertActiveStudent(studentId, tx);
+
+        // Preserve existing behavior for offerings without saved scopes.
+        if (offering.group_scopes.length > 0) {
+          const academicYearId = offering.semesters.academic_year_id;
+
+          const student = await tx.students.findFirst({
+            where: { user_id: studentId },
+            select: {
+              generation_id: true,
+              student_academic_records: {
+                where: { academic_year_id: academicYearId },
+                select: {
+                  academic_year_id: true,
+                  major_id: true,
+                  year_level: true,
+                  class_group: true,
+                },
+              },
+            },
+          });
+
+          const placement = student?.student_academic_records[0];
+
+          if (!student || !placement) {
+            throw new BadRequestException(
+              'Student must have a recorded placement for the offering academic year',
+            );
+          }
+
+          const group = normalizeClassGroups([
+            placement.class_group ?? '',
+          ])[0];
+
+          const matchesScope =
+            group !== undefined &&
+            offering.group_scopes.some(
+              (scope) =>
+                scope.academic_year_id === academicYearId &&
+                scope.generation_id === student.generation_id &&
+                scope.major_id === placement.major_id &&
+                scope.year_level === placement.year_level &&
+                normalizeClassGroups([scope.class_group])[0] === group,
+            );
+
+          if (!matchesScope) {
+            throw new BadRequestException(
+              'Student placement does not match the course offering group scope',
+            );
+          }
+        }
+
+        return tx.enrollments.create({
+          data: {
+            student_id: studentId,
+            course_offering_id: offeringId,
+            enrolled_at: new Date(),
+          },
+          include: enrollmentInclude,
+        });
+      }, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       });
     } catch (error: unknown) {
-      if (
-        error instanceof
-          Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
-      ) {
-        throw new ConflictException(
-          'Student is already enrolled in this course offering',
-        );
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') {
+          throw new ConflictException(
+            'Student is already enrolled in this course offering',
+          );
+        }
+
+        if (error.code === 'P2034') {
+          throw new ConflictException(
+            'Enrollment state changed concurrently. Review the student and offering before retrying.',
+          );
+        }
       }
 
       throw error;
@@ -117,20 +165,10 @@ export class EnrollmentsService {
     const normalizedClassGroups =
       normalizeClassGroups(dto.class_groups);
 
-    const students =
-      await this.studentsService.selectStudentsForEnrollment(
-        {
-          academic_year_id:
-            dto.academic_year_id,
-          generation_id: dto.generation_id,
-          year_level: dto.year_level,
-          major_id: dto.major_id,
-          class_groups:
-            dto.class_groups === undefined
-              ? undefined
-              : normalizedClassGroups,
-        },
-      );
+    const students = await this.selectOfferingStudents(
+      offeringId,
+      dto,
+    );
 
     const userIds = students.map(
       (student) => student.user_id,
@@ -212,131 +250,218 @@ export class EnrollmentsService {
       );
     }
 
-    const normalizedClassGroups =
-      normalizeClassGroups(dto.class_groups);
+    const confirmedIds = new Set(
+      dto.confirmed_student_ids.map((id) => BigInt(id).toString()),
+    );
 
-    const confirmedStudentIds =
-      dto.confirmed_student_ids.map(
-        (id) => BigInt(id),
-      );
-
-    return this.prisma.$transaction(
-      async (tx) => {
-        const students =
-          await this.studentsService.selectStudentsForEnrollment(
-            {
-              academic_year_id:
-                dto.academic_year_id,
-              generation_id:
-                dto.generation_id,
-              year_level:
-                dto.year_level,
-              major_id:
-                dto.major_id,
-              class_groups:
-                dto.class_groups === undefined
-                  ? undefined
-                  : normalizedClassGroups,
-            },
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const students = await this.selectOfferingStudents(
+            offeringId,
+            dto,
             tx,
           );
 
-        const currentStudentIds =
-          students.map(
-            (student) => student.user_id,
-          );
+          const studentIds = [
+            ...new Set(students.map((student) => student.user_id)),
+          ];
 
-        const currentIdSet = new Set(
-          currentStudentIds.map((id) =>
-            id.toString(),
-          ),
-        );
+          if (
+            studentIds.length !== confirmedIds.size ||
+            studentIds.some((id) => !confirmedIds.has(id.toString()))
+          ) {
+            throw new ConflictException(
+              'Enrollment selection changed after preview. Please preview the group again before confirming.',
+            );
+          }
 
-        const confirmedIdSet = new Set(
-          confirmedStudentIds.map((id) =>
-            id.toString(),
-          ),
-        );
+          if (studentIds.length === 0) {
+            return {
+              course_offering_id: offeringId,
+              matched_count: 0,
+              enrolled_count: 0,
+              already_enrolled_count: 0,
+            };
+          }
 
-        const sameStudentSet =
-          currentIdSet.size ===
-            confirmedIdSet.size &&
-          [...currentIdSet].every((id) =>
-            confirmedIdSet.has(id),
-          );
-
-        if (!sameStudentSet) {
-          throw new ConflictException(
-            'Enrollment selection changed after preview. Please preview the group again before confirming.',
-          );
-        }
-
-        if (currentStudentIds.length === 0) {
-          return {
-            course_offering_id:
-              offeringId,
-            matched_count: 0,
-            enrolled_count: 0,
-            already_enrolled_count: 0,
-          };
-        }
-
-        const existingEnrollments =
-          await tx.enrollments.findMany({
+          const existing = await tx.enrollments.findMany({
             where: {
-              course_offering_id:
-                offeringId,
-              student_id: {
-                in: currentStudentIds,
-              },
+              course_offering_id: offeringId,
+              student_id: { in: studentIds },
             },
-            select: {
-              student_id: true,
-            },
+            select: { student_id: true },
           });
 
-        const enrolledUserIds = new Set(
-          existingEnrollments.map(
-            (enrollment) =>
-              enrollment.student_id.toString(),
-          ),
-        );
-
-        const newStudentIds =
-          currentStudentIds.filter(
-            (studentId) =>
-              !enrolledUserIds.has(
-                studentId.toString(),
-              ),
+          const enrolledIds = new Set(
+            existing.map((row) => row.student_id.toString()),
           );
 
-        if (newStudentIds.length > 0) {
-          await tx.enrollments.createMany({
-            data: newStudentIds.map(
-              (studentId) => ({
-                student_id: studentId,
-                course_offering_id:
-                  offeringId,
-                enrolled_at: new Date(),
-              }),
-            ),
-            skipDuplicates: true,
-          });
-        }
+          const newIds = studentIds.filter(
+            (id) => !enrolledIds.has(id.toString()),
+          );
 
-        return {
-          course_offering_id:
-            offeringId,
-          matched_count:
-            currentStudentIds.length,
-          enrolled_count:
-            newStudentIds.length,
-          already_enrolled_count:
-            currentStudentIds.length -
-            newStudentIds.length,
-        };
+          const inserted =
+            newIds.length === 0
+              ? { count: 0 }
+              : await tx.enrollments.createMany({
+                  data: newIds.map((id) => ({
+                    student_id: id,
+                    course_offering_id: offeringId,
+                    enrolled_at: new Date(),
+                  })),
+                  skipDuplicates: true,
+                });
+
+          return {
+            course_offering_id: offeringId,
+            matched_count: studentIds.length,
+            enrolled_count: inserted.count,
+            already_enrolled_count: studentIds.length - inserted.count,
+          };
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        },
+      );
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2034'
+      ) {
+        throw new ConflictException(
+          'Enrollment state changed concurrently. Please preview the group again before confirming.',
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  private async assertActiveStudent(
+    studentId: bigint,
+    tx?: Prisma.TransactionClient,
+    confirmation = false,
+  ) {
+    const db = tx ?? this.prisma;
+
+    const account = await db.users.findUnique({
+      where: { id: studentId },
+      select: { role: true, status: true },
+    });
+
+    const Exception = confirmation
+      ? ConflictException
+      : BadRequestException;
+
+    if (!account || account.role !== 'STUDENT') {
+      throw new Exception(
+        confirmation
+          ? 'Student account changed after preview. Please preview again before confirming.'
+          : 'student_id must refer to a user with role STUDENT',
+      );
+    }
+
+    if (account.status !== 'ACTIVE') {
+      throw new Exception(
+        confirmation
+          ? 'Student account is no longer ACTIVE. Please preview again before confirming.'
+          : 'Student account must be ACTIVE',
+      );
+    }
+  }
+
+  private async selectOfferingStudents(
+    offeringId: bigint,
+    dto: EnrollmentGroupSelectionDto,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const db = tx ?? this.prisma;
+
+    const offering = await db.course_offerings.findUnique({
+      where: { id: offeringId },
+      select: {
+        semesters: {
+          select: { academic_year_id: true },
+        },
+        group_scopes: {
+          select: {
+            academic_year_id: true,
+            generation_id: true,
+            major_id: true,
+            year_level: true,
+            class_group: true,
+          },
+        },
       },
-    );
+    });
+
+    if (!offering) {
+      throw new NotFoundException('Course offering not found');
+    }
+
+    const academicYearId = BigInt(dto.academic_year_id);
+
+    if (
+      offering.group_scopes.length > 0 &&
+      academicYearId !== offering.semesters.academic_year_id
+    ) {
+      throw new BadRequestException(
+        'Selected academic year must match the course offering academic year',
+      );
+    }
+
+    const filters = {
+      academic_year_id: dto.academic_year_id,
+      generation_id: dto.generation_id,
+      year_level: dto.year_level,
+      major_id: dto.major_id,
+      class_groups:
+        dto.class_groups === undefined
+          ? undefined
+          : normalizeClassGroups(dto.class_groups),
+    };
+
+    const students = tx
+      ? await this.studentsService.selectStudentsForEnrollment(filters, tx)
+      : await this.studentsService.selectStudentsForEnrollment(filters);
+
+    if (offering.group_scopes.length === 0) {
+      return students;
+    }
+
+    return students.filter((student) => {
+      if (
+        student.users.role !== 'STUDENT' ||
+        student.users.status !== 'ACTIVE'
+      ) {
+        return false;
+      }
+
+      const placement = student.student_academic_records.find(
+        (record) => record.academic_year_id === academicYearId,
+      );
+
+      if (!placement) {
+        return false;
+      }
+
+      const group = normalizeClassGroups([
+        placement.class_group ?? '',
+      ])[0];
+
+      return (
+        group !== undefined &&
+        offering.group_scopes.some(
+          (scope) =>
+            scope.academic_year_id === academicYearId &&
+            scope.generation_id === student.generation_id &&
+            scope.major_id === placement.major_id &&
+            scope.year_level === placement.year_level &&
+            normalizeClassGroups([scope.class_group])[0] === group,
+        )
+      );
+    });
   }
 
   async previewReassignment(
@@ -357,6 +482,8 @@ export class EnrollmentsService {
           'Source and target course offerings must be different',
         );
       }
+
+      await this.assertActiveStudent(studentId);
 
       const sourceEnrollment =
         await this.prisma.enrollments.findFirst({
@@ -667,8 +794,11 @@ export class EnrollmentsService {
       );
     }
 
-    return this.prisma.$transaction(
-      async (tx) => {
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          await this.assertActiveStudent(studentId, tx, true);
+
         /*
          * Re-check the exact source enrollment returned
          * by the preview.
@@ -972,8 +1102,23 @@ export class EnrollmentsService {
 
           reassigned: true,
         };
-      },
-    );
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        },
+      );
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2034'
+      ) {
+        throw new ConflictException(
+          'Reassignment state changed concurrently. Please preview again before confirming.',
+        );
+      }
+
+      throw error;
+    }
   }
 
   async remove(

@@ -14,6 +14,8 @@ import { EnrollmentsService } from './enrollments.service';
 
 type OfferingResult = {
   id: bigint;
+  semesters?: { academic_year_id: bigint };
+  group_scopes?: ReassignmentOfferingResult['group_scopes'];
 };
 
 type UserResult = {
@@ -248,6 +250,10 @@ describe('EnrollmentsService', () => {
       findUnique: offeringFindUniqueMock,
     },
 
+    users: {
+      findUnique: userFindUniqueMock,
+    },
+
     students: {
       findFirst:
         reassignmentStudentFindFirstMock,
@@ -299,6 +305,9 @@ describe('EnrollmentsService', () => {
         callback: (
           tx: typeof transactionMock,
         ) => Promise<unknown>,
+        _options?: {
+          isolationLevel: Prisma.TransactionIsolationLevel;
+        },
       ) => callback(transactionMock),
     ),
   };
@@ -542,6 +551,8 @@ describe('EnrollmentsService', () => {
 
     offeringFindUniqueMock.mockResolvedValue({
       id: BigInt(1),
+      semesters: { academic_year_id: 2n },
+      group_scopes: [],
     });
 
     userFindUniqueMock.mockResolvedValue({
@@ -569,7 +580,7 @@ describe('EnrollmentsService', () => {
     });
 
     enrollmentCreateManyMock.mockResolvedValue({
-      count: 0,
+      count: 3,
     });
 
     enrollmentFindFirstMock.mockResolvedValue({
@@ -664,6 +675,57 @@ describe('EnrollmentsService', () => {
   });
 
   describe('create', () => {
+    it.each([
+      ['matching A', 'A', 1n, 1n, 4, 2n, true],
+      ['wrong group', 'B', 1n, 1n, 4, 2n, false],
+      ['wrong generation', 'A', 2n, 1n, 4, 2n, false],
+      ['wrong major', 'A', 1n, 2n, 4, 2n, false],
+      ['wrong year level', 'A', 1n, 1n, 3, 2n, false],
+      ['wrong scope academic year', 'A', 1n, 1n, 4, 3n, false],
+      ['normalized group', ' a ', 1n, 1n, 4, 2n, true],
+      ['unknown group', null, 1n, 1n, 4, 2n, false],
+    ] as const)(
+      'checks saved scope: %s',
+      async (_, group, generation, major, year, scopeYear, allowed) => {
+        offeringFindUniqueMock.mockResolvedValue({
+          id: 1n,
+          semesters: { academic_year_id: 2n },
+          group_scopes: [{
+            academic_year_id: scopeYear,
+            generation_id: 1n,
+            major_id: 1n,
+            year_level: 4,
+            class_group: 'A',
+          }],
+        });
+
+        reassignmentStudentFindFirstMock.mockResolvedValue({
+          id: 10n,
+          user_id: 100n,
+          student_code: 'test',
+          generation_id: generation,
+          student_academic_records: [{
+            academic_year_id: 2n,
+            major_id: major,
+            year_level: year,
+            class_group: group,
+          }],
+        });
+
+        const operation = service.create(1n, {
+          student_id: '100',
+        });
+
+        if (allowed) {
+          await expect(operation).resolves.toBeDefined();
+          expect(enrollmentCreateMock).toHaveBeenCalledTimes(1);
+        } else {
+          await expect(operation).rejects.toThrow(BadRequestException);
+          expect(enrollmentCreateMock).not.toHaveBeenCalled();
+        }
+      },
+    );
+
     it('should enroll an ACTIVE STUDENT account', async () => {
       const result = await service.create(
         BigInt(1),
@@ -1224,6 +1286,147 @@ describe('EnrollmentsService', () => {
     });
   });
 
+  describe('saved offering scope for bulk enrollment', () => {
+    const scope = {
+      academic_year_id: 2n,
+      generation_id: 1n,
+      major_id: 1n,
+      year_level: 4,
+      class_group: 'AMS1-A',
+    };
+
+    beforeEach(() => {
+      offeringFindUniqueMock.mockResolvedValue({
+        id: 1n,
+        semesters: { academic_year_id: 2n },
+        group_scopes: [scope],
+      });
+    });
+
+    it.each([
+      ['other group', { class_group: 'AMS1-B' }, 1n, false],
+      ['other major', { major_id: 2n }, 1n, false],
+      ['other year level', { year_level: 3 }, 1n, false],
+      ['other placement year', { academic_year_id: 3n }, 1n, false],
+      ['other generation', {}, 2n, false],
+      ['missing placement', {}, 1n, true],
+    ])(
+      'excludes %s from preview and rejects confirmation',
+      async (_, changes, generation, missingPlacement) => {
+        selectStudentsForEnrollmentMock.mockResolvedValue([{
+          ...selectedStudent1,
+          generation_id: generation,
+          student_academic_records: missingPlacement
+            ? []
+            : [{
+                ...selectedStudent1.student_academic_records[0],
+                ...changes,
+              }],
+        }]);
+
+        const preview = await service.previewGroup(1n, groupDto);
+
+        expect(preview.confirmed_student_ids).toEqual([]);
+        expect(preview.matched_count).toBe(0);
+
+        await expect(service.bulkCreate(1n, {
+          ...groupDto,
+          confirmed_student_ids: ['100'],
+        })).rejects.toThrow(ConflictException);
+
+        expect(enrollmentCreateManyMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it('accepts both configured groups and uses the database insert count', async () => {
+      offeringFindUniqueMock.mockResolvedValue({
+        id: 1n,
+        semesters: { academic_year_id: 2n },
+        group_scopes: [
+          scope,
+          { ...scope, class_group: 'AMS1-B' },
+        ],
+      });
+
+      selectStudentsForEnrollmentMock.mockResolvedValue([
+        selectedStudent1,
+        {
+          ...selectedStudent2,
+          student_academic_records: [{
+            ...selectedStudent2.student_academic_records[0],
+            class_group: 'AMS1-B',
+          }],
+        },
+      ]);
+
+      const dto = {
+        ...groupDto,
+        class_groups: ['AMS1-A', 'AMS1-B'],
+      };
+
+      const preview = await service.previewGroup(1n, dto);
+
+      expect(preview.confirmed_student_ids).toEqual(['100', '101']);
+
+      enrollmentCreateManyMock.mockResolvedValueOnce({ count: 2 });
+
+      const result = await service.bulkCreate(1n, {
+        ...dto,
+        confirmed_student_ids: preview.confirmed_student_ids,
+      });
+
+      expect(result.enrolled_count).toBe(2);
+      expect(enrollmentCreateManyMock).toHaveBeenCalledWith({
+        data: [
+          {
+            student_id: 100n,
+            course_offering_id: 1n,
+            enrolled_at: expect.any(Date),
+          },
+          {
+            student_id: 101n,
+            course_offering_id: 1n,
+            enrolled_at: expect.any(Date),
+          },
+        ],
+        skipDuplicates: true,
+      });
+    });
+
+    it('rejects selection from another academic year without writing', async () => {
+      const dto = { ...groupDto, academic_year_id: '3' };
+
+      await expect(
+        service.previewGroup(1n, dto),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        service.bulkCreate(1n, dto),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(enrollmentCreateManyMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects scope changes that change membership after preview', async () => {
+      const preview = await service.previewGroup(1n, groupDto);
+
+      expect(preview.confirmed_student_ids).toHaveLength(3);
+
+      offeringFindUniqueMock.mockResolvedValue({
+        id: 1n,
+        semesters: { academic_year_id: 2n },
+        group_scopes: [{ ...scope, class_group: 'AMS1-B' }],
+      });
+
+      await expect(service.bulkCreate(1n, {
+        ...groupDto,
+        confirmed_student_ids: preview.confirmed_student_ids,
+      })).rejects.toThrow(ConflictException);
+
+      expect(enrollmentCreateManyMock).not.toHaveBeenCalled();
+    });
+  });
+
   describe('previewReassignment', () => {
     beforeEach(() => {
       enrollmentFindFirstMock
@@ -1668,6 +1871,114 @@ describe('EnrollmentsService', () => {
       expect(
         enrollmentCreateMock,
       ).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reassignment account protection', () => {
+    it.each([
+      null,
+      { role: 'LECTURER', status: 'ACTIVE' },
+      { role: 'STUDENT', status: 'INACTIVE' },
+    ] as const)(
+      'rejects an ineligible account in preview and confirmation: %j',
+      async (account) => {
+        userFindUniqueMock.mockResolvedValue(account);
+
+        await expect(
+          service.previewReassignment(1n, reassignmentDto),
+        ).rejects.toThrow(BadRequestException);
+
+        await expect(
+          service.confirmReassignment(1n, confirmReassignmentDto),
+        ).rejects.toThrow(ConflictException);
+
+        expect(enrollmentDeleteMock).not.toHaveBeenCalled();
+        expect(enrollmentCreateMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects a student disabled after a valid preview', async () => {
+      enrollmentFindFirstMock
+        .mockResolvedValueOnce({ id: 1n })
+        .mockResolvedValueOnce(null);
+
+      offeringFindUniqueMock
+        .mockResolvedValueOnce(reassignmentTargetOffering)
+        .mockResolvedValueOnce({
+          id: 1n,
+          course_id: 10n,
+          semester_id: 20n,
+        });
+
+      reassignmentStudentFindFirstMock.mockResolvedValue(
+        reassignmentStudent,
+      );
+      evaluationParticipantFindManyMock.mockResolvedValue([]);
+
+      const preview = await service.previewReassignment(
+        1n,
+        reassignmentDto,
+      );
+
+      expect(preview.can_confirm).toBe(true);
+
+      userFindUniqueMock.mockResolvedValue({
+        role: 'STUDENT',
+        status: 'INACTIVE',
+      });
+
+      await expect(
+        service.confirmReassignment(1n, confirmReassignmentDto),
+      ).rejects.toThrow(ConflictException);
+
+      expect(enrollmentDeleteMock).not.toHaveBeenCalled();
+      expect(enrollmentCreateMock).not.toHaveBeenCalled();
+    });
+
+    it('maps a reassignment transaction conflict to a review conflict', async () => {
+      prismaMock.$transaction.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('Write conflict', {
+          code: 'P2034',
+          clientVersion: '6.19.3',
+        }),
+      );
+
+      await expect(
+        service.confirmReassignment(1n, confirmReassignmentDto),
+      ).rejects.toThrow(
+        new ConflictException(
+          'Reassignment state changed concurrently. Please preview again before confirming.',
+        ),
+      );
+
+      expect(enrollmentDeleteMock).not.toHaveBeenCalled();
+      expect(enrollmentCreateMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps reassignment blocked when target group scope is absent', async () => {
+      enrollmentFindFirstMock.mockResolvedValueOnce({ id: 1n });
+
+      offeringFindUniqueMock
+        .mockResolvedValueOnce({
+          ...reassignmentTargetOffering,
+          group_scopes: [],
+        })
+        .mockResolvedValueOnce({
+          id: 1n,
+          course_id: 10n,
+          semester_id: 20n,
+        });
+
+      reassignmentStudentFindFirstMock.mockResolvedValue(
+        reassignmentStudent,
+      );
+
+      await expect(
+        service.previewReassignment(1n, reassignmentDto),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(enrollmentDeleteMock).not.toHaveBeenCalled();
+      expect(enrollmentCreateMock).not.toHaveBeenCalled();
     });
   });
 
