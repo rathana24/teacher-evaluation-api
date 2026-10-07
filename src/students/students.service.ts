@@ -1,3 +1,4 @@
+import { resolveStudentPlacement } from '../common/utils/student-placement.util';
 import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
   BadRequestException,
@@ -67,6 +68,7 @@ const studentSelect = {
       year_level: true,
       major_id: true,
       class_group: true,
+      progression_action: true,
       created_at: true,
       updated_at: true,
 
@@ -95,10 +97,9 @@ const studentSelect = {
   },
 } satisfies Prisma.studentsSelect;
 
-type StudentWithRelations =
-  Prisma.studentsGetPayload<{
-    select: typeof studentSelect;
-  }>;
+type StudentWithRelations = Prisma.studentsGetPayload<{
+  select: typeof studentSelect;
+}>;
 
 type AcademicYearContext = {
   id: bigint;
@@ -137,9 +138,7 @@ export class StudentsService {
         : undefined;
 
     const majorId =
-      query.major_id !== undefined
-        ? BigInt(query.major_id)
-        : undefined;
+      query.major_id !== undefined ? BigInt(query.major_id) : undefined;
 
     /*
      * year_level, major_id and class_group describe an
@@ -150,73 +149,59 @@ export class StudentsService {
       majorId !== undefined ||
       query.class_group !== undefined;
 
-    if (
-      hasPlacementFilter &&
-      academicYearId === undefined
-    ) {
+    if (hasPlacementFilter && academicYearId === undefined) {
       throw new BadRequestException(
         'academic_year_id is required when filtering by year_level, major_id, or class_group',
       );
     }
 
-    let selectedAcademicYear:
-      | AcademicYearContext
-      | null = null;
+    let selectedAcademicYear: AcademicYearContext | null = null;
 
     if (academicYearId !== undefined) {
-      selectedAcademicYear =
-        await this.prisma.academic_years.findUnique({
-          where: {
-            id: academicYearId,
-          },
-          select: {
-            id: true,
-            name: true,
-            start_year: true,
-            is_active: true,
-          },
-        });
+      selectedAcademicYear = await this.prisma.academic_years.findUnique({
+        where: {
+          id: academicYearId,
+        },
+        select: {
+          id: true,
+          name: true,
+          start_year: true,
+          is_active: true,
+        },
+      });
 
       if (!selectedAcademicYear) {
-        throw new NotFoundException(
-          'Academic year not found',
-        );
+        throw new NotFoundException('Academic year not found');
       }
     }
 
     if (generationId !== undefined) {
-      const generation =
-        await this.prisma.student_generations.findUnique({
-          where: {
-            id: generationId,
-          },
-          select: {
-            id: true,
-          },
-        });
+      const generation = await this.prisma.student_generations.findUnique({
+        where: {
+          id: generationId,
+        },
+        select: {
+          id: true,
+        },
+      });
 
       if (!generation) {
-        throw new NotFoundException(
-          'Student generation not found',
-        );
+        throw new NotFoundException('Student generation not found');
       }
     }
 
     if (majorId !== undefined) {
-      const major =
-        await this.prisma.majors.findUnique({
-          where: {
-            id: majorId,
-          },
-          select: {
-            id: true,
-          },
-        });
+      const major = await this.prisma.majors.findUnique({
+        where: {
+          id: majorId,
+        },
+        select: {
+          id: true,
+        },
+      });
 
       if (!major) {
-        throw new NotFoundException(
-          'Major not found',
-        );
+        throw new NotFoundException('Major not found');
       }
     }
 
@@ -257,14 +242,13 @@ export class StudentsService {
       }),
     };
 
-    const students =
-      await this.prisma.students.findMany({
-        where,
-        select: studentSelect,
-        orderBy: {
-          student_code: 'asc',
-        },
-      });
+    const students = await this.prisma.students.findMany({
+      where,
+      select: studentSelect,
+      orderBy: {
+        student_code: 'asc',
+      },
+    });
 
     /*
      * Do not combine contextual and non-contextual students
@@ -274,69 +258,51 @@ export class StudentsService {
     let filteredStudents;
 
     if (selectedAcademicYear !== null) {
-      const studentsWithContext = students.map(
-        (student) =>
-          this.attachAcademicContext(
-            student,
-            selectedAcademicYear,
-          ),
+      const studentsWithContext = students.map((student) =>
+        this.attachAcademicContext(student, selectedAcademicYear),
       );
 
-      filteredStudents =
-        studentsWithContext.filter((student) => {
-          const context =
-            student.academic_context;
+      filteredStudents = studentsWithContext.filter((student) => {
+        const context = student.academic_context;
 
-          /*
-           * Effective year level may come from the explicit
-           * academic record or generation calculation.
-           */
-          if (
-            query.year_level !== undefined &&
-            context.effective_year_level !==
-              query.year_level
-          ) {
+        /*
+         * Effective year level may come from the explicit
+         * academic record or generation calculation.
+         */
+        if (
+          query.year_level !== undefined &&
+          context.effective_year_level !== query.year_level
+        ) {
+          return false;
+        }
+
+        /*
+         * Major must come from the explicit placement
+         * record for the selected academic year.
+         */
+        if (majorId !== undefined) {
+          if (context.placement.major_id !== majorId) {
             return false;
           }
+        }
 
-          /*
-           * Major must come from the explicit placement
-           * record for the selected academic year.
-           */
-          if (majorId !== undefined) {
-            if (
-              context.academic_record?.major_id !==
-              majorId
-            ) {
-              return false;
-            }
+        /*
+         * Class/group also belongs to the explicit
+         * historical placement for that academic year.
+         */
+        if (query.class_group !== undefined) {
+          const expectedClassGroup = query.class_group.trim().toLowerCase();
+
+          const actualClassGroup =
+            context.academic_record?.class_group?.trim().toLowerCase() ?? null;
+
+          if (actualClassGroup !== expectedClassGroup) {
+            return false;
           }
+        }
 
-          /*
-           * Class/group also belongs to the explicit
-           * historical placement for that academic year.
-           */
-          if (query.class_group !== undefined) {
-            const expectedClassGroup =
-              query.class_group
-                .trim()
-                .toLowerCase();
-
-            const actualClassGroup =
-              context.academic_record?.class_group
-                ?.trim()
-                .toLowerCase() ?? null;
-
-            if (
-              actualClassGroup !==
-              expectedClassGroup
-            ) {
-              return false;
-            }
-          }
-
-          return true;
-        });
+        return true;
+      });
     } else {
       filteredStudents = students;
     }
@@ -347,17 +313,11 @@ export class StudentsService {
      */
     const total = filteredStudents.length;
 
-    const totalPages =
-      total === 0
-        ? 0
-        : Math.ceil(total / limit);
+    const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
 
     const start = (page - 1) * limit;
 
-    const data = filteredStudents.slice(
-      start,
-      start + limit,
-    );
+    const data = filteredStudents.slice(start, start + limit);
 
     /*
      * Progress is calculated only for students on the
@@ -377,9 +337,7 @@ export class StudentsService {
 
     const dataWithProgress = data.map((student) => ({
       ...student,
-      evaluation_progress: progressByUserId.get(
-        student.user_id,
-      )!,
+      evaluation_progress: progressByUserId.get(student.user_id)!,
     }));
 
     return {
@@ -395,23 +353,17 @@ export class StudentsService {
       filters: {
         search: search || null,
 
-        generation_id:
-          generationId?.toString() ?? null,
+        generation_id: generationId?.toString() ?? null,
 
-        academic_year_id:
-          academicYearId?.toString() ?? null,
+        academic_year_id: academicYearId?.toString() ?? null,
 
-        year_level:
-          query.year_level ?? null,
+        year_level: query.year_level ?? null,
 
-        major_id:
-          majorId?.toString() ?? null,
+        major_id: majorId?.toString() ?? null,
 
-        class_group:
-          query.class_group?.trim() || null,
+        class_group: query.class_group?.trim() || null,
 
-        status:
-          query.status ?? null,
+        status: query.status ?? null,
       },
     };
   }
@@ -433,71 +385,59 @@ export class StudentsService {
         ? BigInt(filters.generation_id)
         : undefined;
 
-    const academicYearId =
-      BigInt(filters.academic_year_id);
+    const academicYearId = BigInt(filters.academic_year_id);
 
     const majorId =
-      filters.major_id !== undefined
-        ? BigInt(filters.major_id)
-        : undefined;
+      filters.major_id !== undefined ? BigInt(filters.major_id) : undefined;
 
     /*
      * Enrollment group resolution always uses an academic
      * year so that effective year level, major and class
      * placement are evaluated in the correct context.
      */
-    const selectedAcademicYear =
-      await prisma.academic_years.findUnique({
-        where: {
-          id: academicYearId,
-        },
-        select: {
-          id: true,
-          name: true,
-          start_year: true,
-          is_active: true,
-        },
-      });
+    const selectedAcademicYear = await prisma.academic_years.findUnique({
+      where: {
+        id: academicYearId,
+      },
+      select: {
+        id: true,
+        name: true,
+        start_year: true,
+        is_active: true,
+      },
+    });
 
     if (!selectedAcademicYear) {
-      throw new NotFoundException(
-        'Academic year not found',
-      );
+      throw new NotFoundException('Academic year not found');
     }
 
     if (generationId !== undefined) {
-      const generation =
-        await prisma.student_generations.findUnique({
-          where: {
-            id: generationId,
-          },
-          select: {
-            id: true,
-          },
-        });
+      const generation = await prisma.student_generations.findUnique({
+        where: {
+          id: generationId,
+        },
+        select: {
+          id: true,
+        },
+      });
 
       if (!generation) {
-        throw new NotFoundException(
-          'Student generation not found',
-        );
+        throw new NotFoundException('Student generation not found');
       }
     }
 
     if (majorId !== undefined) {
-      const major =
-        await prisma.majors.findUnique({
-          where: {
-            id: majorId,
-          },
-          select: {
-            id: true,
-          },
-        });
+      const major = await prisma.majors.findUnique({
+        where: {
+          id: majorId,
+        },
+        select: {
+          id: true,
+        },
+      });
 
       if (!major) {
-        throw new NotFoundException(
-          'Major not found',
-        );
+        throw new NotFoundException('Major not found');
       }
     }
 
@@ -509,99 +449,82 @@ export class StudentsService {
      * Academic placement filters are applied after the
      * shared academic-context calculation below.
      */
-    const students =
-      await prisma.students.findMany({
-        where: {
-          ...(generationId !== undefined && {
-            generation_id: generationId,
-          }),
+    const students = await prisma.students.findMany({
+      where: {
+        ...(generationId !== undefined && {
+          generation_id: generationId,
+        }),
 
-          users: {
-            is: {
-              role: 'STUDENT',
-              status: 'ACTIVE',
-            },
+        users: {
+          is: {
+            role: 'STUDENT',
+            status: 'ACTIVE',
           },
         },
+      },
 
-        select: studentSelect,
+      select: studentSelect,
 
-        orderBy: {
-          student_code: 'asc',
-        },
-      });
+      orderBy: {
+        student_code: 'asc',
+      },
+    });
 
     /*
      * Reuse the same academic-context logic used by the
      * existing Students API. This prevents Enrollment from
      * having a second implementation of effective year.
      */
-    const studentsWithContext = students.map(
-      (student) =>
-        this.attachAcademicContext(
-          student,
-          selectedAcademicYear,
-        ),
+    const studentsWithContext = students.map((student) =>
+      this.attachAcademicContext(student, selectedAcademicYear),
     );
 
-    return studentsWithContext.filter(
-      (student) => {
-        const context =
-          student.academic_context;
+    return studentsWithContext.filter((student) => {
+      const context = student.academic_context;
 
-        /*
-         * Effective year may come from an explicit academic
-         * record or from the generation calculation.
-         */
+      if (!context.placement_eligible) return false;
+
+      /*
+       * Effective year may come from an explicit academic
+       * record or from the generation calculation.
+       */
+      if (
+        filters.year_level !== undefined &&
+        context.effective_year_level !== filters.year_level
+      ) {
+        return false;
+      }
+
+      /*
+       * Major is an explicit academic placement value.
+       */
+      if (majorId !== undefined) {
+        if (context.placement.major_id !== majorId) {
+          return false;
+        }
+      }
+
+      /*
+       * Class/group is also an explicit academic
+       * placement value for the selected academic year.
+       */
+      if (filters.class_groups !== undefined) {
+        const expectedClassGroups = normalizeClassGroups(filters.class_groups);
+
+        const actualClassGroup = normalizeClassGroup(
+          context.academic_record?.class_group,
+        );
+
         if (
-          filters.year_level !== undefined &&
-          context.effective_year_level !==
-            filters.year_level
+          actualClassGroup === null ||
+          !expectedClassGroups.includes(actualClassGroup)
         ) {
           return false;
         }
+      }
 
-        /*
-         * Major is an explicit academic placement value.
-         */
-        if (majorId !== undefined) {
-          if (
-            context.academic_record?.major_id !==
-            majorId
-          ) {
-            return false;
-          }
-        }
-
-        /*
-         * Class/group is also an explicit academic
-         * placement value for the selected academic year.
-         */
-        if (filters.class_groups !== undefined) {
-          const expectedClassGroups =
-            normalizeClassGroups(
-              filters.class_groups,
-            );
-
-          const actualClassGroup =
-            normalizeClassGroup(
-              context.academic_record
-                ?.class_group,
-            );
-
-          if (
-            actualClassGroup === null ||
-            !expectedClassGroups.includes(
-              actualClassGroup,
-            )
-          ) {
-            return false;
-          }
-        }
-
-        return true;
-      },
-    );
+      return true;
+    });
   }
 
   async getGroupOptions(
@@ -609,52 +532,39 @@ export class StudentsService {
     generationId: bigint,
     majorId: bigint,
   ) {
-    const records =
-      await this.prisma.student_academic_records.findMany({
-        where: {
-          academic_year_id: academicYearId,
-          major_id: majorId,
+    const records = await this.prisma.student_academic_records.findMany({
+      where: {
+        academic_year_id: academicYearId,
+        major_id: majorId,
 
-          students: {
-            generation_id: generationId,
-          },
-
-          class_group: {
-            not: null,
-          },
+        students: {
+          generation_id: generationId,
         },
 
-        select: {
-          class_group: true,
+        class_group: {
+          not: null,
         },
-      });
+      },
+
+      select: {
+        class_group: true,
+      },
+    });
 
     const groups = [
       ...new Set(
         records
-          .map((record) =>
-            normalizeClassGroup(
-              record.class_group,
-            ),
-          )
-          .filter(
-            (group): group is string =>
-              group !== null,
-          ),
+          .map((record) => normalizeClassGroup(record.class_group))
+          .filter((group): group is string => group !== null),
       ),
-    ].sort((a, b) =>
-      a.localeCompare(b),
-    );
+    ].sort((a, b) => a.localeCompare(b));
 
     return {
-      academic_year_id:
-        academicYearId.toString(),
+      academic_year_id: academicYearId.toString(),
 
-      generation_id:
-        generationId.toString(),
+      generation_id: generationId.toString(),
 
-      major_id:
-        majorId.toString(),
+      major_id: majorId.toString(),
 
       groups,
 
@@ -684,140 +594,94 @@ export class StudentsService {
     studentIds: bigint[],
     classGroupValue: string,
   ) {
-    const classGroup =
-      normalizeClassGroup(
-        classGroupValue,
-      );
+    const classGroup = normalizeClassGroup(classGroupValue);
 
     if (classGroup === null) {
-      throw new BadRequestException(
-        'class_group must not be empty',
-      );
+      throw new BadRequestException('class_group must not be empty');
     }
 
     const uniqueStudentIds = [
-      ...new Set(
-        studentIds.map(
-          (id) => id.toString(),
-        ),
-      ),
-    ].map(
-      (id) => BigInt(id),
-    );
+      ...new Set(studentIds.map((id) => id.toString())),
+    ].map((id) => BigInt(id));
 
-    return this.prisma.$transaction(
-      async (tx) => {
-        /*
-         * Only existing placements may be changed. Missing
-         * records abort the transaction before any updates.
-         */
-        const records =
-          await tx.student_academic_records.findMany(
-            {
-              where: {
-                academic_year_id:
-                  academicYearId,
+    return this.prisma.$transaction(async (tx) => {
+      /*
+       * Only existing placements may be changed. Missing
+       * records abort the transaction before any updates.
+       */
+      const records = await tx.student_academic_records.findMany({
+        where: {
+          academic_year_id: academicYearId,
 
-                student_id: {
-                  in: uniqueStudentIds,
-                },
-              },
-
-              select: {
-                id: true,
-                student_id: true,
-                academic_year_id: true,
-                year_level: true,
-                major_id: true,
-                class_group: true,
-              },
-            },
-          );
-
-        const foundStudentIds =
-          new Set(
-            records.map((record) =>
-              record.student_id.toString(),
-            ),
-          );
-
-        const missingStudentIds =
-          uniqueStudentIds
-            .filter(
-              (studentId) =>
-                !foundStudentIds.has(
-                  studentId.toString(),
-                ),
-            )
-            .map((studentId) =>
-              studentId.toString(),
-            );
-
-        if (
-          missingStudentIds.length > 0
-        ) {
-          throw new BadRequestException({
-            message:
-              'Some students do not have an existing placement for the selected academic year',
-            missing_student_ids:
-              missingStudentIds,
-          });
-        }
-
-        await tx.student_academic_records.updateMany(
-          {
-            where: {
-              academic_year_id:
-                academicYearId,
-
-              student_id: {
-                in: uniqueStudentIds,
-              },
-            },
-
-            data: {
-              class_group:
-                classGroup,
-            },
+          student_id: {
+            in: uniqueStudentIds,
           },
-        );
+        },
 
-        return {
-          academic_year_id:
-            academicYearId.toString(),
-
-          class_group:
-            classGroup,
-
-          updated_student_ids:
-            uniqueStudentIds.map(
-              (studentId) =>
-                studentId.toString(),
-            ),
-
-          updated_count:
-            uniqueStudentIds.length,
-
-          complete: true,
-        };
-      },
-    );
-  }
-
-  async findOne(
-    id: bigint,
-    academicYearId?: string,
-  ) {
-    const student =
-      await this.prisma.students.findUnique({
-        where: { id },
-        select: studentSelect,
+        select: {
+          id: true,
+          student_id: true,
+          academic_year_id: true,
+          year_level: true,
+          major_id: true,
+          class_group: true,
+        },
       });
 
-    if (!student) {
-      throw new NotFoundException(
-        'Student not found',
+      const foundStudentIds = new Set(
+        records.map((record) => record.student_id.toString()),
       );
+
+      const missingStudentIds = uniqueStudentIds
+        .filter((studentId) => !foundStudentIds.has(studentId.toString()))
+        .map((studentId) => studentId.toString());
+
+      if (missingStudentIds.length > 0) {
+        throw new BadRequestException({
+          message:
+            'Some students do not have an existing placement for the selected academic year',
+          missing_student_ids: missingStudentIds,
+        });
+      }
+
+      await tx.student_academic_records.updateMany({
+        where: {
+          academic_year_id: academicYearId,
+
+          student_id: {
+            in: uniqueStudentIds,
+          },
+        },
+
+        data: {
+          class_group: classGroup,
+        },
+      });
+
+      return {
+        academic_year_id: academicYearId.toString(),
+
+        class_group: classGroup,
+
+        updated_student_ids: uniqueStudentIds.map((studentId) =>
+          studentId.toString(),
+        ),
+
+        updated_count: uniqueStudentIds.length,
+
+        complete: true,
+      };
+    });
+  }
+
+  async findOne(id: bigint, academicYearId?: string) {
+    const student = await this.prisma.students.findUnique({
+      where: { id },
+      select: studentSelect,
+    });
+
+    if (!student) {
+      throw new NotFoundException('Student not found');
     }
 
     /*
@@ -849,33 +713,26 @@ export class StudentsService {
       );
     }
 
-    const selectedAcademicYearId =
-      BigInt(academicYearId);
+    const selectedAcademicYearId = BigInt(academicYearId);
 
-    const selectedAcademicYear =
-      await this.prisma.academic_years.findUnique({
-        where: {
-          id: selectedAcademicYearId,
-        },
-        select: {
-          id: true,
-          name: true,
-          start_year: true,
-          is_active: true,
-        },
-      });
+    const selectedAcademicYear = await this.prisma.academic_years.findUnique({
+      where: {
+        id: selectedAcademicYearId,
+      },
+      select: {
+        id: true,
+        name: true,
+        start_year: true,
+        is_active: true,
+      },
+    });
 
     if (!selectedAcademicYear) {
-      throw new NotFoundException(
-        'Academic year not found',
-      );
+      throw new NotFoundException('Academic year not found');
     }
 
     return {
-      ...this.attachAcademicContext(
-        student,
-        selectedAcademicYear,
-      ),
+      ...this.attachAcademicContext(student, selectedAcademicYear),
 
       evaluation_progress: evaluationProgress,
     };
@@ -885,160 +742,34 @@ export class StudentsService {
     student: StudentWithRelations,
     selectedAcademicYear: AcademicYearContext,
   ) {
-    const generation =
-      student.student_generations;
-
-    const entryAcademicYear =
-      generation.entry_academic_year;
-
-    /*
-     * Formula:
-     *
-     * starting_year_level
-     * + selected academic year start_year
-     * - generation entry academic year start_year
-     *
-     * We never calculate from IDs or parse year labels.
-     */
-    let calculatedYearLevel: number | null =
-      null;
-
-    let calculationStatus:
-      | 'CALCULATED'
-      | 'NOT_STARTED'
-      | 'BEYOND_PROGRAM'
-      | 'UNAVAILABLE' = 'UNAVAILABLE';
-
-    if (
-      selectedAcademicYear.start_year !== null &&
-      entryAcademicYear.start_year !== null
-    ) {
-      const yearDifference =
-        selectedAcademicYear.start_year -
-        entryAcademicYear.start_year;
-
-      if (yearDifference < 0) {
-        calculationStatus = 'NOT_STARTED';
-      } else {
-        const candidateYearLevel =
-          generation.starting_year_level +
-          yearDifference;
-
-        if (
-          candidateYearLevel >= 1 &&
-          candidateYearLevel <= 5
-        ) {
-          calculatedYearLevel =
-            candidateYearLevel;
-
-          calculationStatus = 'CALCULATED';
-        } else {
-          calculationStatus =
-            'BEYOND_PROGRAM';
-        }
-      }
-    }
-
-    /*
-     * Explicit academic placement has precedence over
-     * generation calculation.
-     */
-    const academicRecord =
-      student.student_academic_records.find(
-        (record) =>
-          record.academic_year_id ===
-          selectedAcademicYear.id,
-      ) ?? null;
-
-    const effectiveYearLevel =
-      academicRecord?.year_level ??
-      calculatedYearLevel;
-
-    const yearLevelSource =
-      academicRecord !== null
-        ? 'ACADEMIC_RECORD'
-        : calculatedYearLevel !== null
-          ? 'GENERATION_CALCULATION'
-          : calculationStatus ===
-                'NOT_STARTED'
-            ? 'NOT_STARTED'
-            : calculationStatus ===
-                  'BEYOND_PROGRAM'
-              ? 'BEYOND_PROGRAM'
-            : 'UNAVAILABLE';
-
     return {
       ...student,
-
       academic_context: {
-        academic_year:
-          selectedAcademicYear,
-
+        academic_year: selectedAcademicYear,
         generation_entry_academic_year:
-          entryAcademicYear,
-
-        starting_year_level:
-          generation.starting_year_level,
-
-        calculated_year_level:
-          calculatedYearLevel,
-
-        effective_year_level:
-          effectiveYearLevel,
-
-        year_level_source:
-          yearLevelSource,
-
-        calculation_status:
-          calculationStatus,
-
-        academic_record:
-          academicRecord,
-
-        placement: {
-          academic_year_id:
-            selectedAcademicYear.id,
-
-          source:
-            academicRecord !== null
-              ? 'ACADEMIC_RECORD'
-              : calculatedYearLevel !== null
-                ? 'GENERATION_CALCULATION'
-                : calculationStatus,
-
-          year_level:
-            effectiveYearLevel,
-
-          major_id:
-            academicRecord?.major_id ??
-            null,
-
-          class_group:
-            normalizeClassGroup(
-              academicRecord?.class_group,
-            ),
-        },
+          student.student_generations.entry_academic_year,
+        starting_year_level: student.student_generations.starting_year_level,
+        ...resolveStudentPlacement(
+          student.student_generations,
+          student.student_academic_records,
+          selectedAcademicYear,
+        ),
       },
     };
   }
 
-  private async ensureGenerationExists(
-    generationId: bigint,
-  ) {
-    const generation =
-      await this.prisma.student_generations.findUnique({
-        where: {
-          id: generationId,
-        },
-        select: {
-          id: true,
-        },
-      });
+  private async ensureGenerationExists(generationId: bigint) {
+    const generation = await this.prisma.student_generations.findUnique({
+      where: {
+        id: generationId,
+      },
+      select: {
+        id: true,
+      },
+    });
 
     if (!generation) {
-      throw new NotFoundException(
-        'Student generation not found',
-      );
+      throw new NotFoundException('Student generation not found');
     }
   }
 
@@ -1057,152 +788,116 @@ export class StudentsService {
   }
 
   private async createInTransaction(dto: CreateStudentDto) {
-    const studentCode =
-      normalizeStudentCode(dto.student_code);
+    const studentCode = normalizeStudentCode(dto.student_code);
 
-    const email =
-      dto.email === undefined
-        ? null
-        : normalizeEmail(dto.email);
+    const email = dto.email === undefined ? null : normalizeEmail(dto.email);
 
-    const generationId =
-      BigInt(dto.generation_id);
+    const generationId = BigInt(dto.generation_id);
 
-    const academicYearId =
-      BigInt(dto.academic_year_id);
+    const academicYearId = BigInt(dto.academic_year_id);
 
-    const majorId =
-      BigInt(dto.major_id);
+    const majorId = BigInt(dto.major_id);
 
     /*
      * Validate all references before writing anything.
      */
-    await this.ensureGenerationExists(
-      generationId,
-    );
+    await this.ensureGenerationExists(generationId);
 
-    const [academicYear, major] =
-      await Promise.all([
-        this.prisma.academic_years.findUnique({
-          where: {
-            id: academicYearId,
-          },
-          select: {
-            id: true,
-          },
-        }),
+    const [academicYear, major] = await Promise.all([
+      this.prisma.academic_years.findUnique({
+        where: {
+          id: academicYearId,
+        },
+        select: {
+          id: true,
+        },
+      }),
 
-        this.prisma.majors.findUnique({
-          where: {
-            id: majorId,
-          },
-          select: {
-            id: true,
-          },
-        }),
-      ]);
+      this.prisma.majors.findUnique({
+        where: {
+          id: majorId,
+        },
+        select: {
+          id: true,
+        },
+      }),
+    ]);
 
     if (!academicYear) {
-      throw new NotFoundException(
-        'Academic year not found',
-      );
+      throw new NotFoundException('Academic year not found');
     }
 
     if (!major) {
-      throw new NotFoundException(
-        'Major not found',
-      );
+      throw new NotFoundException('Major not found');
     }
 
-    const passwordHash =
-      await bcrypt.hash(
-        dto.password,
-        BCRYPT_ROUNDS,
-      );
+    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
 
-    const classGroup =
-      dto.class_group?.trim() || null;
+    const classGroup = dto.class_group?.trim() || null;
 
     try {
-      const student =
-        await this.prisma.$transaction(
-          async (tx) => {
-            /*
-             * 1. Authentication account.
-             */
-            const user =
-              await tx.users.create({
-                data: {
-                  email,
-                  password_hash:
-                    passwordHash,
-                  full_name:
-                    dto.full_name.trim(),
-                  gender:
-                    dto.gender ?? null,
-                  role: 'STUDENT',
-                  status: 'ACTIVE',
-                  created_at: new Date(),
-                  updated_at: new Date(),
-                },
-                select: {
-                  id: true,
-                },
-              });
-
-            /*
-             * 2. Student profile.
-             */
-            const createdStudent =
-              await tx.students.create({
-                data: {
-                  user_id: user.id,
-                  student_code:
-                    studentCode,
-                  generation_id:
-                    generationId,
-                  notes:
-                    dto.notes?.trim() ||
-                    null,
-                },
-                select: {
-                  id: true,
-                },
-              });
-
-            /*
-             * 3. Initial academic placement.
-             *
-             * All three writes are inside the same
-             * transaction. If this fails, the user and
-             * student profile are rolled back too.
-             */
-            await tx.student_academic_records.create({
-              data: {
-                student_id:
-                  createdStudent.id,
-                academic_year_id:
-                  academicYearId,
-                year_level:
-                  dto.year_level,
-                major_id:
-                  majorId,
-                class_group:
-                  classGroup,
-              },
-            });
-
-            /*
-             * 4. Return the complete student.
-             */
-            return tx.students.findUniqueOrThrow({
-              where: {
-                id: createdStudent.id,
-              },
-              select: studentSelect,
-            });
+      const student = await this.prisma.$transaction(async (tx) => {
+        /*
+         * 1. Authentication account.
+         */
+        const user = await tx.users.create({
+          data: {
+            email,
+            password_hash: passwordHash,
+            full_name: dto.full_name.trim(),
+            gender: dto.gender ?? null,
+            role: 'STUDENT',
+            status: 'ACTIVE',
+            created_at: new Date(),
+            updated_at: new Date(),
           },
-        );
+          select: {
+            id: true,
+          },
+        });
+
+        /*
+         * 2. Student profile.
+         */
+        const createdStudent = await tx.students.create({
+          data: {
+            user_id: user.id,
+            student_code: studentCode,
+            generation_id: generationId,
+            notes: dto.notes?.trim() || null,
+          },
+          select: {
+            id: true,
+          },
+        });
+
+        /*
+         * 3. Initial academic placement.
+         *
+         * All three writes are inside the same
+         * transaction. If this fails, the user and
+         * student profile are rolled back too.
+         */
+        await tx.student_academic_records.create({
+          data: {
+            student_id: createdStudent.id,
+            academic_year_id: academicYearId,
+            year_level: dto.year_level,
+            major_id: majorId,
+            class_group: classGroup,
+          },
+        });
+
+        /*
+         * 4. Return the complete student.
+         */
+        return tx.students.findUniqueOrThrow({
+          where: {
+            id: createdStudent.id,
+          },
+          select: studentSelect,
+        });
+      });
 
       return student;
     } catch (error) {
@@ -1224,43 +919,30 @@ export class StudentsService {
     );
   }
 
-  private async updateInTransaction(
-    id: bigint,
-    dto: UpdateStudentDto,
-  ) {
-    const existingStudent =
-      await this.prisma.students.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          user_id: true,
-        },
-      });
+  private async updateInTransaction(id: bigint, dto: UpdateStudentDto) {
+    const existingStudent = await this.prisma.students.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        user_id: true,
+      },
+    });
 
     if (!existingStudent) {
-      throw new NotFoundException(
-        'Student not found',
-      );
+      throw new NotFoundException('Student not found');
     }
 
-    let generationId:
-      | bigint
-      | undefined;
+    let generationId: bigint | undefined;
 
     if (dto.generation_id !== undefined) {
-      generationId =
-        BigInt(dto.generation_id);
+      generationId = BigInt(dto.generation_id);
 
-      await this.ensureGenerationExists(
-        generationId,
-      );
+      await this.ensureGenerationExists(generationId);
     }
 
     const normalizedStudentCode =
       dto.student_code !== undefined
-        ? normalizeStudentCode(
-            dto.student_code,
-          )
+        ? normalizeStudentCode(dto.student_code)
         : undefined;
 
     const normalizedEmail =
@@ -1271,72 +953,58 @@ export class StudentsService {
           : normalizeEmail(dto.email);
 
     try {
-      return await this.prisma.$transaction(
-        async (tx) => {
-          await tx.users.update({
-            where: {
-              id: existingStudent.user_id,
-            },
-            data: {
-              ...(dto.full_name !==
-                undefined && {
-                full_name:
-                  dto.full_name.trim(),
-              }),
+      return await this.prisma.$transaction(async (tx) => {
+        await tx.users.update({
+          where: {
+            id: existingStudent.user_id,
+          },
+          data: {
+            ...(dto.full_name !== undefined && {
+              full_name: dto.full_name.trim(),
+            }),
 
-              ...(dto.email !== undefined && {
-                email: normalizedEmail,
-              }),
+            ...(dto.email !== undefined && {
+              email: normalizedEmail,
+            }),
 
-              ...(dto.gender !==
-                undefined && {
-                gender: dto.gender,
-              }),
+            ...(dto.gender !== undefined && {
+              gender: dto.gender,
+            }),
 
-              ...(dto.status !==
-                undefined && {
-                status: dto.status,
-              }),
+            ...(dto.status !== undefined && {
+              status: dto.status,
+            }),
 
-              updated_at: new Date(),
-            },
-          });
+            updated_at: new Date(),
+          },
+        });
 
-          await tx.students.update({
-            where: {
-              id,
-            },
-            data: {
-              ...(normalizedStudentCode !==
-                undefined && {
-                student_code:
-                  normalizedStudentCode,
-              }),
+        await tx.students.update({
+          where: {
+            id,
+          },
+          data: {
+            ...(normalizedStudentCode !== undefined && {
+              student_code: normalizedStudentCode,
+            }),
 
-              ...(generationId !==
-                undefined && {
-                generation_id:
-                  generationId,
-              }),
+            ...(generationId !== undefined && {
+              generation_id: generationId,
+            }),
 
-              ...(dto.notes !== undefined && {
-                notes:
-                  dto.notes === null
-                    ? null
-                    : dto.notes.trim() ||
-                      null,
-              }),
-            },
-          });
+            ...(dto.notes !== undefined && {
+              notes: dto.notes === null ? null : dto.notes.trim() || null,
+            }),
+          },
+        });
 
-          return tx.students.findUniqueOrThrow({
-            where: {
-              id,
-            },
-            select: studentSelect,
-          });
-        },
-      );
+        return tx.students.findUniqueOrThrow({
+          where: {
+            id,
+          },
+          select: studentSelect,
+        });
+      });
     } catch (error) {
       this.handlePrismaError(error);
     }
@@ -1357,33 +1025,26 @@ export class StudentsService {
   }
 
   private async removeInTransaction(id: bigint) {
-    const student =
-      await this.prisma.students.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          user_id: true,
-          student_code: true,
+    const student = await this.prisma.students.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        user_id: true,
+        student_code: true,
 
-          _count: {
-            select: {
-              student_academic_records:
-                true,
-            },
+        _count: {
+          select: {
+            student_academic_records: true,
           },
         },
-      });
+      },
+    });
 
     if (!student) {
-      throw new NotFoundException(
-        'Student not found',
-      );
+      throw new NotFoundException('Student not found');
     }
 
-    const [
-      enrollmentCount,
-      participantCount,
-    ] = await Promise.all([
+    const [enrollmentCount, participantCount] = await Promise.all([
       this.prisma.enrollments.count({
         where: {
           student_id: student.user_id,
@@ -1398,8 +1059,7 @@ export class StudentsService {
     ]);
 
     const hasHistoricalReferences =
-      student._count
-        .student_academic_records > 0 ||
+      student._count.student_academic_records > 0 ||
       enrollmentCount > 0 ||
       participantCount > 0;
 
@@ -1410,70 +1070,44 @@ export class StudentsService {
     }
 
     try {
-      await this.prisma.$transaction(
-        async (tx) => {
-          await tx.students.delete({
-            where: {
-              id,
-            },
-          });
+      await this.prisma.$transaction(async (tx) => {
+        await tx.students.delete({
+          where: {
+            id,
+          },
+        });
 
-          await tx.users.delete({
-            where: {
-              id: student.user_id,
-            },
-          });
-        },
-      );
+        await tx.users.delete({
+          where: {
+            id: student.user_id,
+          },
+        });
+      });
 
       return {
-        message:
-          'Student deleted successfully',
+        message: 'Student deleted successfully',
       };
     } catch (error) {
       this.handlePrismaError(error);
     }
   }
 
-  private handlePrismaError(
-    error: unknown,
-  ): never {
-    if (
-      error instanceof
-      Prisma.PrismaClientKnownRequestError
-    ) {
+  private handlePrismaError(error: unknown): never {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === 'P2002') {
-        const target = Array.isArray(
-          error.meta?.target,
-        )
+        const target = Array.isArray(error.meta?.target)
           ? error.meta.target.map(String)
           : [];
 
-        if (
-          target.some((field) =>
-            field.includes(
-              'student_code',
-            ),
-          )
-        ) {
-          throw new ConflictException(
-            'Student code already exists',
-          );
+        if (target.some((field) => field.includes('student_code'))) {
+          throw new ConflictException('Student code already exists');
         }
 
-        if (
-          target.some((field) =>
-            field.includes('email'),
-          )
-        ) {
-          throw new ConflictException(
-            'Email is already in use',
-          );
+        if (target.some((field) => field.includes('email'))) {
+          throw new ConflictException('Email is already in use');
         }
 
-        throw new ConflictException(
-          'Student data already exists',
-        );
+        throw new ConflictException('Student data already exists');
       }
 
       if (error.code === 'P2003') {

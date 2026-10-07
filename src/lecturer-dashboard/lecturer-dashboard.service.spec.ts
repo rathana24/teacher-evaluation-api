@@ -3,17 +3,14 @@ import { jest } from '@jest/globals';
 import { PrismaService } from '../prisma/prisma.service';
 import { LecturerDashboardService } from './lecturer-dashboard.service';
 
-type AsyncMock = jest.Mock<
-  (...args: any[]) => Promise<any>
->;
+type AsyncMock = jest.Mock<(...args: any[]) => Promise<any>>;
 
 describe('LecturerDashboardService', () => {
   let service: LecturerDashboardService;
   let evaluationFindMany: AsyncMock;
 
   beforeEach(() => {
-    evaluationFindMany =
-      jest.fn<(...args: any[]) => Promise<any>>();
+    evaluationFindMany = jest.fn<(...args: any[]) => Promise<any>>();
 
     const prismaMock = {
       evaluations: {
@@ -32,12 +29,8 @@ describe('LecturerDashboardService', () => {
         {
           id: 100n,
           status: 'OPEN',
-          start_at: new Date(
-            '2026-10-01T00:00:00.000Z',
-          ),
-          end_at: new Date(
-            '2026-10-31T23:59:59.000Z',
-          ),
+          start_at: new Date('2026-10-01T00:00:00.000Z'),
+          end_at: new Date('2026-10-31T23:59:59.000Z'),
           survey_version_id: 200n,
 
           course_offerings: {
@@ -90,8 +83,7 @@ describe('LecturerDashboardService', () => {
               majors: {
                 id: 10n,
                 code: 'AMS',
-                name:
-                  'Applied Mathematics and Statistics',
+                name: 'Applied Mathematics and Statistics',
               },
             },
           ],
@@ -103,8 +95,7 @@ describe('LecturerDashboardService', () => {
         },
       ]);
 
-      const result =
-        await service.findMyEvaluations(20n);
+      const result = await service.findMyEvaluations(20n);
 
       expect(result).toHaveLength(1);
 
@@ -121,6 +112,26 @@ describe('LecturerDashboardService', () => {
 
             groups: [
               {
+                historical_labels: null,
+                labels_captured_at: null,
+                historical_labels_status: 'UNKNOWN',
+                historical_labels_unavailable_reason:
+                  'LEGACY_LABELS_NOT_CAPTURED',
+                current_labels: {
+                  academic_year: {
+                    id: 70n,
+                    name: '2026-2027',
+                    start_year: 2026,
+                  },
+                  generation: { id: 5n, name: 'Generation 2023' },
+                  major: {
+                    id: 10n,
+                    code: 'AMS',
+                    name: 'Applied Mathematics and Statistics',
+                  },
+                  year_level: 4,
+                  class_group: 'A',
+                },
                 academic_year: {
                   id: 70n,
                   name: '2026-2027',
@@ -135,8 +146,7 @@ describe('LecturerDashboardService', () => {
                 major: {
                   id: 10n,
                   code: 'AMS',
-                  name:
-                    'Applied Mathematics and Statistics',
+                  name: 'Applied Mathematics and Statistics',
                 },
 
                 year_level: 4,
@@ -147,9 +157,7 @@ describe('LecturerDashboardService', () => {
         }),
       );
 
-      expect(
-        evaluationFindMany,
-      ).toHaveBeenCalledWith(
+      expect(evaluationFindMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
             status: {
@@ -162,8 +170,7 @@ describe('LecturerDashboardService', () => {
           },
 
           select: expect.objectContaining({
-            group_targets:
-              expect.any(Object),
+            group_targets: expect.any(Object),
           }),
         }),
       );
@@ -174,12 +181,8 @@ describe('LecturerDashboardService', () => {
         {
           id: 101n,
           status: 'CLOSED',
-          start_at: new Date(
-            '2026-09-01T00:00:00.000Z',
-          ),
-          end_at: new Date(
-            '2026-09-30T23:59:59.000Z',
-          ),
+          start_at: new Date('2026-09-01T00:00:00.000Z'),
+          end_at: new Date('2026-09-30T23:59:59.000Z'),
           survey_version_id: 201n,
 
           course_offerings: {
@@ -219,19 +222,15 @@ describe('LecturerDashboardService', () => {
         },
       ]);
 
-      const result =
-        await service.findMyEvaluations(20n);
+      const result = await service.findMyEvaluations(20n);
 
       expect(result[0].group_scope).toEqual({
         complete: false,
-        unavailable_reason:
-          'NO_FROZEN_GROUP_TARGETS',
+        unavailable_reason: 'NO_FROZEN_GROUP_TARGETS',
         groups: [],
       });
 
-      expect(
-        result[0].results_available,
-      ).toBe(true);
+      expect(result[0].results_available).toBe(true);
     });
   });
 });

@@ -87,6 +87,22 @@ describe('Enrollments (e2e)', () => {
       },
     });
     academicYearId = academicYear.id;
+    const profile = await prisma.students.findUniqueOrThrow({
+      where: { user_id: student.id },
+    });
+    const placement = await prisma.student_academic_records.findFirstOrThrow({
+      where: { student_id: profile.id },
+      orderBy: { id: 'desc' },
+    });
+    await prisma.student_academic_records.create({
+      data: {
+        student_id: profile.id,
+        academic_year_id: academicYear.id,
+        year_level: placement.year_level,
+        major_id: placement.major_id,
+        class_group: 'TEST-A',
+      },
+    });
 
     const semester = await prisma.semesters.create({
       data: {
@@ -157,6 +173,9 @@ describe('Enrollments (e2e)', () => {
           }
 
           if (academicYearId !== undefined) {
+            await tx.student_academic_records.deleteMany({
+              where: { academic_year_id: academicYearId },
+            });
             await tx.academic_years.deleteMany({
               where: { id: academicYearId },
             });
@@ -619,14 +638,11 @@ describe('Enrollments (e2e)', () => {
           .set('Authorization', `Bearer ${adminToken}`)
           .send({ student_id: matchingUserId.toString() });
 
-      const responses = await Promise.all([
-        enroll(),
-        enroll(),
-      ]);
+      const responses = await Promise.all([enroll(), enroll()]);
 
-      expect(
-        responses.map((res) => res.status).sort((a, b) => a - b),
-      ).toEqual([201, 409]);
+      expect(responses.map((res) => res.status).sort((a, b) => a - b)).toEqual([
+        201, 409,
+      ]);
 
       const rows = await prisma.enrollments.findMany({
         where: { course_offering_id: scopedOfferingId },

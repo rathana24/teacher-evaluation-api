@@ -1,8 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  INestApplication,
-  ValidationPipe,
-} from '@nestjs/common';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -20,7 +17,7 @@ describe('Student Access (e2e)', () => {
   let lecturerToken: string;
 
   let tempSurveyId: string;
- let secondarySurveyId: string;
+  let secondarySurveyId: string;
   let versionAId: string;
   let versionBId: string;
   let tempOfferingId: string;
@@ -40,13 +37,9 @@ describe('Student Access (e2e)', () => {
 
   const stamp = Date.now();
   const testCourseCode = `E2E-SA-${stamp}`;
-  const hourAgo = new Date(
-    stamp - 60 * 60 * 1000,
-  ).toISOString();
+  const hourAgo = new Date(stamp - 60 * 60 * 1000).toISOString();
 
-  const nextWeek = new Date(
-    stamp + 7 * 24 * 60 * 60 * 1000,
-  ).toISOString();
+  const nextWeek = new Date(stamp + 7 * 24 * 60 * 60 * 1000).toISOString();
 
   const admin = () => ({
     Authorization: `Bearer ${adminToken}`,
@@ -58,26 +51,18 @@ describe('Student Access (e2e)', () => {
 
   const api = () => request(app.getHttpServer());
 
-  async function createOpenEvaluation(
-    offeringId: string,
-    versionId: string,
-  ) {
-    const created = await api()
-      .post('/api/evaluations')
-      .set(admin())
-      .send({
-        course_offering_id: offeringId,
-        survey_version_id: versionId,
-        start_at: hourAgo,
-        end_at: nextWeek,
-      });
+  async function createOpenEvaluation(offeringId: string, versionId: string) {
+    const created = await api().post('/api/evaluations').set(admin()).send({
+      course_offering_id: offeringId,
+      survey_version_id: versionId,
+      start_at: hourAgo,
+      end_at: nextWeek,
+    });
 
     expect(created.status).toBe(201);
 
     const opened = await api()
-      .post(
-        `/api/evaluations/${created.body.id}/open`,
-      )
+      .post(`/api/evaluations/${created.body.id}/open`)
       .set(admin());
 
     expect(opened.status).toBe(200);
@@ -191,6 +176,18 @@ describe('Student Access (e2e)', () => {
             user_id: user.id,
             student_code: `E2E-SA-${stamp}-${index}`,
             generation_id: generation.id,
+            student_academic_records: {
+              create: {
+                academic_year_id: year.id,
+                year_level: 1,
+                major_id: (
+                  await tx.majors.findFirstOrThrow({
+                    where: { department_id: department.id },
+                  })
+                ).id,
+                class_group: 'TEST-A',
+              },
+            },
           },
         });
 
@@ -235,7 +232,14 @@ describe('Student Access (e2e)', () => {
         },
       });
 
-      const secondSet = await tx.surveys.create({data:{title:`E2E Student Access other ${stamp}`,created_by:adminUser.id,created_at:now,updated_at:now}});
+      const secondSet = await tx.surveys.create({
+        data: {
+          title: `E2E Student Access other ${stamp}`,
+          created_by: adminUser.id,
+          created_at: now,
+          updated_at: now,
+        },
+      });
       secondarySurveyId = secondSet.id.toString();
       const versionB = await tx.survey_versions.create({
         data: {
@@ -330,7 +334,11 @@ describe('Student Access (e2e)', () => {
       if (prisma && courseId !== undefined) {
         await prisma.$transaction(async (tx) => {
           const versions = await tx.survey_versions.findMany({
-            where: {survey_id:{in:[BigInt(tempSurveyId),BigInt(secondarySurveyId)]}},
+            where: {
+              survey_id: {
+                in: [BigInt(tempSurveyId), BigInt(secondarySurveyId)],
+              },
+            },
             select: { id: true },
           });
           const versionIds = versions.map((version) => version.id);
@@ -364,7 +372,11 @@ describe('Student Access (e2e)', () => {
           await tx.survey_versions.deleteMany({
             where: { id: { in: versionIds } },
           });
-          await tx.surveys.deleteMany({where:{id:{in:[BigInt(tempSurveyId),BigInt(secondarySurveyId)]}}});
+          await tx.surveys.deleteMany({
+            where: {
+              id: { in: [BigInt(tempSurveyId), BigInt(secondarySurveyId)] },
+            },
+          });
 
           const offerings = await tx.course_offerings.findMany({
             where: { course_id: courseId! },
@@ -379,6 +391,9 @@ describe('Student Access (e2e)', () => {
             where: { id: { in: offeringIds } },
           });
           await tx.courses.delete({ where: { id: courseId! } });
+          await tx.student_academic_records.deleteMany({
+            where: { academic_year_id: academicYearId },
+          });
           await tx.students.deleteMany({
             where: { user_id: { in: fixtureUserIds } },
           });
@@ -403,9 +418,7 @@ describe('Student Access (e2e)', () => {
 
   describe('access control', () => {
     it('ADMIN is blocked from student routes -> 403', async () => {
-      const res = await api()
-        .get('/api/student/evaluations')
-        .set(admin());
+      const res = await api().get('/api/student/evaluations').set(admin());
 
       expect(res.status).toBe(403);
     });
@@ -413,219 +426,140 @@ describe('Student Access (e2e)', () => {
     it('LECTURER is blocked from student routes -> 403', async () => {
       const res = await api()
         .get('/api/student/evaluations')
-        .set(
-          'Authorization',
-          `Bearer ${lecturerToken}`,
-        );
+        .set('Authorization', `Bearer ${lecturerToken}`);
 
       expect(res.status).toBe(403);
     });
   });
 
-  describe(
-    'GET /api/student/evaluations',
-    () => {
-      it('shows an open evaluation I am part of, without internal ids -> 200', async () => {
-        const res = await api()
-          .get('/api/student/evaluations')
-          .set(student());
+  describe('GET /api/student/evaluations', () => {
+    it('shows an open evaluation I am part of, without internal ids -> 200', async () => {
+      const res = await api().get('/api/student/evaluations').set(student());
 
-        const mine = res.body.find(
-          (e: any) =>
-            e.id === openEvalId,
-        );
+      const mine = res.body.find((e: any) => e.id === openEvalId);
 
-        expect(res.status).toBe(200);
-        expect(mine).toBeDefined();
+      expect(res.status).toBe(200);
+      expect(mine).toBeDefined();
 
-        expect(mine.course.code).toBe(
-          testCourseCode,
-        );
+      expect(mine.course.code).toBe(testCourseCode);
 
-        expect(
-          mine.lecturer.full_name,
-        ).toBe(lecturerName);
+      expect(mine.lecturer.full_name).toBe(lecturerName);
 
-        expect(mine).not.toHaveProperty(
-          'course_offering_id',
-        );
+      expect(mine).not.toHaveProperty('course_offering_id');
 
-        expect(mine).not.toHaveProperty(
-          'survey_version_id',
-        );
-      });
+      expect(mine).not.toHaveProperty('survey_version_id');
+    });
 
-      it('does not show a CLOSED evaluation', async () => {
-        const res = await api()
-          .get('/api/student/evaluations')
-          .set(student());
+    it('does not show a CLOSED evaluation', async () => {
+      const res = await api().get('/api/student/evaluations').set(student());
 
-        expect(
-          res.body.some(
-            (e: any) =>
-              e.id === closedEvalId,
-          ),
-        ).toBe(false);
-      });
+      expect(res.body.some((e: any) => e.id === closedEvalId)).toBe(false);
+    });
 
-      it('does not show an evaluation for a class I am not in', async () => {
-        const res = await api()
-          .get('/api/student/evaluations')
-          .set(student());
+    it('does not show an evaluation for a class I am not in', async () => {
+      const res = await api().get('/api/student/evaluations').set(student());
 
-        expect(
-          res.body.some(
-            (e: any) =>
-              e.id === otherEvalId,
-          ),
-        ).toBe(false);
-      });
-    },
-  );
+      expect(res.body.some((e: any) => e.id === otherEvalId)).toBe(false);
+    });
+  });
 
-  describe(
-    'GET /api/student/evaluations/:id/survey',
-    () => {
-      it('returns the questions in order, with only student-facing fields -> 200', async () => {
-        const res = await api()
-          .get(
-            `/api/student/evaluations/${openEvalId}/survey`,
-          )
-          .set(student());
+  describe('GET /api/student/evaluations/:id/survey', () => {
+    it('returns the questions in order, with only student-facing fields -> 200', async () => {
+      const res = await api()
+        .get(`/api/student/evaluations/${openEvalId}/survey`)
+        .set(student());
 
-        expect(res.status).toBe(200);
+      expect(res.status).toBe(200);
 
-        expect(
-          res.body.evaluation.course.code,
-        ).toBe(testCourseCode);
+      expect(res.body.evaluation.course.code).toBe(testCourseCode);
 
-        expect(
-          res.body.questions.map(
-            (q: any) => q.display_order,
-          ),
-        ).toEqual([1, 2]);
+      expect(res.body.questions.map((q: any) => q.display_order)).toEqual([
+        1, 2,
+      ]);
 
-        expect(
-          res.body.questions[0],
-        ).not.toHaveProperty(
-          'created_at',
-        );
-      });
+      expect(res.body.questions[0]).not.toHaveProperty('created_at');
+    });
 
-      it('returns English and Khmer question text to the student -> 200', async () => {
-        const res = await api()
-          .get(
-            `/api/student/evaluations/${openEvalId}/survey`,
-          )
-          .set(student());
+    it('returns English and Khmer question text to the student -> 200', async () => {
+      const res = await api()
+        .get(`/api/student/evaluations/${openEvalId}/survey`)
+        .set(student());
 
-        expect(res.status).toBe(200);
+      expect(res.status).toBe(200);
 
-        const question =
-          res.body.questions[0];
+      const question = res.body.questions[0];
 
-        expect(question.question_text).toBe(
-          'The lecturer explains clearly.',
-        );
+      expect(question.question_text).toBe('The lecturer explains clearly.');
 
-        expect(
-          question.question_text_km,
-        ).toBe(
-          'គ្រូបង្រៀនពន្យល់បានច្បាស់លាស់។',
-        );
-      });
+      expect(question.question_text_km).toBe('គ្រូបង្រៀនពន្យល់បានច្បាស់លាស់។');
+    });
 
-      it('returns null Khmer text when translation is not provided -> 200', async () => {
-        const res = await api()
-          .get(
-            `/api/student/evaluations/${openEvalId}/survey`,
-          )
-          .set(student());
+    it('returns null Khmer text when translation is not provided -> 200', async () => {
+      const res = await api()
+        .get(`/api/student/evaluations/${openEvalId}/survey`)
+        .set(student());
 
-        expect(res.status).toBe(200);
+      expect(res.status).toBe(200);
 
-        const question =
-          res.body.questions[1];
+      const question = res.body.questions[1];
 
-        expect(question.question_text).toBe(
-          'Any comments?',
-        );
+      expect(question.question_text).toBe('Any comments?');
 
-        expect(
-          question.question_text_km,
-        ).toBeNull();
-      });
+      expect(question.question_text_km).toBeNull();
+    });
 
-      it('CLOSED evaluation -> 409', async () => {
-        const res = await api()
-          .get(
-            `/api/student/evaluations/${closedEvalId}/survey`,
-          )
-          .set(student());
+    it('CLOSED evaluation -> 409', async () => {
+      const res = await api()
+        .get(`/api/student/evaluations/${closedEvalId}/survey`)
+        .set(student());
 
-        expect(res.status).toBe(409);
-      });
+      expect(res.status).toBe(409);
+    });
 
-      it('evaluation for a class I am not in -> 403', async () => {
-        const res = await api()
-          .get(
-            `/api/student/evaluations/${otherEvalId}/survey`,
-          )
-          .set(student());
+    it('evaluation for a class I am not in -> 403', async () => {
+      const res = await api()
+        .get(`/api/student/evaluations/${otherEvalId}/survey`)
+        .set(student());
 
-        expect(res.status).toBe(403);
-      });
+      expect(res.status).toBe(403);
+    });
 
-      it('evaluation that does not exist -> 404', async () => {
-        const res = await api()
-          .get(
-            '/api/student/evaluations/999999/survey',
-          )
-          .set(student());
+    it('evaluation that does not exist -> 404', async () => {
+      const res = await api()
+        .get('/api/student/evaluations/999999/survey')
+        .set(student());
 
-        expect(res.status).toBe(404);
-      });
+      expect(res.status).toBe(404);
+    });
 
-      it('non-numeric id -> 400', async () => {
-        const res = await api()
-          .get(
-            '/api/student/evaluations/abc/survey',
-          )
-          .set(student());
+    it('non-numeric id -> 400', async () => {
+      const res = await api()
+        .get('/api/student/evaluations/abc/survey')
+        .set(student());
 
-        expect(res.status).toBe(400);
-      });
-    },
-  );
+      expect(res.status).toBe(400);
+    });
+  });
 
-  describe(
-    'GET /api/student/evaluations/:id/submission-status',
-    () => {
-      it('not submitted yet -> 200', async () => {
-        const res = await api()
-          .get(
-            `/api/student/evaluations/${openEvalId}/submission-status`,
-          )
-          .set(student());
+  describe('GET /api/student/evaluations/:id/submission-status', () => {
+    it('not submitted yet -> 200', async () => {
+      const res = await api()
+        .get(`/api/student/evaluations/${openEvalId}/submission-status`)
+        .set(student());
 
-        expect(res.status).toBe(200);
+      expect(res.status).toBe(200);
 
-        expect(
-          res.body.has_submitted,
-        ).toBe(false);
-      });
+      expect(res.body.has_submitted).toBe(false);
+    });
 
-      it('evaluation I am not part of -> 403', async () => {
-        const res = await api()
-          .get(
-            `/api/student/evaluations/${otherEvalId}/submission-status`,
-          )
-          .set(student());
+    it('evaluation I am not part of -> 403', async () => {
+      const res = await api()
+        .get(`/api/student/evaluations/${otherEvalId}/submission-status`)
+        .set(student());
 
-        expect(res.status).toBe(403);
-      });
-    },
-  );
+      expect(res.status).toBe(403);
+    });
+  });
 
   describe('after submitting', () => {
     beforeAll(async () => {
@@ -646,43 +580,28 @@ describe('Student Access (e2e)', () => {
 
     it('status shows submitted -> 200', async () => {
       const res = await api()
-        .get(
-          `/api/student/evaluations/${openEvalId}/submission-status`,
-        )
+        .get(`/api/student/evaluations/${openEvalId}/submission-status`)
         .set(student());
 
       expect(res.status).toBe(200);
 
-      expect(
-        res.body.has_submitted,
-      ).toBe(true);
+      expect(res.body.has_submitted).toBe(true);
 
-      expect(
-        res.body.submitted_at,
-      ).not.toBeNull();
+      expect(res.body.submitted_at).not.toBeNull();
     });
 
     it('survey can no longer be opened -> 409', async () => {
       const res = await api()
-        .get(
-          `/api/student/evaluations/${openEvalId}/survey`,
-        )
+        .get(`/api/student/evaluations/${openEvalId}/survey`)
         .set(student());
 
       expect(res.status).toBe(409);
     });
 
     it('it disappears from my available list', async () => {
-      const res = await api()
-        .get('/api/student/evaluations')
-        .set(student());
+      const res = await api().get('/api/student/evaluations').set(student());
 
-      expect(
-        res.body.some(
-          (e: any) =>
-            e.id === openEvalId,
-        ),
-      ).toBe(false);
+      expect(res.body.some((e: any) => e.id === openEvalId)).toBe(false);
     });
   });
 });

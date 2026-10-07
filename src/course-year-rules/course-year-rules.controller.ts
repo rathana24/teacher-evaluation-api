@@ -25,6 +25,7 @@ import { ParseBigIntPipe } from '../common/pipes/parse-bigint.pipe';
 import { CourseYearRulesService } from './course-year-rules.service';
 import { CreateCourseYearRuleDto } from './dto/create-course-year-rule.dto';
 import { UpdateCourseYearRuleDto } from './dto/update-course-year-rule.dto';
+import { CreateCurriculumRevisionDto } from './dto/create-curriculum-revision.dto';
 
 @ApiTags('course-year-rules')
 @ApiBearerAuth()
@@ -35,6 +36,106 @@ export class CourseYearRulesController {
   constructor(
     private readonly courseYearRulesService: CourseYearRulesService,
   ) {}
+
+  @Get(':id/revisions')
+  @ApiOperation({ summary: 'Read immutable curriculum revision history' })
+  @ApiResponse({
+    status: 200,
+    schema: {
+      example: [
+        {
+          id: '12',
+          rule_id: '3',
+          revision_no: 1,
+          effective_academic_year_id: '2',
+          effective_start_year: 2026,
+          enabled: true,
+          reason: null,
+          created_at: '2026-10-08T00:00:00.000Z',
+        },
+      ],
+    },
+  })
+  revisions(@Param('id', ParseBigIntPipe) id: bigint) {
+    return this.courseYearRulesService.revisions(id);
+  }
+
+  @Get(':id/applicable')
+  @ApiOperation({
+    summary: 'Resolve a curriculum rule for an offering academic year',
+    description:
+      'Use the returned revision id as group_scopes[].curriculum_revision_id. LEGACY_UNVERSIONED returns enabled:null; a revisioned rule without an applicable approval returns enabled:false. Offering confirmation independently rechecks applicability.',
+  })
+  @ApiQuery({ name: 'academic_year_id', required: true, example: '1' })
+  @ApiResponse({
+    status: 200,
+    schema: {
+      example: {
+        rule_id: '3',
+        academic_year_id: '2',
+        policy: 'REVISIONED',
+        revision: {
+          id: '12',
+          rule_id: '3',
+          revision_no: 1,
+          effective_academic_year_id: '2',
+          effective_start_year: 2026,
+          enabled: true,
+        },
+        enabled: true,
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Invalid or missing academic_year_id; year has no structured start_year',
+  })
+  applicable(
+    @Param('id', ParseBigIntPipe) id: bigint,
+    @Query('academic_year_id', ParseBigIntPipe) yearId: bigint,
+  ) {
+    return this.courseYearRulesService.applicableRevision(id, yearId);
+  }
+
+  @Post(':id/revisions')
+  @ApiOperation({
+    summary: 'Append an academic-year curriculum approval or withdrawal',
+    description:
+      'Years must advance strictly using start_year. Existing offerings retain their pinned revisions. A changed course/major/year tuple requires a new rule and withdrawal of the old rule.',
+  })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Revision appended; no historical offerings are revalidated or changed',
+    schema: {
+      example: {
+        id: '13',
+        rule_id: '3',
+        revision_no: 2,
+        effective_academic_year_id: '4',
+        effective_start_year: 2027,
+        enabled: false,
+        reason: 'Withdrawn for new assignments',
+        created_at: '2026-10-08T00:00:00.000Z',
+        academic_years: { id: '4', name: '2027-2028', start_year: 2027 },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Academic year missing structured start_year or invalid input',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Same-year, backdated or concurrent revision conflict',
+  })
+  createRevision(
+    @Param('id', ParseBigIntPipe) id: bigint,
+    @Body() dto: CreateCurriculumRevisionDto,
+  ) {
+    return this.courseYearRulesService.createRevision(id, dto);
+  }
 
   @Get()
   @ApiOperation({
@@ -62,8 +163,7 @@ export class CourseYearRulesController {
     name: 'search',
     required: false,
     type: String,
-    description:
-      'Search by course code/name or major code/name',
+    description: 'Search by course code/name or major code/name',
   })
   @ApiResponse({
     status: 200,
@@ -84,9 +184,7 @@ export class CourseYearRulesController {
     if (yearLevel !== undefined) {
       const normalizedYearLevel = yearLevel.trim();
 
-      if (
-        !/^[1-9]\d*$/.test(normalizedYearLevel)
-      ) {
+      if (!/^[1-9]\d*$/.test(normalizedYearLevel)) {
         parsedYearLevel = Number.NaN;
       } else {
         parsedYearLevel = Number(normalizedYearLevel);
@@ -113,9 +211,7 @@ export class CourseYearRulesController {
     status: 404,
     description: 'Course year rule not found',
   })
-  findOne(
-    @Param('id', ParseBigIntPipe) id: bigint,
-  ) {
+  findOne(@Param('id', ParseBigIntPipe) id: bigint) {
     return this.courseYearRulesService.findOne(id);
   }
 
@@ -129,17 +225,13 @@ export class CourseYearRulesController {
   })
   @ApiResponse({
     status: 400,
-    description:
-      'Invalid course, major, or year level',
+    description: 'Invalid course, major, or year level',
   })
   @ApiResponse({
     status: 409,
-    description:
-      'Course year rule already exists',
+    description: 'Course year rule already exists',
   })
-  create(
-    @Body() dto: CreateCourseYearRuleDto,
-  ) {
+  create(@Body() dto: CreateCourseYearRuleDto) {
     return this.courseYearRulesService.create(dto);
   }
 
@@ -153,8 +245,7 @@ export class CourseYearRulesController {
   })
   @ApiResponse({
     status: 400,
-    description:
-      'Invalid course, major, or year level',
+    description: 'Invalid course, major, or year level',
   })
   @ApiResponse({
     status: 404,
@@ -162,17 +253,13 @@ export class CourseYearRulesController {
   })
   @ApiResponse({
     status: 409,
-    description:
-      'Course year rule already exists',
+    description: 'Course year rule already exists',
   })
   update(
     @Param('id', ParseBigIntPipe) id: bigint,
     @Body() dto: UpdateCourseYearRuleDto,
   ) {
-    return this.courseYearRulesService.update(
-      id,
-      dto,
-    );
+    return this.courseYearRulesService.update(id, dto);
   }
 
   @Delete(':id')
@@ -187,9 +274,7 @@ export class CourseYearRulesController {
     status: 404,
     description: 'Course year rule not found',
   })
-  remove(
-    @Param('id', ParseBigIntPipe) id: bigint,
-  ) {
+  remove(@Param('id', ParseBigIntPipe) id: bigint) {
     return this.courseYearRulesService.remove(id);
   }
 }

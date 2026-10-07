@@ -108,9 +108,7 @@ export class AcademicYearsService {
         : existing.start_date;
 
     const endDate =
-      dto.end_date !== undefined
-        ? new Date(dto.end_date)
-        : existing.end_date;
+      dto.end_date !== undefined ? new Date(dto.end_date) : existing.end_date;
 
     this.checkDateOrder(startDate, endDate);
 
@@ -143,6 +141,17 @@ export class AcademicYearsService {
         });
       });
     } catch (e: any) {
+      if (
+        e.code === 'P2004' ||
+        (e instanceof Error &&
+          e.message.includes(
+            'Curriculum academic year start_year is protected',
+          ))
+      ) {
+        throw new ConflictException(
+          'Academic year start_year is protected by curriculum revisions or bound offerings',
+        );
+      }
       if (e.code === 'P2002') {
         throw new ConflictException('Academic year already exists');
       }
@@ -187,9 +196,7 @@ export class AcademicYearsService {
 
   private checkDateOrder(start: Date | null, end: Date | null) {
     if (start && end && end <= start) {
-      throw new BadRequestException(
-        'end_date must be after start_date',
-      );
+      throw new BadRequestException('end_date must be after start_date');
     }
   }
 }

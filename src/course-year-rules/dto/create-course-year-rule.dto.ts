@@ -1,13 +1,24 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsInt,
   IsNumberString,
   Max,
   Min,
+  Matches,
+  ValidateIf,
 } from 'class-validator';
 
 export class CreateCourseYearRuleDto {
+  @ApiPropertyOptional({
+    example: '1',
+    description:
+      'Create the first enabled revision for this academic year atomically. Omit only for legacy unversioned compatibility.',
+  })
+  @ValidateIf((_object, value) => value !== undefined)
+  @Matches(/^[1-9]\d*$/)
+  effective_academic_year_id?: string;
+
   @ApiProperty({
     example: '1',
     description: 'ID of an existing course',

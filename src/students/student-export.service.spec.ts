@@ -1,14 +1,9 @@
-import {
-  BadRequestException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { jest } from '@jest/globals';
 
 import { StudentExportService } from './student-export.service';
 
-type AsyncMock = jest.Mock<
-  (...args: any[]) => Promise<any>
->;
+type AsyncMock = jest.Mock<(...args: any[]) => Promise<any>>;
 
 describe('StudentExportService', () => {
   let service: StudentExportService;
@@ -34,48 +29,34 @@ describe('StudentExportService', () => {
   beforeEach(() => {
     prisma = {
       student_generations: {
-        findUnique: jest.fn<
-          (...args: any[]) => Promise<any>
-        >(),
+        findUnique: jest.fn<(...args: any[]) => Promise<any>>(),
       },
 
       academic_years: {
-        findUnique: jest.fn<
-          (...args: any[]) => Promise<any>
-        >(),
+        findUnique: jest.fn<(...args: any[]) => Promise<any>>(),
       },
 
       semesters: {
-        findUnique: jest.fn<
-          (...args: any[]) => Promise<any>
-        >(),
+        findUnique: jest.fn<(...args: any[]) => Promise<any>>(),
       },
 
       students: {
-        findMany: jest.fn<
-          (...args: any[]) => Promise<any>
-        >(),
+        findMany: jest.fn<(...args: any[]) => Promise<any>>(),
       },
 
       evaluation_participants: {
-        findMany: jest.fn<
-          (...args: any[]) => Promise<any>
-        >(),
+        findMany: jest.fn<(...args: any[]) => Promise<any>>(),
       },
     };
 
-    service = new StudentExportService(
-      prisma as any,
-    );
+    service = new StudentExportService(prisma as any);
   });
 
   afterEach(() => {
     jest.useRealTimers();
   });
 
-  function makeStudent(
-    overrides: Record<string, any> = {},
-  ) {
+  function makeStudent(overrides: Record<string, any> = {}) {
     return {
       id: 1n,
       user_id: 73n,
@@ -91,6 +72,8 @@ describe('StudentExportService', () => {
       student_generations: {
         id: 1n,
         name: 'Gen43',
+        starting_year_level: 1,
+        entry_academic_year: { start_year: 2022 },
       },
 
       student_academic_records: [
@@ -109,8 +92,7 @@ describe('StudentExportService', () => {
           majors: {
             id: 1n,
             code: 'AMS',
-            name:
-              'Applied Mathematics & Statistics',
+            name: 'Applied Mathematics & Statistics',
           },
         },
       ],
@@ -119,9 +101,7 @@ describe('StudentExportService', () => {
     };
   }
 
-  function makeParticipant(
-    overrides: Record<string, any> = {},
-  ) {
+  function makeParticipant(overrides: Record<string, any> = {}) {
     return {
       student_id: 73n,
       evaluation_id: 10n,
@@ -129,62 +109,43 @@ describe('StudentExportService', () => {
 
       evaluations: {
         status: 'OPEN',
-        start_at: new Date(
-          '2026-10-04T00:00:00.000Z',
-        ),
-        end_at: new Date(
-          '2026-10-05T00:00:00.000Z',
-        ),
+        start_at: new Date('2026-10-04T00:00:00.000Z'),
+        end_at: new Date('2026-10-05T00:00:00.000Z'),
       },
 
       ...overrides,
     };
   }
 
-  function mockAcademicYear(
-    id = 1n,
-  ) {
-    prisma.academic_years.findUnique.mockResolvedValue(
-      {
-        id,
-        name: '2025-2026',
-        start_year: 2025,
-      },
-    );
+  function mockAcademicYear(id = 1n) {
+    prisma.academic_years.findUnique.mockResolvedValue({
+      id,
+      name: '2025-2026',
+      start_year: 2025,
+    });
   }
 
   it('exports all students without a period filter', async () => {
-    prisma.students.findMany.mockResolvedValue([
-      makeStudent(),
-    ]);
+    prisma.students.findMany.mockResolvedValue([makeStudent()]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [],
-    );
+    prisma.evaluation_participants.findMany.mockResolvedValue([]);
 
-    const result =
-      await service.getExportData({});
+    const result = await service.getExportData({});
 
     expect(result.preview).toEqual({
       student_count: 1,
       complete: true,
     });
 
-    expect(
-      result.data[0].student_code,
-    ).toBe('e20221111');
+    expect(result.data[0].student_code).toBe('e20221111');
 
-    expect(
-      result.data[0].active,
-    ).toEqual({
+    expect(result.data[0].active).toEqual({
       completed: 0,
       assigned: 0,
       left: 0,
     });
 
-    expect(
-      result.data[0].total,
-    ).toEqual({
+    expect(result.data[0].total).toEqual({
       completed: 0,
       assigned: 0,
       not_completed: 0,
@@ -192,31 +153,21 @@ describe('StudentExportService', () => {
   });
 
   it('includes students with no evaluations in an unscoped export', async () => {
-    prisma.students.findMany.mockResolvedValue([
-      makeStudent(),
-    ]);
+    prisma.students.findMany.mockResolvedValue([makeStudent()]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [],
-    );
+    prisma.evaluation_participants.findMany.mockResolvedValue([]);
 
-    const result =
-      await service.getExportData({});
+    const result = await service.getExportData({});
 
     expect(result.data).toHaveLength(1);
 
-    expect(
-      result.data[0].total.assigned,
-    ).toBe(0);
+    expect(result.data[0].total.assigned).toBe(0);
   });
 
   it('returns an empty complete export when no students match', async () => {
-    prisma.students.findMany.mockResolvedValue(
-      [],
-    );
+    prisma.students.findMany.mockResolvedValue([]);
 
-    const result =
-      await service.getExportData({});
+    const result = await service.getExportData({});
 
     expect(result.data).toEqual([]);
 
@@ -225,9 +176,7 @@ describe('StudentExportService', () => {
       complete: true,
     });
 
-    expect(
-      prisma.evaluation_participants.findMany,
-    ).not.toHaveBeenCalled();
+    expect(prisma.evaluation_participants.findMany).not.toHaveBeenCalled();
   });
 
   it('requires academic_year_id when semester_number is provided', async () => {
@@ -235,13 +184,9 @@ describe('StudentExportService', () => {
       service.getExportData({
         semester_number: 1,
       }),
-    ).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    ).rejects.toBeInstanceOf(BadRequestException);
 
-    expect(
-      prisma.students.findMany,
-    ).not.toHaveBeenCalled();
+    expect(prisma.students.findMany).not.toHaveBeenCalled();
   });
 
   it('requires academic year, generation, and major context when class_group is provided', async () => {
@@ -267,65 +212,48 @@ describe('StudentExportService', () => {
       ),
     );
 
-    expect(
-      prisma.students.findMany,
-    ).not.toHaveBeenCalled();
+    expect(prisma.students.findMany).not.toHaveBeenCalled();
   });
 
   it('rejects an unknown generation', async () => {
-    prisma.student_generations.findUnique.mockResolvedValue(
-      null,
-    );
+    prisma.student_generations.findUnique.mockResolvedValue(null);
 
     await expect(
       service.getExportData({
         generation_id: '999',
       }),
-    ).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('rejects an unknown academic year', async () => {
-    prisma.academic_years.findUnique.mockResolvedValue(
-      null,
-    );
+    prisma.academic_years.findUnique.mockResolvedValue(null);
 
     await expect(
       service.getExportData({
         academic_year_id: '999',
       }),
-    ).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('rejects an unknown semester', async () => {
     mockAcademicYear();
 
-    prisma.semesters.findUnique.mockResolvedValue(
-      null,
-    );
+    prisma.semesters.findUnique.mockResolvedValue(null);
 
     await expect(
       service.getExportData({
         academic_year_id: '1',
         semester_number: 1,
       }),
-    ).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    ).rejects.toBeInstanceOf(NotFoundException);
 
-    expect(
-      prisma.semesters.findUnique,
-    ).toHaveBeenCalledWith(
+    expect(prisma.semesters.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          academic_year_id_semester_number:
-            {
-              academic_year_id: 1n,
-              semester_number: 1,
-            },
+          academic_year_id_semester_number: {
+            academic_year_id: 1n,
+            semester_number: 1,
+          },
         },
       }),
     );
@@ -334,65 +262,44 @@ describe('StudentExportService', () => {
   it('resolves semester using academic year and semester number', async () => {
     mockAcademicYear();
 
-    prisma.semesters.findUnique.mockResolvedValue(
-      {
-        id: 5n,
-        semester_name: 'Semester 1',
-        semester_number: 1,
-        academic_year_id: 1n,
-      },
-    );
+    prisma.semesters.findUnique.mockResolvedValue({
+      id: 5n,
+      semester_name: 'Semester 1',
+      semester_number: 1,
+      academic_year_id: 1n,
+    });
 
-    prisma.students.findMany.mockResolvedValue([
-      makeStudent(),
-    ]);
+    prisma.students.findMany.mockResolvedValue([makeStudent()]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [],
-    );
+    prisma.evaluation_participants.findMany.mockResolvedValue([]);
 
-    const result =
-      await service.getExportData({
-        academic_year_id: '1',
-        semester_number: 1,
-      });
+    const result = await service.getExportData({
+      academic_year_id: '1',
+      semester_number: 1,
+    });
 
-    expect(
-      result.report.scope.semester_id,
-    ).toBe('5');
+    expect(result.report.scope.semester_id).toBe('5');
 
-    expect(
-      result.report.scope.semester_number,
-    ).toBe(1);
+    expect(result.report.scope.semester_number).toBe(1);
 
-    expect(
-      result.report.scope.semester_name,
-    ).toBe('Semester 1');
+    expect(result.report.scope.semester_name).toBe('Semester 1');
   });
 
   it('applies generation filter to student population', async () => {
-    prisma.student_generations.findUnique.mockResolvedValue(
-      {
-        id: 2n,
-        name: 'Gen44',
-      },
-    );
+    prisma.student_generations.findUnique.mockResolvedValue({
+      id: 2n,
+      name: 'Gen44',
+    });
 
-    prisma.students.findMany.mockResolvedValue([
-      makeStudent(),
-    ]);
+    prisma.students.findMany.mockResolvedValue([makeStudent()]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [],
-    );
+    prisma.evaluation_participants.findMany.mockResolvedValue([]);
 
     await service.getExportData({
       generation_id: '2',
     });
 
-    expect(
-      prisma.students.findMany,
-    ).toHaveBeenCalledWith(
+    expect(prisma.students.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           generation_id: 2n,
@@ -402,12 +309,10 @@ describe('StudentExportService', () => {
   });
 
   it('filters export by normalized class group within the exact placement scope', async () => {
-    prisma.student_generations.findUnique.mockResolvedValue(
-      {
-        id: 1n,
-        name: 'Gen43',
-      },
-    );
+    prisma.student_generations.findUnique.mockResolvedValue({
+      id: 1n,
+      name: 'Gen43',
+    });
 
     mockAcademicYear();
 
@@ -433,8 +338,7 @@ describe('StudentExportService', () => {
             majors: {
               id: 1n,
               code: 'AMS',
-              name:
-                'Applied Mathematics & Statistics',
+              name: 'Applied Mathematics & Statistics',
             },
           },
         ],
@@ -461,35 +365,27 @@ describe('StudentExportService', () => {
             majors: {
               id: 1n,
               code: 'AMS',
-              name:
-                'Applied Mathematics & Statistics',
+              name: 'Applied Mathematics & Statistics',
             },
           },
         ],
       }),
     ]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [],
-    );
+    prisma.evaluation_participants.findMany.mockResolvedValue([]);
 
-    const result =
-      await service.getExportData({
-        academic_year_id: '1',
-        generation_id: '1',
-        major_id: '1',
-        class_group: '  a  ',
-      });
+    const result = await service.getExportData({
+      academic_year_id: '1',
+      generation_id: '1',
+      major_id: '1',
+      class_group: '  a  ',
+    });
 
     expect(result.data).toHaveLength(1);
 
-    expect(
-      result.data[0].student_code,
-    ).toBe('e20221111');
+    expect(result.data[0].student_code).toBe('e20221111');
 
-    expect(
-      result.data[0].placement,
-    ).toEqual({
+    expect(result.data[0].placement).toEqual({
       academic_year: {
         id: '1',
         name: '2025-2026',
@@ -502,9 +398,7 @@ describe('StudentExportService', () => {
       source: 'ACADEMIC_RECORD',
     });
 
-    expect(
-      result.report.scope,
-    ).toEqual(
+    expect(result.report.scope).toEqual(
       expect.objectContaining({
         academic_year_id: '1',
         generation_id: '1',
@@ -513,16 +407,11 @@ describe('StudentExportService', () => {
       }),
     );
 
-    const studentQuery =
-      prisma.students.findMany.mock.calls[0][0];
+    const studentQuery = prisma.students.findMany.mock.calls[0][0];
 
-    expect(
-      studentQuery.where.generation_id,
-    ).toBe(1n);
+    expect(studentQuery.where.generation_id).toBe(1n);
 
-    expect(
-      studentQuery.where.student_academic_records,
-    ).toEqual({
+    expect(studentQuery.where.student_academic_records).toEqual({
       some: {
         academic_year_id: 1n,
         major_id: 1n,
@@ -533,108 +422,77 @@ describe('StudentExportService', () => {
   it('uses assigned published evaluations for academic-year population', async () => {
     mockAcademicYear();
 
-    prisma.students.findMany.mockResolvedValue([
-      makeStudent(),
-    ]);
+    prisma.students.findMany.mockResolvedValue([makeStudent()]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [],
-    );
+    prisma.evaluation_participants.findMany.mockResolvedValue([]);
 
     await service.getExportData({
       academic_year_id: '1',
     });
 
-    const call =
-      prisma.students.findMany.mock.calls[0][0];
+    const call = prisma.students.findMany.mock.calls[0][0];
 
     expect(
-      call.where.users.is
-        .evaluation_participants.some
-        .evaluations.is.status,
+      call.where.users.is.evaluation_participants.some.evaluations.is.status,
     ).toEqual({
       in: ['OPEN', 'CLOSED'],
     });
 
     expect(
-      call.where.users.is
-        .evaluation_participants.some
-        .evaluations.is.course_offerings.is
-        .semesters.is.academic_year_id,
+      call.where.users.is.evaluation_participants.some.evaluations.is
+        .course_offerings.is.semesters.is.academic_year_id,
     ).toBe(1n);
   });
 
   it('uses the resolved semester ID for semester population', async () => {
     mockAcademicYear();
 
-    prisma.semesters.findUnique.mockResolvedValue(
-      {
-        id: 5n,
-        semester_name: 'Semester 1',
-        semester_number: 1,
-        academic_year_id: 1n,
-      },
-    );
+    prisma.semesters.findUnique.mockResolvedValue({
+      id: 5n,
+      semester_name: 'Semester 1',
+      semester_number: 1,
+      academic_year_id: 1n,
+    });
 
-    prisma.students.findMany.mockResolvedValue([
-      makeStudent(),
-    ]);
+    prisma.students.findMany.mockResolvedValue([makeStudent()]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [],
-    );
+    prisma.evaluation_participants.findMany.mockResolvedValue([]);
 
     await service.getExportData({
       academic_year_id: '1',
       semester_number: 1,
     });
 
-    const call =
-      prisma.students.findMany.mock.calls[0][0];
+    const call = prisma.students.findMany.mock.calls[0][0];
 
     expect(
-      call.where.users.is
-        .evaluation_participants.some
-        .evaluations.is.course_offerings.is
-        .semesters.is.id,
+      call.where.users.is.evaluation_participants.some.evaluations.is
+        .course_offerings.is.semesters.is.id,
     ).toBe(5n);
   });
 
   it('counts active unsubmitted evaluation correctly', async () => {
     jest.useFakeTimers();
 
-    jest.setSystemTime(
-      new Date(
-        '2026-10-04T12:00:00.000Z',
-      ),
-    );
+    jest.setSystemTime(new Date('2026-10-04T12:00:00.000Z'));
 
-    prisma.students.findMany.mockResolvedValue([
-      makeStudent(),
+    prisma.students.findMany.mockResolvedValue([makeStudent()]);
+
+    prisma.evaluation_participants.findMany.mockResolvedValue([
+      makeParticipant({
+        has_submitted: false,
+      }),
     ]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [
-        makeParticipant({
-          has_submitted: false,
-        }),
-      ],
-    );
+    const result = await service.getExportData({});
 
-    const result =
-      await service.getExportData({});
-
-    expect(
-      result.data[0].active,
-    ).toEqual({
+    expect(result.data[0].active).toEqual({
       completed: 0,
       assigned: 1,
       left: 1,
     });
 
-    expect(
-      result.data[0].total,
-    ).toEqual({
+    expect(result.data[0].total).toEqual({
       completed: 0,
       assigned: 1,
       not_completed: 1,
@@ -644,38 +502,25 @@ describe('StudentExportService', () => {
   it('counts active submitted evaluation correctly', async () => {
     jest.useFakeTimers();
 
-    jest.setSystemTime(
-      new Date(
-        '2026-10-04T12:00:00.000Z',
-      ),
-    );
+    jest.setSystemTime(new Date('2026-10-04T12:00:00.000Z'));
 
-    prisma.students.findMany.mockResolvedValue([
-      makeStudent(),
+    prisma.students.findMany.mockResolvedValue([makeStudent()]);
+
+    prisma.evaluation_participants.findMany.mockResolvedValue([
+      makeParticipant({
+        has_submitted: true,
+      }),
     ]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [
-        makeParticipant({
-          has_submitted: true,
-        }),
-      ],
-    );
+    const result = await service.getExportData({});
 
-    const result =
-      await service.getExportData({});
-
-    expect(
-      result.data[0].active,
-    ).toEqual({
+    expect(result.data[0].active).toEqual({
       completed: 1,
       assigned: 1,
       left: 0,
     });
 
-    expect(
-      result.data[0].total,
-    ).toEqual({
+    expect(result.data[0].total).toEqual({
       completed: 1,
       assigned: 1,
       not_completed: 0,
@@ -683,149 +528,51 @@ describe('StudentExportService', () => {
   });
 
   it('keeps upcoming OPEN evaluation in total but not active', async () => {
-    prisma.students.findMany.mockResolvedValue([
-      makeStudent(),
+    prisma.students.findMany.mockResolvedValue([makeStudent()]);
+
+    prisma.evaluation_participants.findMany.mockResolvedValue([
+      makeParticipant({
+        evaluations: {
+          status: 'OPEN',
+          start_at: new Date('2999-01-01T00:00:00.000Z'),
+          end_at: new Date('2999-02-01T00:00:00.000Z'),
+        },
+      }),
     ]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [
-        makeParticipant({
-          evaluations: {
-            status: 'OPEN',
-            start_at: new Date(
-              '2999-01-01T00:00:00.000Z',
-            ),
-            end_at: new Date(
-              '2999-02-01T00:00:00.000Z',
-            ),
-          },
-        }),
-      ],
-    );
+    const result = await service.getExportData({});
 
-    const result =
-      await service.getExportData({});
+    expect(result.data[0].active.assigned).toBe(0);
 
-    expect(
-      result.data[0].active.assigned,
-    ).toBe(0);
+    expect(result.data[0].total.assigned).toBe(1);
 
-    expect(
-      result.data[0].total.assigned,
-    ).toBe(1);
-
-    expect(
-      result.data[0].total.not_completed,
-    ).toBe(1);
+    expect(result.data[0].total.not_completed).toBe(1);
   });
 
   it('keeps expired OPEN evaluation in total but not active', async () => {
-    prisma.students.findMany.mockResolvedValue([
-      makeStudent(),
+    prisma.students.findMany.mockResolvedValue([makeStudent()]);
+
+    prisma.evaluation_participants.findMany.mockResolvedValue([
+      makeParticipant({
+        evaluations: {
+          status: 'OPEN',
+          start_at: new Date('2000-01-01T00:00:00.000Z'),
+          end_at: new Date('2000-02-01T00:00:00.000Z'),
+        },
+      }),
     ]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [
-        makeParticipant({
-          evaluations: {
-            status: 'OPEN',
-            start_at: new Date(
-              '2000-01-01T00:00:00.000Z',
-            ),
-            end_at: new Date(
-              '2000-02-01T00:00:00.000Z',
-            ),
-          },
-        }),
-      ],
-    );
+    const result = await service.getExportData({});
 
-    const result =
-      await service.getExportData({});
+    expect(result.data[0].active.assigned).toBe(0);
 
-    expect(
-      result.data[0].active.assigned,
-    ).toBe(0);
-
-    expect(
-      result.data[0].total.assigned,
-    ).toBe(1);
+    expect(result.data[0].total.assigned).toBe(1);
   });
 
   it('counts CLOSED evaluation in total but not active', async () => {
-    prisma.students.findMany.mockResolvedValue([
-      makeStudent(),
-    ]);
+    prisma.students.findMany.mockResolvedValue([makeStudent()]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [
-        makeParticipant({
-          has_submitted: true,
-
-          evaluations: {
-            status: 'CLOSED',
-            start_at: null,
-            end_at: null,
-          },
-        }),
-      ],
-    );
-
-    const result =
-      await service.getExportData({});
-
-    expect(
-      result.data[0].active,
-    ).toEqual({
-      completed: 0,
-      assigned: 0,
-      left: 0,
-    });
-
-    expect(
-      result.data[0].total,
-    ).toEqual({
-      completed: 1,
-      assigned: 1,
-      not_completed: 0,
-    });
-  });
-
-  it('does not treat OPEN evaluation without schedule boundaries as active', async () => {
-    prisma.students.findMany.mockResolvedValue([
-      makeStudent(),
-    ]);
-
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [
-        makeParticipant({
-          evaluations: {
-            status: 'OPEN',
-            start_at: null,
-            end_at: null,
-          },
-        }),
-      ],
-    );
-
-    const result =
-      await service.getExportData({});
-
-    expect(
-      result.data[0].active.assigned,
-    ).toBe(0);
-
-    expect(
-      result.data[0].total.assigned,
-    ).toBe(1);
-  });
-
-  it('deduplicates the same student and evaluation pair', async () => {
-    prisma.students.findMany.mockResolvedValue([
-      makeStudent(),
-    ]);
-
-    const participant =
+    prisma.evaluation_participants.findMany.mockResolvedValue([
       makeParticipant({
         has_submitted: true,
 
@@ -834,21 +581,65 @@ describe('StudentExportService', () => {
           start_at: null,
           end_at: null,
         },
-      });
+      }),
+    ]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [
-        participant,
-        participant,
-      ],
-    );
+    const result = await service.getExportData({});
 
-    const result =
-      await service.getExportData({});
+    expect(result.data[0].active).toEqual({
+      completed: 0,
+      assigned: 0,
+      left: 0,
+    });
 
-    expect(
-      result.data[0].total,
-    ).toEqual({
+    expect(result.data[0].total).toEqual({
+      completed: 1,
+      assigned: 1,
+      not_completed: 0,
+    });
+  });
+
+  it('does not treat OPEN evaluation without schedule boundaries as active', async () => {
+    prisma.students.findMany.mockResolvedValue([makeStudent()]);
+
+    prisma.evaluation_participants.findMany.mockResolvedValue([
+      makeParticipant({
+        evaluations: {
+          status: 'OPEN',
+          start_at: null,
+          end_at: null,
+        },
+      }),
+    ]);
+
+    const result = await service.getExportData({});
+
+    expect(result.data[0].active.assigned).toBe(0);
+
+    expect(result.data[0].total.assigned).toBe(1);
+  });
+
+  it('deduplicates the same student and evaluation pair', async () => {
+    prisma.students.findMany.mockResolvedValue([makeStudent()]);
+
+    const participant = makeParticipant({
+      has_submitted: true,
+
+      evaluations: {
+        status: 'CLOSED',
+        start_at: null,
+        end_at: null,
+      },
+    });
+
+    prisma.evaluation_participants.findMany.mockResolvedValue([
+      participant,
+      participant,
+    ]);
+
+    const result = await service.getExportData({});
+
+    expect(result.data[0].total).toEqual({
       completed: 1,
       assigned: 1,
       not_completed: 0,
@@ -872,66 +663,51 @@ describe('StudentExportService', () => {
       }),
     ]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [
-        makeParticipant({
-          student_id: 73n,
-          evaluation_id: 10n,
-          has_submitted: true,
+    prisma.evaluation_participants.findMany.mockResolvedValue([
+      makeParticipant({
+        student_id: 73n,
+        evaluation_id: 10n,
+        has_submitted: true,
 
-          evaluations: {
-            status: 'CLOSED',
-            start_at: null,
-            end_at: null,
-          },
-        }),
+        evaluations: {
+          status: 'CLOSED',
+          start_at: null,
+          end_at: null,
+        },
+      }),
 
-        makeParticipant({
-          student_id: 76n,
-          evaluation_id: 11n,
-          has_submitted: false,
+      makeParticipant({
+        student_id: 76n,
+        evaluation_id: 11n,
+        has_submitted: false,
 
-          evaluations: {
-            status: 'CLOSED',
-            start_at: null,
-            end_at: null,
-          },
-        }),
-      ],
-    );
+        evaluations: {
+          status: 'CLOSED',
+          start_at: null,
+          end_at: null,
+        },
+      }),
+    ]);
 
-    const result =
-      await service.getExportData({});
+    const result = await service.getExportData({});
 
-    expect(
-      prisma.evaluation_participants.findMany,
-    ).toHaveBeenCalledTimes(1);
+    expect(prisma.evaluation_participants.findMany).toHaveBeenCalledTimes(1);
 
-    expect(
-      result.data,
-    ).toHaveLength(2);
+    expect(result.data).toHaveLength(2);
 
-    expect(
-      result.data[0].total.completed,
-    ).toBe(1);
+    expect(result.data[0].total.completed).toBe(1);
 
-    expect(
-      result.data[1].total.completed,
-    ).toBe(0);
+    expect(result.data[1].total.completed).toBe(0);
 
-    expect(
-      result.data[1].account_status,
-    ).toBe('INACTIVE');
+    expect(result.data[1].account_status).toBe('INACTIVE');
   });
 
   it('uses academic-year-specific major for period export', async () => {
-    prisma.academic_years.findUnique.mockResolvedValue(
-      {
-        id: 2n,
-        name: '2026-2027',
-        start_year: 2026,
-      },
-    );
+    prisma.academic_years.findUnique.mockResolvedValue({
+      id: 2n,
+      name: '2026-2027',
+      start_year: 2026,
+    });
 
     prisma.students.findMany.mockResolvedValue([
       makeStudent({
@@ -970,26 +746,20 @@ describe('StudentExportService', () => {
             majors: {
               id: 1n,
               code: 'AMS',
-              name:
-                'Applied Mathematics & Statistics',
+              name: 'Applied Mathematics & Statistics',
             },
           },
         ],
       }),
     ]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [],
-    );
+    prisma.evaluation_participants.findMany.mockResolvedValue([]);
 
-    const result =
-      await service.getExportData({
-        academic_year_id: '2',
-      });
+    const result = await service.getExportData({
+      academic_year_id: '2',
+    });
 
-    expect(
-      result.data[0].major,
-    ).toEqual({
+    expect(result.data[0].major).toEqual({
       id: '2',
       code: 'DS',
       name: 'Data Science',
@@ -1034,24 +804,18 @@ describe('StudentExportService', () => {
             majors: {
               id: 1n,
               code: 'AMS',
-              name:
-                'Applied Mathematics & Statistics',
+              name: 'Applied Mathematics & Statistics',
             },
           },
         ],
       }),
     ]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [],
-    );
+    prisma.evaluation_participants.findMany.mockResolvedValue([]);
 
-    const result =
-      await service.getExportData({});
+    const result = await service.getExportData({});
 
-    expect(
-      result.data[0].major,
-    ).toEqual({
+    expect(result.data[0].major).toEqual({
       id: '2',
       code: 'DS',
       name: 'Data Science',
@@ -1096,24 +860,18 @@ describe('StudentExportService', () => {
             majors: {
               id: 1n,
               code: 'AMS',
-              name:
-                'Applied Mathematics & Statistics',
+              name: 'Applied Mathematics & Statistics',
             },
           },
         ],
       }),
     ]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [],
-    );
+    prisma.evaluation_participants.findMany.mockResolvedValue([]);
 
-    const result =
-      await service.getExportData({});
+    const result = await service.getExportData({});
 
-    expect(
-      result.data[0].placement,
-    ).toEqual({
+    expect(result.data[0].placement).toEqual({
       academic_year: {
         id: '2',
         name: '2026-2027',
@@ -1134,108 +892,61 @@ describe('StudentExportService', () => {
       }),
     ]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [],
-    );
+    prisma.evaluation_participants.findMany.mockResolvedValue([]);
 
-    const result =
-      await service.getExportData({});
+    const result = await service.getExportData({});
 
-    expect(
-      result.data[0].major,
-    ).toBeNull();
+    expect(result.data[0].major).toBeNull();
   });
 
   it('does not expose internal IDs, responses, answers, or credentials', async () => {
-    prisma.students.findMany.mockResolvedValue([
-      makeStudent(),
-    ]);
+    prisma.students.findMany.mockResolvedValue([makeStudent()]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [],
-    );
+    prisma.evaluation_participants.findMany.mockResolvedValue([]);
 
-    const result =
-      await service.getExportData({});
+    const result = await service.getExportData({});
 
-    const row =
-      result.data[0] as Record<
-        string,
-        unknown
-      >;
+    const row = result.data[0] as Record<string, unknown>;
 
-    expect(row).not.toHaveProperty(
-      'user_id',
-    );
+    expect(row).not.toHaveProperty('user_id');
 
-    expect(row).not.toHaveProperty(
-      'response_id',
-    );
+    expect(row).not.toHaveProperty('response_id');
 
-    expect(row).not.toHaveProperty(
-      'responses',
-    );
+    expect(row).not.toHaveProperty('responses');
 
-    expect(row).not.toHaveProperty(
-      'answers',
-    );
+    expect(row).not.toHaveProperty('answers');
 
-    expect(row).not.toHaveProperty(
-      'password',
-    );
+    expect(row).not.toHaveProperty('password');
 
-    expect(row).not.toHaveProperty(
-      'password_hash',
-    );
+    expect(row).not.toHaveProperty('password_hash');
   });
 
   it('returns scope, generated time, preview, and privacy warning', async () => {
-    prisma.student_generations.findUnique.mockResolvedValue(
-      {
-        id: 1n,
-        name: 'Gen43',
-      },
-    );
+    prisma.student_generations.findUnique.mockResolvedValue({
+      id: 1n,
+      name: 'Gen43',
+    });
 
-    prisma.students.findMany.mockResolvedValue([
-      makeStudent(),
-    ]);
+    prisma.students.findMany.mockResolvedValue([makeStudent()]);
 
-    prisma.evaluation_participants.findMany.mockResolvedValue(
-      [],
-    );
+    prisma.evaluation_participants.findMany.mockResolvedValue([]);
 
-    const result =
-      await service.getExportData({
-        generation_id: '1',
-      });
+    const result = await service.getExportData({
+      generation_id: '1',
+    });
 
-    expect(
-      result.report.scope.generation_id,
-    ).toBe('1');
+    expect(result.report.scope.generation_id).toBe('1');
 
-    expect(
-      result.report.scope.generation_name,
-    ).toBe('Gen43');
+    expect(result.report.scope.generation_name).toBe('Gen43');
 
-    expect(
-      result.report.generated_at,
-    ).toMatch(/Z$/);
+    expect(result.report.generated_at).toMatch(/Z$/);
 
-    expect(
-      result.report.identifiable_participation_data,
-    ).toBe(true);
+    expect(result.report.identifiable_participation_data).toBe(true);
 
-    expect(
-      result.report.privacy_notice,
-    ).toContain('authorized staff');
+    expect(result.report.privacy_notice).toContain('authorized staff');
 
-    expect(
-      result.preview.student_count,
-    ).toBe(1);
+    expect(result.preview.student_count).toBe(1);
 
-    expect(
-      result.preview.complete,
-    ).toBe(true);
+    expect(result.preview.complete).toBe(true);
   });
 });

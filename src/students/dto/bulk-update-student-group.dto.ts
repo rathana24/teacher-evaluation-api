@@ -7,8 +7,9 @@ import {
   MaxLength,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { OptionalReviewDto } from '../../common/dto/optional-review.dto';
 
-export class BulkUpdateStudentGroupDto {
+export class BulkUpdateStudentGroupDto extends OptionalReviewDto {
   @ApiProperty({
     example: '1',
     type: String,
@@ -17,8 +18,7 @@ export class BulkUpdateStudentGroupDto {
   })
   @IsString()
   @Matches(/^[1-9]\d*$/, {
-    message:
-      'academic_year_id must be a positive integer',
+    message: 'academic_year_id must be a positive integer',
   })
   academic_year_id!: string;
 
@@ -34,8 +34,7 @@ export class BulkUpdateStudentGroupDto {
   @IsString({ each: true })
   @Matches(/^[1-9]\d*$/, {
     each: true,
-    message:
-      'Each student_id must be a positive integer',
+    message: 'Each student_id must be a positive integer',
   })
   student_ids!: string[];
 
@@ -43,8 +42,7 @@ export class BulkUpdateStudentGroupDto {
     example: 'A',
     type: String,
     maxLength: 50,
-    description:
-      'New class group. It is normalized before being stored.',
+    description: 'New class group. It is normalized before being stored.',
   })
   @IsString()
   @MaxLength(50)

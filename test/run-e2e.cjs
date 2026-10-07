@@ -64,6 +64,8 @@ if (require.main === module) {
   if (mode === 'check') {
     console.log('Test configuration valid: teacher_evaluation_test');
     process.exit(0);
+  } else if (mode === 'generate') {
+    args = [require.resolve('prisma/build/index.js'), 'generate'];
   } else if (mode === 'migrate') {
     args = [
       require.resolve('prisma/build/index.js'),
@@ -80,7 +82,7 @@ if (require.main === module) {
       ...process.argv.slice(3),
     ];
   } else {
-    throw new Error('Use check, migrate, or test.');
+    throw new Error('Use check, generate, migrate, or test.');
   }
 
   const result = spawnSync(process.execPath, args, {

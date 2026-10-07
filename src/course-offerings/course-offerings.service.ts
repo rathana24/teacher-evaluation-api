@@ -1,4 +1,5 @@
 import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
+import { attachTargetLabelViews } from '../common/utils/target-labels.util';
 import {
   BadRequestException,
   ConflictException,
@@ -15,6 +16,7 @@ import { LecturerCourseOfferingsQueryDto } from './dto/lecturer-course-offerings
 import { UpdateCourseOfferingDto } from './dto/update-course-offering.dto';
 
 const groupScopeInclude = {
+  curriculum_revision: true,
   academic_years: {
     select: {
       id: true,
@@ -100,12 +102,9 @@ const offeringInclude = {
   },
 } satisfies Prisma.course_offeringsInclude;
 
-const DUPLICATE_MESSAGE =
-  'This course offering already exists';
+const DUPLICATE_MESSAGE = 'This course offering already exists';
 
-type PrismaWriteClient =
-  | PrismaService
-  | Prisma.TransactionClient;
+type PrismaWriteClient = PrismaService | Prisma.TransactionClient;
 
 @Injectable()
 export class CourseOfferingsService {
@@ -130,9 +129,7 @@ export class CourseOfferingsService {
       lecturer_id: lecturerId,
 
       semester_id:
-        query.semester_id !== undefined
-          ? BigInt(query.semester_id)
-          : undefined,
+        query.semester_id !== undefined ? BigInt(query.semester_id) : undefined,
 
       year_level: query.year_level,
 
@@ -141,9 +138,7 @@ export class CourseOfferingsService {
       semesters:
         query.academic_year_id !== undefined
           ? {
-              academic_year_id: BigInt(
-                query.academic_year_id,
-              ),
+              academic_year_id: BigInt(query.academic_year_id),
             }
           : undefined,
 
@@ -180,97 +175,95 @@ export class CourseOfferingsService {
           : undefined,
     };
 
-    const offerings =
-      await this.prisma.course_offerings.findMany({
-        where,
+    const offerings = await this.prisma.course_offerings.findMany({
+      where,
 
-        include: {
-          courses: true,
+      include: {
+        courses: true,
 
-          semesters: {
-            include: {
-              academic_years: true,
-            },
-          },
-
-          group_scopes: {
-            include: groupScopeInclude,
-            orderBy: [
-              {
-                generation_id: 'asc',
-              },
-              {
-                major_id: 'asc',
-              },
-              {
-                year_level: 'asc',
-              },
-              {
-                class_group: 'asc',
-              },
-            ],
-          },
-
-          evaluations: {
-            select: {
-              id: true,
-              status: true,
-              start_at: true,
-              end_at: true,
-              survey_version_id: true,
-
-              group_targets: {
-                include:
-                  evaluationGroupTargetInclude,
-
-                orderBy: [
-                  {
-                    generation_id: 'asc',
-                  },
-                  {
-                    major_id: 'asc',
-                  },
-                  {
-                    year_level: 'asc',
-                  },
-                  {
-                    class_group: 'asc',
-                  },
-                ],
-              },
-            },
-
-            orderBy: {
-              created_at: 'desc',
-            },
+        semesters: {
+          include: {
+            academic_years: true,
           },
         },
 
-        orderBy: {
-          id: 'asc',
+        group_scopes: {
+          include: groupScopeInclude,
+          orderBy: [
+            {
+              generation_id: 'asc',
+            },
+            {
+              major_id: 'asc',
+            },
+            {
+              year_level: 'asc',
+            },
+            {
+              class_group: 'asc',
+            },
+          ],
         },
-      });
+
+        evaluations: {
+          select: {
+            id: true,
+            status: true,
+            start_at: true,
+            end_at: true,
+            survey_version_id: true,
+
+            group_targets: {
+              include: evaluationGroupTargetInclude,
+
+              orderBy: [
+                {
+                  generation_id: 'asc',
+                },
+                {
+                  major_id: 'asc',
+                },
+                {
+                  year_level: 'asc',
+                },
+                {
+                  class_group: 'asc',
+                },
+              ],
+            },
+          },
+
+          orderBy: {
+            created_at: 'desc',
+          },
+        },
+      },
+
+      orderBy: {
+        id: 'asc',
+      },
+    });
 
     return {
-      items: offerings,
+      items: offerings.map((offering) => ({
+        ...offering,
+        evaluations: offering.evaluations.map(attachTargetLabelViews),
+      })),
       total: offerings.length,
       complete: true,
     };
   }
 
   async findOne(id: bigint) {
-    const offering =
-      await this.prisma.course_offerings.findUnique({
-        where: {
-          id,
-        },
-        include: offeringInclude,
-      });
+    const offering = await this.prisma.course_offerings.findUnique({
+      where: {
+        id,
+      },
+      include: offeringInclude,
+    });
 
     if (!offering) {
-      throw new NotFoundException(
-        'Course offering not found',
-      );
+      throw new NotFoundException('Course offering not found');
     }
 
     return offering;
@@ -292,22 +285,13 @@ export class CourseOfferingsService {
     const semesterId = BigInt(dto.semester_id);
 
     const sectionCode =
-      dto.section_code !== undefined
-        ? dto.section_code.trim()
-        : null;
+      dto.section_code !== undefined ? dto.section_code.trim() : null;
 
-    const yearLevel =
-      dto.year_level !== undefined
-        ? dto.year_level
-        : null;
+    const yearLevel = dto.year_level !== undefined ? dto.year_level : null;
 
     const classType = dto.class_type;
 
-    await this.checkReferences(
-      courseId,
-      lecturerId,
-      semesterId,
-    );
+    await this.checkReferences(courseId, lecturerId, semesterId);
 
     await this.checkNotDuplicate(
       courseId,
@@ -318,47 +302,45 @@ export class CourseOfferingsService {
       classType ?? null,
     );
 
-    await this.validateGroupScopes(
-      semesterId,
-      yearLevel,
+    await this.validateGroupScopes(semesterId, yearLevel, dto.group_scopes);
+    const curriculumBindings = await this.resolveCurriculumScopes(
+      courseId,
       dto.group_scopes,
     );
 
     const now = new Date();
 
     try {
-      return await this.prisma.$transaction(
-        async (tx) => {
-          const offering =
-            await tx.course_offerings.create({
-              data: {
-                course_id: courseId,
-                lecturer_id: lecturerId,
-                semester_id: semesterId,
-                section_code: sectionCode,
-                year_level: yearLevel,
-                class_type: classType,
-                created_at: now,
-                updated_at: now,
-              },
-            });
+      return await this.prisma.$transaction(async (tx) => {
+        const offering = await tx.course_offerings.create({
+          data: {
+            course_id: courseId,
+            lecturer_id: lecturerId,
+            semester_id: semesterId,
+            section_code: sectionCode,
+            year_level: yearLevel,
+            class_type: classType,
+            created_at: now,
+            updated_at: now,
+          },
+        });
 
-          if (dto.group_scopes !== undefined) {
-            await this.createGroupScopes(
-              tx,
-              offering.id,
-              dto.group_scopes,
-            );
-          }
+        if (dto.group_scopes !== undefined) {
+          await this.createGroupScopes(
+            tx,
+            offering.id,
+            dto.group_scopes,
+            curriculumBindings,
+          );
+        }
 
-          return tx.course_offerings.findUniqueOrThrow({
-            where: {
-              id: offering.id,
-            },
-            include: offeringInclude,
-          });
-        },
-      );
+        return tx.course_offerings.findUniqueOrThrow({
+          where: {
+            id: offering.id,
+          },
+          include: offeringInclude,
+        });
+      });
     } catch (e: any) {
       this.handleWriteError(e);
     }
@@ -374,16 +356,11 @@ export class CourseOfferingsService {
     );
   }
 
-  private async updateInTransaction(
-    id: bigint,
-    dto: UpdateCourseOfferingDto,
-  ) {
+  private async updateInTransaction(id: bigint, dto: UpdateCourseOfferingDto) {
     const existing = await this.findOne(id);
 
     const courseId =
-      dto.course_id !== undefined
-        ? BigInt(dto.course_id)
-        : existing.course_id;
+      dto.course_id !== undefined ? BigInt(dto.course_id) : existing.course_id;
 
     const lecturerId =
       dto.lecturer_id !== undefined
@@ -401,20 +378,12 @@ export class CourseOfferingsService {
         : existing.section_code;
 
     const yearLevel =
-      dto.year_level !== undefined
-        ? dto.year_level
-        : existing.year_level;
+      dto.year_level !== undefined ? dto.year_level : existing.year_level;
 
     const classType =
-      dto.class_type !== undefined
-        ? dto.class_type
-        : existing.class_type;
+      dto.class_type !== undefined ? dto.class_type : existing.class_type;
 
-    await this.checkReferences(
-      courseId,
-      lecturerId,
-      semesterId,
-    );
+    await this.checkReferences(courseId, lecturerId, semesterId);
 
     await this.checkNotDuplicate(
       courseId,
@@ -431,65 +400,133 @@ export class CourseOfferingsService {
      * preserved. But if the offering academic context itself
      * changes, those preserved scopes must still remain valid.
      */
-    const scopesForValidation =
+    const scopesForValidation: CourseOfferingGroupScopeDto[] =
       dto.group_scopes !== undefined
         ? dto.group_scopes
         : existing.group_scopes.map((scope) => ({
-            academic_year_id:
-              scope.academic_year_id.toString(),
-            generation_id:
-              scope.generation_id.toString(),
+            academic_year_id: scope.academic_year_id.toString(),
+            generation_id: scope.generation_id.toString(),
             major_id: scope.major_id.toString(),
             year_level: scope.year_level,
             class_groups: [scope.class_group],
           }));
 
-    await this.validateGroupScopes(
-      semesterId,
-      yearLevel,
-      scopesForValidation,
+    await this.validateGroupScopes(semesterId, yearLevel, scopesForValidation);
+    const pinnedScopes = existing.group_scopes.filter(
+      (scope) =>
+        scope.curriculum_revision_id !== null &&
+        scope.curriculum_revision_id !== undefined,
     );
+    let curriculumBindings = new Map<string, bigint | null>();
+    if (pinnedScopes.length) {
+      const scopeKeys = (scopes: CourseOfferingGroupScopeDto[]) =>
+        scopes
+          .flatMap((scope) =>
+            normalizeClassGroups(scope.class_groups).map((group) =>
+              [
+                BigInt(scope.academic_year_id),
+                BigInt(scope.generation_id),
+                BigInt(scope.major_id),
+                scope.year_level,
+                group,
+              ].join(':'),
+            ),
+          )
+          .sort();
+      const originalScopes = existing.group_scopes.map((scope) => ({
+        academic_year_id: String(scope.academic_year_id),
+        generation_id: String(scope.generation_id),
+        major_id: String(scope.major_id),
+        year_level: scope.year_level,
+        class_groups: [scope.class_group],
+      }));
+      if (
+        courseId !== existing.course_id ||
+        semesterId !== existing.semester_id ||
+        yearLevel !== existing.year_level ||
+        JSON.stringify(scopeKeys(scopesForValidation)) !==
+          JSON.stringify(scopeKeys(originalScopes))
+      ) {
+        throw new ConflictException(
+          'A curriculum-bound offering keeps its original course, semester, year level and group assignments. Create another offering for changed curriculum context.',
+        );
+      }
+      for (const scope of existing.group_scopes)
+        curriculumBindings.set(
+          `${BigInt(scope.major_id)}:${scope.year_level}`,
+          scope.curriculum_revision_id,
+        );
+      for (const scope of scopesForValidation) {
+        const pinned = curriculumBindings.get(
+          `${BigInt(scope.major_id)}:${scope.year_level}`,
+        );
+        if (
+          scope.curriculum_revision_id !== undefined &&
+          String(pinned) !== scope.curriculum_revision_id
+        )
+          throw new ConflictException(
+            'Existing curriculum bindings cannot be replaced',
+          );
+      }
+    } else if (dto.group_scopes !== undefined) {
+      curriculumBindings = await this.resolveCurriculumScopes(
+        courseId,
+        dto.group_scopes,
+      );
+    } else if (
+      existing.group_scopes.length &&
+      courseId !== existing.course_id
+    ) {
+      // A changed course is a new assignment even when scopes were omitted.
+      curriculumBindings = await this.resolveCurriculumScopes(
+        courseId,
+        scopesForValidation,
+      );
+      if ([...curriculumBindings.values()].some((id) => id !== null))
+        throw new ConflictException(
+          'Changing to a revisioned course requires explicit group_scopes to save curriculum bindings',
+        );
+    }
 
     try {
-      return await this.prisma.$transaction(
-        async (tx) => {
-          await tx.course_offerings.update({
+      return await this.prisma.$transaction(async (tx) => {
+        await tx.course_offerings.update({
+          where: {
+            id,
+          },
+          data: {
+            course_id: courseId,
+            lecturer_id: lecturerId,
+            semester_id: semesterId,
+            section_code: sectionCode,
+            year_level: yearLevel,
+            class_type: classType,
+            updated_at: new Date(),
+          },
+        });
+
+        if (dto.group_scopes !== undefined && pinnedScopes.length === 0) {
+          await tx.course_offering_group_scopes.deleteMany({
             where: {
-              id,
-            },
-            data: {
-              course_id: courseId,
-              lecturer_id: lecturerId,
-              semester_id: semesterId,
-              section_code: sectionCode,
-              year_level: yearLevel,
-              class_type: classType,
-              updated_at: new Date(),
+              course_offering_id: id,
             },
           });
 
-          if (dto.group_scopes !== undefined) {
-            await tx.course_offering_group_scopes.deleteMany({
-              where: {
-                course_offering_id: id,
-              },
-            });
+          await this.createGroupScopes(
+            tx,
+            id,
+            dto.group_scopes,
+            curriculumBindings,
+          );
+        }
 
-            await this.createGroupScopes(
-              tx,
-              id,
-              dto.group_scopes,
-            );
-          }
-
-          return tx.course_offerings.findUniqueOrThrow({
-            where: {
-              id,
-            },
-            include: offeringInclude,
-          });
-        },
-      );
+        return tx.course_offerings.findUniqueOrThrow({
+          where: {
+            id,
+          },
+          include: offeringInclude,
+        });
+      });
     } catch (e: any) {
       this.handleWriteError(e);
     }
@@ -514,27 +551,25 @@ export class CourseOfferingsService {
     await this.findOne(id);
 
     try {
-      await this.prisma.$transaction(
-        async (tx) => {
-          /*
-           * Group-scope rows are configuration owned by the
-           * offering. Remove them explicitly before deleting
-           * an otherwise unused offering because the schema
-           * intentionally uses NO ACTION foreign keys.
-           */
-          await tx.course_offering_group_scopes.deleteMany({
-            where: {
-              course_offering_id: id,
-            },
-          });
+      await this.prisma.$transaction(async (tx) => {
+        /*
+         * Group-scope rows are configuration owned by the
+         * offering. Remove them explicitly before deleting
+         * an otherwise unused offering because the schema
+         * intentionally uses NO ACTION foreign keys.
+         */
+        await tx.course_offering_group_scopes.deleteMany({
+          where: {
+            course_offering_id: id,
+          },
+        });
 
-          await tx.course_offerings.delete({
-            where: {
-              id,
-            },
-          });
-        },
-      );
+        await tx.course_offerings.delete({
+          where: {
+            id,
+          },
+        });
+      });
     } catch (e: any) {
       if (e.code === 'P2003') {
         throw new ConflictException(
@@ -548,45 +583,33 @@ export class CourseOfferingsService {
   private async validateGroupScopes(
     semesterId: bigint,
     offeringYearLevel: number | null,
-    scopes:
-      | CourseOfferingGroupScopeDto[]
-      | undefined,
+    scopes: CourseOfferingGroupScopeDto[] | undefined,
   ) {
     if (scopes === undefined) {
       return;
     }
 
-    const semester =
-      await this.prisma.semesters.findUnique({
-        where: {
-          id: semesterId,
-        },
-        select: {
-          academic_year_id: true,
-        },
-      });
+    const semester = await this.prisma.semesters.findUnique({
+      where: {
+        id: semesterId,
+      },
+      select: {
+        academic_year_id: true,
+      },
+    });
 
     if (!semester) {
-      throw new BadRequestException(
-        'semester_id does not match any semester',
-      );
+      throw new BadRequestException('semester_id does not match any semester');
     }
 
     const seen = new Set<string>();
 
     for (const scope of scopes) {
-      const academicYearId = BigInt(
-        scope.academic_year_id,
-      );
-      const generationId = BigInt(
-        scope.generation_id,
-      );
+      const academicYearId = BigInt(scope.academic_year_id);
+      const generationId = BigInt(scope.generation_id);
       const majorId = BigInt(scope.major_id);
 
-      if (
-        academicYearId !==
-        semester.academic_year_id
-      ) {
+      if (academicYearId !== semester.academic_year_id) {
         throw new BadRequestException(
           'Group scope academic_year_id must match the course offering semester academic year',
         );
@@ -601,10 +624,7 @@ export class CourseOfferingsService {
         );
       }
 
-      const normalizedGroups =
-        normalizeClassGroups(
-          scope.class_groups,
-        );
+      const normalizedGroups = normalizeClassGroups(scope.class_groups);
 
       if (normalizedGroups.length === 0) {
         throw new BadRequestException(
@@ -612,35 +632,34 @@ export class CourseOfferingsService {
         );
       }
 
-      const [academicYear, generation, major] =
-        await Promise.all([
-          this.prisma.academic_years.findUnique({
-            where: {
-              id: academicYearId,
-            },
-            select: {
-              id: true,
-            },
-          }),
+      const [academicYear, generation, major] = await Promise.all([
+        this.prisma.academic_years.findUnique({
+          where: {
+            id: academicYearId,
+          },
+          select: {
+            id: true,
+          },
+        }),
 
-          this.prisma.student_generations.findUnique({
-            where: {
-              id: generationId,
-            },
-            select: {
-              id: true,
-            },
-          }),
+        this.prisma.student_generations.findUnique({
+          where: {
+            id: generationId,
+          },
+          select: {
+            id: true,
+          },
+        }),
 
-          this.prisma.majors.findUnique({
-            where: {
-              id: majorId,
-            },
-            select: {
-              id: true,
-            },
-          }),
-        ]);
+        this.prisma.majors.findUnique({
+          where: {
+            id: majorId,
+          },
+          select: {
+            id: true,
+          },
+        }),
+      ]);
 
       if (!academicYear) {
         throw new BadRequestException(
@@ -684,29 +703,23 @@ export class CourseOfferingsService {
     prisma: PrismaWriteClient,
     offeringId: bigint,
     scopes: CourseOfferingGroupScopeDto[],
+    curriculumBindings: Map<string, bigint | null>,
   ) {
     const rows = scopes.flatMap((scope) => {
-      const normalizedGroups =
-        normalizeClassGroups(
-          scope.class_groups,
-        );
+      const normalizedGroups = normalizeClassGroups(scope.class_groups);
 
-      return normalizedGroups.map(
-        (classGroup) => ({
-          course_offering_id: offeringId,
-          academic_year_id: BigInt(
-            scope.academic_year_id,
-          ),
-          generation_id: BigInt(
-            scope.generation_id,
-          ),
-          major_id: BigInt(
-            scope.major_id,
-          ),
-          year_level: scope.year_level,
-          class_group: classGroup,
-        }),
-      );
+      return normalizedGroups.map((classGroup) => ({
+        course_offering_id: offeringId,
+        academic_year_id: BigInt(scope.academic_year_id),
+        generation_id: BigInt(scope.generation_id),
+        major_id: BigInt(scope.major_id),
+        year_level: scope.year_level,
+        class_group: classGroup,
+        curriculum_revision_id:
+          curriculumBindings.get(
+            `${BigInt(scope.major_id)}:${scope.year_level}`,
+          ) ?? null,
+      }));
     });
 
     if (rows.length === 0) {
@@ -718,46 +731,87 @@ export class CourseOfferingsService {
     });
   }
 
+  private async resolveCurriculumScopes(
+    courseId: bigint,
+    scopes: CourseOfferingGroupScopeDto[] | undefined,
+  ) {
+    const bindings = new Map<string, bigint | null>();
+    for (const scope of scopes ?? []) {
+      const rules = await this.prisma.course_year_rules.findMany({
+        where: { course_id: courseId, major_id: BigInt(scope.major_id) },
+        include: { revisions: { orderBy: { effective_start_year: 'asc' } } },
+      });
+      const tracked = rules.some((rule) => rule.revisions.length > 0);
+      const rule = rules.find(
+        (candidate) => candidate.year_level === scope.year_level,
+      );
+      let revisionId: bigint | null = null;
+      if (tracked) {
+        const year = await this.prisma.academic_years.findUnique({
+          where: { id: BigInt(scope.academic_year_id) },
+        });
+        if (!year || year.start_year === null)
+          throw new BadRequestException(
+            'Revisioned curriculum assignment requires an academic year with structured start_year',
+          );
+        const applicable = rule?.revisions
+          .filter(
+            (revision) => revision.effective_start_year <= year.start_year!,
+          )
+          .at(-1);
+        if (!applicable?.enabled)
+          throw new ConflictException(
+            'No enabled curriculum revision permits this course, major and year level in the offering academic year',
+          );
+        revisionId = applicable.id;
+      }
+      if (
+        scope.curriculum_revision_id !== undefined &&
+        String(revisionId) !== scope.curriculum_revision_id
+      )
+        throw new ConflictException(
+          'Selected curriculum revision is obsolete, inapplicable or does not match the assignment. Reload curriculum history.',
+        );
+      bindings.set(`${BigInt(scope.major_id)}:${scope.year_level}`, revisionId);
+    }
+    return bindings;
+  }
+
   private async checkReferences(
     courseId: bigint,
     lecturerId: bigint,
     semesterId: bigint,
   ) {
-    const [course, lecturer, semester] =
-      await Promise.all([
-        this.prisma.courses.findUnique({
-          where: {
-            id: courseId,
-          },
-        }),
+    const [course, lecturer, semester] = await Promise.all([
+      this.prisma.courses.findUnique({
+        where: {
+          id: courseId,
+        },
+      }),
 
-        this.prisma.users.findUnique({
-          where: {
-            id: lecturerId,
-          },
-          select: {
-            role: true,
-            status: true,
-          },
-        }),
+      this.prisma.users.findUnique({
+        where: {
+          id: lecturerId,
+        },
+        select: {
+          role: true,
+          status: true,
+        },
+      }),
 
-        this.prisma.semesters.findUnique({
-          where: {
-            id: semesterId,
-          },
-        }),
-      ]);
+      this.prisma.semesters.findUnique({
+        where: {
+          id: semesterId,
+        },
+      }),
+    ]);
 
     if (!course) {
-      throw new BadRequestException(
-        'course_id does not match any course',
-      );
+      throw new BadRequestException('course_id does not match any course');
     }
 
     if (!semester) {
-      throw new BadRequestException(
-        'semester_id does not match any semester',
-      );
+      throw new BadRequestException('semester_id does not match any semester');
     }
 
     if (!lecturer || lecturer.role !== 'LECTURER') {
@@ -782,37 +836,32 @@ export class CourseOfferingsService {
     classType: class_type | null,
     excludeId?: bigint,
   ) {
-    const duplicate =
-      await this.prisma.course_offerings.findFirst({
-        where: {
-          course_id: courseId,
-          lecturer_id: lecturerId,
-          semester_id: semesterId,
-          section_code: sectionCode,
-          year_level: yearLevel,
-          class_type: classType,
+    const duplicate = await this.prisma.course_offerings.findFirst({
+      where: {
+        course_id: courseId,
+        lecturer_id: lecturerId,
+        semester_id: semesterId,
+        section_code: sectionCode,
+        year_level: yearLevel,
+        class_type: classType,
 
-          id:
-            excludeId !== undefined
-              ? {
-                  not: excludeId,
-                }
-              : undefined,
-        },
-      });
+        id:
+          excludeId !== undefined
+            ? {
+                not: excludeId,
+              }
+            : undefined,
+      },
+    });
 
     if (duplicate) {
-      throw new ConflictException(
-        DUPLICATE_MESSAGE,
-      );
+      throw new ConflictException(DUPLICATE_MESSAGE);
     }
   }
 
   private handleWriteError(e: any): never {
     if (e.code === 'P2002') {
-      throw new ConflictException(
-        DUPLICATE_MESSAGE,
-      );
+      throw new ConflictException(DUPLICATE_MESSAGE);
     }
 
     if (e.code === 'P2003') {

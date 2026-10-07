@@ -3,4 +3,5 @@ import { CreateStudentAcademicRecordDto } from './create-student-academic-record
 
 export class UpdateStudentAcademicRecordDto extends PartialType(
   CreateStudentAcademicRecordDto,
+  { skipNullProperties: false },
 ) {}

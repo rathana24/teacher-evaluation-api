@@ -4,10 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { resolveStudentPlacement } from '../common/utils/student-placement.util';
 
-import {
-  normalizeClassGroup,
-} from '../common/utils/class-group.util';
+import { normalizeClassGroup } from '../common/utils/class-group.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { StudentExportQueryDto } from './dto/student-export-query.dto';
 
@@ -54,15 +53,19 @@ const exportStudentSelect = {
     select: {
       id: true,
       name: true,
+      starting_year_level: true,
+      entry_academic_year: { select: { start_year: true } },
     },
   },
 
   student_academic_records: {
     select: {
+      id: true,
       academic_year_id: true,
       major_id: true,
       year_level: true,
       class_group: true,
+      progression_action: true,
 
       academic_years: {
         select: {
@@ -93,13 +96,9 @@ type ExportStudent = Prisma.studentsGetPayload<{
 
 @Injectable()
 export class StudentExportService {
-  constructor(
-    private readonly prisma: PrismaService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  async getExportData(
-    query: StudentExportQueryDto,
-  ) {
+  async getExportData(query: StudentExportQueryDto) {
     const generationId =
       query.generation_id !== undefined
         ? BigInt(query.generation_id)
@@ -111,31 +110,19 @@ export class StudentExportService {
         : undefined;
 
     const majorId =
-      query.major_id !== undefined
-        ? BigInt(query.major_id)
-        : undefined;
+      query.major_id !== undefined ? BigInt(query.major_id) : undefined;
 
-    const classGroup =
-      normalizeClassGroup(
-        query.class_group,
-      );
+    const classGroup = normalizeClassGroup(query.class_group);
 
-    if (
-      query.class_group !== undefined &&
-      classGroup === null
-    ) {
-      throw new BadRequestException(
-        'class_group must not be empty',
-      );
+    if (query.class_group !== undefined && classGroup === null) {
+      throw new BadRequestException('class_group must not be empty');
     }
 
     if (
       classGroup !== null &&
-      (
-        academicYearId === undefined ||
+      (academicYearId === undefined ||
         generationId === undefined ||
-        majorId === undefined
-      )
+        majorId === undefined)
     ) {
       throw new BadRequestException(
         'academic_year_id, generation_id, and major_id are required when class_group is provided',
@@ -147,59 +134,45 @@ export class StudentExportService {
      * Never interpret Semester 1 or Semester 2 without
      * an academic-year context.
      */
-    if (
-      query.semester_number !== undefined &&
-      academicYearId === undefined
-    ) {
+    if (query.semester_number !== undefined && academicYearId === undefined) {
       throw new BadRequestException(
         'academic_year_id is required when semester_number is provided',
       );
     }
 
-    const [generation, academicYear] =
-      await Promise.all([
-        generationId !== undefined
-          ? this.prisma.student_generations.findUnique({
-              where: {
-                id: generationId,
-              },
-              select: {
-                id: true,
-                name: true,
-              },
-            })
-          : Promise.resolve(null),
+    const [generation, academicYear] = await Promise.all([
+      generationId !== undefined
+        ? this.prisma.student_generations.findUnique({
+            where: {
+              id: generationId,
+            },
+            select: {
+              id: true,
+              name: true,
+            },
+          })
+        : Promise.resolve(null),
 
-        academicYearId !== undefined
-          ? this.prisma.academic_years.findUnique({
-              where: {
-                id: academicYearId,
-              },
-              select: {
-                id: true,
-                name: true,
-                start_year: true,
-              },
-            })
-          : Promise.resolve(null),
-      ]);
+      academicYearId !== undefined
+        ? this.prisma.academic_years.findUnique({
+            where: {
+              id: academicYearId,
+            },
+            select: {
+              id: true,
+              name: true,
+              start_year: true,
+            },
+          })
+        : Promise.resolve(null),
+    ]);
 
-    if (
-      generationId !== undefined &&
-      !generation
-    ) {
-      throw new NotFoundException(
-        'Student generation not found',
-      );
+    if (generationId !== undefined && !generation) {
+      throw new NotFoundException('Student generation not found');
     }
 
-    if (
-      academicYearId !== undefined &&
-      !academicYear
-    ) {
-      throw new NotFoundException(
-        'Academic year not found',
-      );
+    if (academicYearId !== undefined && !academicYear) {
+      throw new NotFoundException('Academic year not found');
     }
 
     /*
@@ -211,38 +184,30 @@ export class StudentExportService {
      * We never infer semester number from database IDs
      * or free-text semester names.
      */
-    let semester:
-      | {
-          id: bigint;
-          semester_name: string;
-          semester_number: number | null;
-          academic_year_id: bigint;
-        }
-      | null = null;
+    let semester: {
+      id: bigint;
+      semester_name: string;
+      semester_number: number | null;
+      academic_year_id: bigint;
+    } | null = null;
 
-    if (
-      academicYearId !== undefined &&
-      query.semester_number !== undefined
-    ) {
-      semester =
-        await this.prisma.semesters.findUnique({
-          where: {
-            academic_year_id_semester_number: {
-              academic_year_id:
-                academicYearId,
+    if (academicYearId !== undefined && query.semester_number !== undefined) {
+      semester = await this.prisma.semesters.findUnique({
+        where: {
+          academic_year_id_semester_number: {
+            academic_year_id: academicYearId,
 
-              semester_number:
-                query.semester_number,
-            },
+            semester_number: query.semester_number,
           },
+        },
 
-          select: {
-            id: true,
-            semester_name: true,
-            semester_number: true,
-            academic_year_id: true,
-          },
-        });
+        select: {
+          id: true,
+          semester_name: true,
+          semester_number: true,
+          academic_year_id: true,
+        },
+      });
 
       if (!semester) {
         throw new NotFoundException(
@@ -250,10 +215,7 @@ export class StudentExportService {
         );
       }
 
-      if (
-        semester.semester_number !== 1 &&
-        semester.semester_number !== 2
-      ) {
+      if (semester.semester_number !== 1 && semester.semester_number !== 2) {
         throw new BadRequestException(
           'Selected semester does not have a reliable Semester 1 / Semester 2 classification',
         );
@@ -268,32 +230,23 @@ export class StudentExportService {
     const generatedAt = new Date();
 
     const scope: ExportScope = {
-      generation_id:
-        generation?.id.toString() ?? null,
+      generation_id: generation?.id.toString() ?? null,
 
-      generation_name:
-        generation?.name ?? null,
+      generation_name: generation?.name ?? null,
 
-      academic_year_id:
-        academicYear?.id.toString() ?? null,
+      academic_year_id: academicYear?.id.toString() ?? null,
 
-      academic_year_name:
-        academicYear?.name ?? null,
+      academic_year_name: academicYear?.name ?? null,
 
-      major_id:
-        majorId?.toString() ?? null,
+      major_id: majorId?.toString() ?? null,
 
-      class_group:
-        classGroup,
+      class_group: classGroup,
 
-      semester_id:
-        semester?.id.toString() ?? null,
+      semester_id: semester?.id.toString() ?? null,
 
-      semester_number:
-        semester?.semester_number ?? null,
+      semester_number: semester?.semester_number ?? null,
 
-      semester_name:
-        semester?.semester_name ?? null,
+      semester_name: semester?.semester_name ?? null,
     };
 
     /*
@@ -306,169 +259,149 @@ export class StudentExportService {
      * explicitly assigned published evaluation
      * in the selected period.
      */
-    const students =
-      await this.findStudentsForScope(
-        generationId,
-        academicYearId,
-        semester?.id,
-        majorId,
-        classGroup,
-      );
-
-    const progressByUserId =
-      await this.getScopedProgress(
-        students.map(
-          (student) => student.user_id,
-        ),
-        generatedAt,
-        academicYearId,
-        semester?.id,
-      );
-
-    const data = students.map(
-      (student, index) => {
-        const progress =
-          progressByUserId.get(
-            student.user_id,
-          ) ?? this.emptyProgress();
-
-        const academicRecord =
-          this.resolveAcademicRecord(
-            student,
-            academicYearId,
-          );
-
-        const activeLeft = Math.max(
-          0,
-          progress.active.assigned -
-            progress.active.completed,
-        );
-
-        const totalNotCompleted = Math.max(
-          0,
-          progress.total.assigned -
-            progress.total.completed,
-        );
-
-        return {
-          no: index + 1,
-
-          student_code:
-            student.student_code,
-
-          full_name:
-            student.users.full_name,
-
-          gender:
-            student.users.gender,
-
-          major:
-            academicRecord
-              ? {
-                  id:
-                    academicRecord.majors.id.toString(),
-
-                  code:
-                    academicRecord.majors.code,
-
-                  name:
-                    academicRecord.majors.name,
-                }
-              : null,
-
-          placement: academicRecord
-            ? {
-                academic_year: {
-                  id:
-                    academicRecord.academic_years.id.toString(),
-
-                  name:
-                    academicRecord.academic_years.name,
-
-                  start_year:
-                    academicRecord.academic_years.start_year,
-                },
-
-                year_level:
-                  academicRecord.year_level,
-
-                major_id:
-                  academicRecord.major_id.toString(),
-
-                class_group:
-                  normalizeClassGroup(
-                    academicRecord.class_group,
-                  ),
-
-                source:
-                  'ACADEMIC_RECORD' as const,
-              }
-            : null,
-
-          generation: {
-            id:
-              student.student_generations.id.toString(),
-
-            name:
-              student.student_generations.name,
-          },
-
-          account_status:
-            student.users.status,
-
-          active: {
-            completed:
-              progress.active.completed,
-
-            assigned:
-              progress.active.assigned,
-
-            left:
-              activeLeft,
-          },
-
-          total: {
-            completed:
-              progress.total.completed,
-
-            assigned:
-              progress.total.assigned,
-
-            not_completed:
-              totalNotCompleted,
-          },
-
-          /*
-           * Counts are calculated directly from
-           * evaluation_participants, so zero here is
-           * a real zero rather than a guessed value.
-           */
-          availability_status:
-            'AVAILABLE' as const,
-        };
-      },
+    const students = await this.findStudentsForScope(
+      generationId,
+      academicYearId,
+      semester?.id,
+      majorId,
+      classGroup,
     );
+
+    const progressByUserId = await this.getScopedProgress(
+      students.map((student) => student.user_id),
+      generatedAt,
+      academicYearId,
+      semester?.id,
+    );
+
+    const data = students.map((student, index) => {
+      const progress =
+        progressByUserId.get(student.user_id) ?? this.emptyProgress();
+
+      const academicRecord = this.resolveAcademicRecord(
+        student,
+        academicYearId,
+      );
+
+      const contextYear = academicYear ?? academicRecord?.academic_years;
+      const placementContext = contextYear
+        ? resolveStudentPlacement(
+            student.student_generations,
+            student.student_academic_records,
+            contextYear,
+          )
+        : null;
+
+      const activeLeft = Math.max(
+        0,
+        progress.active.assigned - progress.active.completed,
+      );
+
+      const totalNotCompleted = Math.max(
+        0,
+        progress.total.assigned - progress.total.completed,
+      );
+
+      return {
+        no: index + 1,
+        academic_context: placementContext
+          ? {
+              academic_year: contextYear,
+              calculated_year_level: placementContext.calculated_year_level,
+              effective_year_level: placementContext.effective_year_level,
+              year_level_source: placementContext.year_level_source,
+              progression_status: placementContext.progression_status,
+              placement_eligible: placementContext.placement_eligible,
+              ineligibility_reason: placementContext.ineligibility_reason,
+              placement: placementContext.placement,
+            }
+          : null,
+
+        student_code: student.student_code,
+
+        full_name: student.users.full_name,
+
+        gender: student.users.gender,
+
+        major: academicRecord
+          ? {
+              id: academicRecord.majors.id.toString(),
+
+              code: academicRecord.majors.code,
+
+              name: academicRecord.majors.name,
+            }
+          : null,
+
+        placement: academicRecord
+          ? {
+              academic_year: {
+                id: academicRecord.academic_years.id.toString(),
+
+                name: academicRecord.academic_years.name,
+
+                start_year: academicRecord.academic_years.start_year,
+              },
+
+              year_level: academicRecord.year_level,
+
+              major_id: academicRecord.major_id.toString(),
+
+              class_group: normalizeClassGroup(academicRecord.class_group),
+
+              source: 'ACADEMIC_RECORD' as const,
+            }
+          : null,
+
+        generation: {
+          id: student.student_generations.id.toString(),
+
+          name: student.student_generations.name,
+        },
+
+        account_status: student.users.status,
+
+        active: {
+          completed: progress.active.completed,
+
+          assigned: progress.active.assigned,
+
+          left: activeLeft,
+        },
+
+        total: {
+          completed: progress.total.completed,
+
+          assigned: progress.total.assigned,
+
+          not_completed: totalNotCompleted,
+        },
+
+        /*
+         * Counts are calculated directly from
+         * evaluation_participants, so zero here is
+         * a real zero rather than a guessed value.
+         */
+        availability_status: 'AVAILABLE' as const,
+      };
+    });
 
     return {
       report: {
-        generated_at:
-          generatedAt.toISOString(),
+        generated_at: generatedAt.toISOString(),
 
         scope,
 
-        identifiable_participation_data:
-          true,
+        identifiable_participation_data: true,
 
         privacy_notice:
           'This export contains identifiable student participation data. Share it only with authorized staff.',
       },
 
       preview: {
-        student_count:
-          data.length,
+        student_count: data.length,
 
-        complete:
-          true,
+        complete: true,
       },
 
       data,
@@ -484,19 +417,16 @@ export class StudentExportService {
   ): Promise<ExportStudent[]> {
     const where: Prisma.studentsWhereInput = {
       ...(generationId !== undefined && {
-        generation_id:
-          generationId,
+        generation_id: generationId,
       }),
 
       ...(academicYearId !== undefined &&
         majorId !== undefined && {
           student_academic_records: {
             some: {
-              academic_year_id:
-                academicYearId,
+              academic_year_id: academicYearId,
 
-              major_id:
-                majorId,
+              major_id: majorId,
             },
           },
         }),
@@ -519,23 +449,17 @@ export class StudentExportService {
                 evaluations: {
                   is: {
                     status: {
-                      in: [
-                        'OPEN',
-                        'CLOSED',
-                      ],
+                      in: ['OPEN', 'CLOSED'],
                     },
 
                     course_offerings: {
                       is: {
                         semesters: {
                           is: {
-                            academic_year_id:
-                              academicYearId,
+                            academic_year_id: academicYearId,
 
-                            ...(semesterId !==
-                              undefined && {
-                              id:
-                                semesterId,
+                            ...(semesterId !== undefined && {
+                              id: semesterId,
                             }),
                           },
                         },
@@ -550,18 +474,15 @@ export class StudentExportService {
       }),
     };
 
-    const students =
-      await this.prisma.students.findMany({
-        where,
+    const students = await this.prisma.students.findMany({
+      where,
 
-        select:
-          exportStudentSelect,
+      select: exportStudentSelect,
 
-        orderBy: {
-          student_code:
-            'asc',
-        },
-      });
+      orderBy: {
+        student_code: 'asc',
+      },
+    });
 
     if (
       classGroup === null ||
@@ -576,24 +497,15 @@ export class StudentExportService {
      * casing or whitespace. Compare using the shared
      * normalization policy without rewriting history.
      */
-    return students.filter(
-      (student) => {
-        const placement =
-          student.student_academic_records.find(
-            (record) =>
-              record.academic_year_id ===
-                academicYearId &&
-              record.major_id ===
-                majorId,
-          );
+    return students.filter((student) => {
+      const placement = student.student_academic_records.find(
+        (record) =>
+          record.academic_year_id === academicYearId &&
+          record.major_id === majorId,
+      );
 
-        return (
-          normalizeClassGroup(
-            placement?.class_group,
-          ) === classGroup
-        );
-      },
-    );
+      return normalizeClassGroup(placement?.class_group) === classGroup;
+    });
   }
 
   private async getScopedProgress(
@@ -602,100 +514,69 @@ export class StudentExportService {
     academicYearId: bigint | undefined,
     semesterId: bigint | undefined,
   ): Promise<Map<bigint, StudentProgress>> {
-    const uniqueUserIds = [
-      ...new Set(
-        userIds.map(
-          (id) => id.toString(),
-        ),
-      ),
-    ].map(
+    const uniqueUserIds = [...new Set(userIds.map((id) => id.toString()))].map(
       (id) => BigInt(id),
     );
 
-    const progressByUserId =
-      new Map<bigint, StudentProgress>();
+    const progressByUserId = new Map<bigint, StudentProgress>();
 
-    for (
-      const userId of uniqueUserIds
-    ) {
-      progressByUserId.set(
-        userId,
-        this.emptyProgress(),
-      );
+    for (const userId of uniqueUserIds) {
+      progressByUserId.set(userId, this.emptyProgress());
     }
 
-    if (
-      uniqueUserIds.length === 0
-    ) {
+    if (uniqueUserIds.length === 0) {
       return progressByUserId;
     }
 
-    const participants =
-      await this.prisma.evaluation_participants.findMany(
-        {
-          where: {
-            student_id: {
-              in:
-                uniqueUserIds,
+    const participants = await this.prisma.evaluation_participants.findMany({
+      where: {
+        student_id: {
+          in: uniqueUserIds,
+        },
+
+        evaluations: {
+          is: {
+            status: {
+              in: ['OPEN', 'CLOSED'],
             },
 
-            evaluations: {
-              is: {
-                status: {
-                  in: [
-                    'OPEN',
-                    'CLOSED',
-                  ],
-                },
-
-                ...(academicYearId !==
-                  undefined && {
-                  course_offerings: {
+            ...(academicYearId !== undefined && {
+              course_offerings: {
+                is: {
+                  semesters: {
                     is: {
-                      semesters: {
-                        is: {
-                          academic_year_id:
-                            academicYearId,
+                      academic_year_id: academicYearId,
 
-                          ...(semesterId !==
-                            undefined && {
-                            id:
-                              semesterId,
-                          }),
-                        },
-                      },
+                      ...(semesterId !== undefined && {
+                        id: semesterId,
+                      }),
                     },
                   },
-                }),
+                },
               },
-            },
-          },
-
-          select: {
-            student_id:
-              true,
-
-            evaluation_id:
-              true,
-
-            has_submitted:
-              true,
-
-            evaluations: {
-              select: {
-                status:
-                  true,
-
-                start_at:
-                  true,
-
-                end_at:
-                  true,
-              },
-            },
+            }),
           },
         },
-      );
+      },
+
+      select: {
+        student_id: true,
+
+        evaluation_id: true,
+
+        has_submitted: true,
+
+        evaluations: {
+          select: {
+            status: true,
+
+            start_at: true,
+
+            end_at: true,
+          },
+        },
+      },
+    });
 
     /*
      * Defensively deduplicate by:
@@ -707,30 +588,20 @@ export class StudentExportService {
      * the aggregate from accidental duplication if
      * future queries introduce joins.
      */
-    const seen =
-      new Set<string>();
+    const seen = new Set<string>();
 
-    for (
-      const participant of participants
-    ) {
+    for (const participant of participants) {
       const dedupeKey =
         `${participant.student_id.toString()}:` +
         participant.evaluation_id.toString();
 
-      if (
-        seen.has(dedupeKey)
-      ) {
+      if (seen.has(dedupeKey)) {
         continue;
       }
 
-      seen.add(
-        dedupeKey,
-      );
+      seen.add(dedupeKey);
 
-      const progress =
-        progressByUserId.get(
-          participant.student_id,
-        );
+      const progress = progressByUserId.get(participant.student_id);
 
       if (!progress) {
         continue;
@@ -740,14 +611,10 @@ export class StudentExportService {
        * Every published OPEN or CLOSED assignment
        * contributes to the total denominator.
        */
-      progress.total.assigned +=
-        1;
+      progress.total.assigned += 1;
 
-      if (
-        participant.has_submitted
-      ) {
-        progress.total.completed +=
-          1;
+      if (participant.has_submitted) {
+        progress.total.completed += 1;
       }
 
       /*
@@ -761,33 +628,23 @@ export class StudentExportService {
        * boundaries remains in total, but it is not
        * treated as active.
        */
-      const evaluation =
-        participant.evaluations;
+      const evaluation = participant.evaluations;
 
       const isActive =
-        evaluation.status ===
-          'OPEN' &&
-        evaluation.start_at !==
-          null &&
-        evaluation.end_at !==
-          null &&
-        evaluation.start_at <=
-          now &&
-        now <
-          evaluation.end_at;
+        evaluation.status === 'OPEN' &&
+        evaluation.start_at !== null &&
+        evaluation.end_at !== null &&
+        evaluation.start_at <= now &&
+        now < evaluation.end_at;
 
       if (!isActive) {
         continue;
       }
 
-      progress.active.assigned +=
-        1;
+      progress.active.assigned += 1;
 
-      if (
-        participant.has_submitted
-      ) {
-        progress.active.completed +=
-          1;
+      if (participant.has_submitted) {
+        progress.active.completed += 1;
       }
     }
 
@@ -802,14 +659,10 @@ export class StudentExportService {
      * When an academic year is selected, major comes
      * from that year's explicit historical placement.
      */
-    if (
-      academicYearId !== undefined
-    ) {
+    if (academicYearId !== undefined) {
       return (
         student.student_academic_records.find(
-          (record) =>
-            record.academic_year_id ===
-            academicYearId,
+          (record) => record.academic_year_id === academicYearId,
         ) ?? null
       );
     }
@@ -823,8 +676,11 @@ export class StudentExportService {
      * If no record exists, major remains unavailable.
      */
     return (
-      student.student_academic_records[0] ??
-      null
+      [...student.student_academic_records].sort(
+        (a, b) =>
+          (b.academic_years.start_year ?? -1) -
+          (a.academic_years.start_year ?? -1),
+      )[0] ?? null
     );
   }
 

@@ -19,7 +19,7 @@ describe('Evaluations (e2e)', () => {
 
   // Temporary data created for these tests
   let tempSurveyId: string;
- let secondarySurveyId: string;
+  let secondarySurveyId: string;
   let versionWithQuestionsId: string;
   let emptyVersionId: string;
   let emptyOfferingId: string;
@@ -41,7 +41,10 @@ describe('Evaluations (e2e)', () => {
   const auth = () => ({ Authorization: `Bearer ${adminToken}` });
 
   const createEval = (body: Record<string, unknown>) =>
-    request(app.getHttpServer()).post('/api/evaluations').set(auth()).send(body);
+    request(app.getHttpServer())
+      .post('/api/evaluations')
+      .set(auth())
+      .send(body);
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -50,7 +53,9 @@ describe('Evaluations (e2e)', () => {
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api');
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     await app.init();
 
     const login = async (identifier: string): Promise<string> => {
@@ -69,7 +74,9 @@ describe('Evaluations (e2e)', () => {
     studentToken = await login('student1@itc.edu.kh');
     lecturerToken = await login('sokdara@itc.edu.kh');
 
-    const me = await request(app.getHttpServer()).get('/api/auth/me').set(auth());
+    const me = await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set(auth());
     adminId = me.body.id;
     expect(me.status).toBe(200);
     prisma = app.get(PrismaService);
@@ -139,6 +146,18 @@ describe('Evaluations (e2e)', () => {
           user_id: user.id,
           student_code: `E2E-EVAL-${stamp}`,
           generation_id: generation.id,
+          student_academic_records: {
+            create: {
+              academic_year_id: year.id,
+              year_level: 1,
+              major_id: (
+                await tx.majors.findFirstOrThrow({
+                  where: { department_id: department.id },
+                })
+              ).id,
+              class_group: 'TEST-A',
+            },
+          },
         },
       });
 
@@ -220,8 +239,12 @@ describe('Evaluations (e2e)', () => {
 
     expect(question.status).toBe(201);
 
-    const secondSet = await request(app.getHttpServer()).post('/api/surveys').set(auth()).send({title:`E2E evaluations other ${stamp}`});
-    expect(secondSet.status).toBe(201); secondarySurveyId = secondSet.body.id;
+    const secondSet = await request(app.getHttpServer())
+      .post('/api/surveys')
+      .set(auth())
+      .send({ title: `E2E evaluations other ${stamp}` });
+    expect(secondSet.status).toBe(201);
+    secondarySurveyId = secondSet.body.id;
     const v2 = await request(app.getHttpServer())
       .post(`/api/surveys/${secondarySurveyId}/versions`)
       .set(auth())
@@ -238,7 +261,9 @@ describe('Evaluations (e2e)', () => {
             const surveyId = BigInt(tempSurveyId);
 
             const versions = await tx.survey_versions.findMany({
-              where: { survey_id: { in: [surveyId, BigInt(secondarySurveyId)] } },
+              where: {
+                survey_id: { in: [surveyId, BigInt(secondarySurveyId)] },
+              },
               select: { id: true },
             });
             const versionIds = versions.map((version) => version.id);
@@ -247,7 +272,9 @@ describe('Evaluations (e2e)', () => {
               where: { survey_version_id: { in: versionIds } },
               select: { id: true },
             });
-            const evaluationIds = evaluations.map((evaluation) => evaluation.id);
+            const evaluationIds = evaluations.map(
+              (evaluation) => evaluation.id,
+            );
 
             await tx.evaluation_participants.deleteMany({
               where: { evaluation_id: { in: evaluationIds } },
@@ -267,7 +294,9 @@ describe('Evaluations (e2e)', () => {
             await tx.survey_versions.deleteMany({
               where: { id: { in: versionIds } },
             });
-            await tx.surveys.deleteMany({where:{id:{in:[surveyId,BigInt(secondarySurveyId)]}}});
+            await tx.surveys.deleteMany({
+              where: { id: { in: [surveyId, BigInt(secondarySurveyId)] } },
+            });
           }
 
           if (courseId !== undefined) {
@@ -287,6 +316,9 @@ describe('Evaluations (e2e)', () => {
           }
 
           if (participantUserId !== undefined) {
+            await tx.student_academic_records.deleteMany({
+              where: { academic_year_id: academicYearId },
+            });
             await tx.students.deleteMany({
               where: { user_id: participantUserId },
             });
@@ -331,14 +363,20 @@ describe('Evaluations (e2e)', () => {
       const res = await request(app.getHttpServer())
         .post('/api/evaluations')
         .set('Authorization', `Bearer ${lecturerToken}`)
-        .send({ course_offering_id: enrolledOfferingId, survey_version_id: versionWithQuestionsId });
+        .send({
+          course_offering_id: enrolledOfferingId,
+          survey_version_id: versionWithQuestionsId,
+        });
       expect(res.status).toBe(403);
     });
   });
 
   describe('POST /api/evaluations', () => {
     it('ADMIN creates a DRAFT evaluation -> 201', async () => {
-      const res = await createEval({ course_offering_id: enrolledOfferingId, survey_version_id: versionWithQuestionsId });
+      const res = await createEval({
+        course_offering_id: enrolledOfferingId,
+        survey_version_id: versionWithQuestionsId,
+      });
 
       expect(res.status).toBe(201);
       expect(res.body.status).toBe('DRAFT');
@@ -348,17 +386,26 @@ describe('Evaluations (e2e)', () => {
     });
 
     it('same offering + version again -> 409', async () => {
-      const res = await createEval({ course_offering_id: enrolledOfferingId, survey_version_id: versionWithQuestionsId });
+      const res = await createEval({
+        course_offering_id: enrolledOfferingId,
+        survey_version_id: versionWithQuestionsId,
+      });
       expect(res.status).toBe(409);
     });
 
     it('course offering that does not exist -> 400', async () => {
-      const res = await createEval({ course_offering_id: '999999', survey_version_id: versionWithQuestionsId });
+      const res = await createEval({
+        course_offering_id: '999999',
+        survey_version_id: versionWithQuestionsId,
+      });
       expect(res.status).toBe(400);
     });
 
     it('survey version that does not exist -> 400', async () => {
-      const res = await createEval({ course_offering_id: enrolledOfferingId, survey_version_id: '999999' });
+      const res = await createEval({
+        course_offering_id: enrolledOfferingId,
+        survey_version_id: '999999',
+      });
       expect(res.status).toBe(400);
     });
 
@@ -384,7 +431,9 @@ describe('Evaluations (e2e)', () => {
 
   describe('GET /api/evaluations', () => {
     it('filter by status=DRAFT returns only drafts, including ours -> 200', async () => {
-      const res = await request(app.getHttpServer()).get('/api/evaluations?status=DRAFT').set(auth());
+      const res = await request(app.getHttpServer())
+        .get('/api/evaluations?status=DRAFT')
+        .set(auth());
 
       expect(res.status).toBe(200);
       expect(res.body.every((e: any) => e.status === 'DRAFT')).toBe(true);
@@ -392,23 +441,31 @@ describe('Evaluations (e2e)', () => {
     });
 
     it('get one shows course, lecturer, and counts -> 200', async () => {
-      const res = await request(app.getHttpServer()).get(`/api/evaluations/${evalId}`).set(auth());
+      const res = await request(app.getHttpServer())
+        .get(`/api/evaluations/${evalId}`)
+        .set(auth());
 
       expect(res.status).toBe(200);
-      expect(res.body.course_offerings.courses.course_code).toBe(testCourseCode);
+      expect(res.body.course_offerings.courses.course_code).toBe(
+        testCourseCode,
+      );
       expect(res.body.course_offerings.users.password_hash).toBeUndefined();
       expect(res.body._count.evaluation_participants).toBe(0);
     });
 
     it('evaluation that does not exist -> 404', async () => {
-      const res = await request(app.getHttpServer()).get('/api/evaluations/999999').set(auth());
+      const res = await request(app.getHttpServer())
+        .get('/api/evaluations/999999')
+        .set(auth());
       expect(res.status).toBe(404);
     });
   });
 
   describe('schedule and open', () => {
     it('cannot open without dates -> 400', async () => {
-      const res = await request(app.getHttpServer()).post(`/api/evaluations/${evalId}/open`).set(auth());
+      const res = await request(app.getHttpServer())
+        .post(`/api/evaluations/${evalId}/open`)
+        .set(auth());
       expect(res.status).toBe(400);
     });
 
@@ -489,11 +546,15 @@ describe('Evaluations (e2e)', () => {
         .get(`/api/course-offerings/${enrolledOfferingId}/enrollments`)
         .set(auth());
 
-      const res = await request(app.getHttpServer()).post(`/api/evaluations/${evalId}/open`).set(auth());
+      const res = await request(app.getHttpServer())
+        .post(`/api/evaluations/${evalId}/open`)
+        .set(auth());
 
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('OPEN');
-      expect(res.body._count.evaluation_participants).toBe(enrolled.body.length);
+      expect(res.body._count.evaluation_participants).toBe(
+        enrolled.body.length,
+      );
 
       expect(enrolled.status).toBe(200);
       expect(enrolled.body).toHaveLength(1);
@@ -527,7 +588,9 @@ describe('Evaluations (e2e)', () => {
 
   describe('while OPEN', () => {
     it('opening again -> 409', async () => {
-      const res = await request(app.getHttpServer()).post(`/api/evaluations/${evalId}/open`).set(auth());
+      const res = await request(app.getHttpServer())
+        .post(`/api/evaluations/${evalId}/open`)
+        .set(auth());
       expect(res.status).toBe(409);
     });
 
@@ -540,21 +603,27 @@ describe('Evaluations (e2e)', () => {
     });
 
     it('cannot be deleted -> 409', async () => {
-      const res = await request(app.getHttpServer()).delete(`/api/evaluations/${evalId}`).set(auth());
+      const res = await request(app.getHttpServer())
+        .delete(`/api/evaluations/${evalId}`)
+        .set(auth());
       expect(res.status).toBe(409);
     });
   });
 
   describe('close', () => {
     it('ADMIN closes an OPEN evaluation -> 200', async () => {
-      const res = await request(app.getHttpServer()).post(`/api/evaluations/${evalId}/close`).set(auth());
+      const res = await request(app.getHttpServer())
+        .post(`/api/evaluations/${evalId}/close`)
+        .set(auth());
 
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('CLOSED');
     });
 
     it('closing again -> 409', async () => {
-      const res = await request(app.getHttpServer()).post(`/api/evaluations/${evalId}/close`).set(auth());
+      const res = await request(app.getHttpServer())
+        .post(`/api/evaluations/${evalId}/close`)
+        .set(auth());
       expect(res.status).toBe(409);
     });
   });

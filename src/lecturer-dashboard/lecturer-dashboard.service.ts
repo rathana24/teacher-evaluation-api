@@ -7,6 +7,10 @@ import {
 import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  targetLabelSelect,
+  targetLabelView,
+} from '../common/utils/target-labels.util';
 
 // =========================================================
 // EVALUATION CONTEXT
@@ -21,6 +25,7 @@ const contextSelect = {
 
   group_targets: {
     select: {
+      ...targetLabelSelect,
       academic_year_id: true,
       generation_id: true,
       major_id: true,
@@ -108,26 +113,21 @@ const contextSelect = {
   },
 } satisfies Prisma.evaluationsSelect;
 
-type EvaluationContext =
-  Prisma.evaluationsGetPayload<{
-    select: typeof contextSelect;
-  }>;
+type EvaluationContext = Prisma.evaluationsGetPayload<{
+  select: typeof contextSelect;
+}>;
 
 // =========================================================
 // HELPERS
 // =========================================================
 
-const round2 = (n: number) =>
-  Math.round(n * 100) / 100;
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
-const round4 = (n: number) =>
-  Math.round(n * 10000) / 10000;
+const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
 // Clean object for the lecturer.
 // No student identity or internal participant information.
-function toContext(
-  e: EvaluationContext,
-) {
+function toContext(e: EvaluationContext) {
   return {
     id: e.id,
     status: e.status,
@@ -135,93 +135,67 @@ function toContext(
     end_at: e.end_at,
 
     course: {
-      code:
-        e.course_offerings.courses
-          .course_code,
+      code: e.course_offerings.courses.course_code,
 
-      name:
-        e.course_offerings.courses
-          .course_name,
+      name: e.course_offerings.courses.course_name,
     },
 
-    section_code:
-      e.course_offerings.section_code,
+    section_code: e.course_offerings.section_code,
 
     semester: {
-      name:
-        e.course_offerings.semesters
-          .semester_name,
+      name: e.course_offerings.semesters.semester_name,
 
-      academic_year_id:
-        e.course_offerings.semesters
-          .academic_year_id,
+      academic_year_id: e.course_offerings.semesters.academic_year_id,
 
-      academic_year:
-        e.course_offerings.semesters
-          .academic_years.name,
+      academic_year: e.course_offerings.semesters.academic_years.name,
     },
 
     survey: {
-      title:
-        e.survey_versions.surveys
-          .title,
+      title: e.survey_versions.surveys.title,
 
-      version_no:
-        e.survey_versions.version_no,
+      version_no: e.survey_versions.version_no,
     },
 
     group_scope: {
-      complete:
-        e.group_targets.length > 0,
+      complete: e.group_targets.length > 0,
 
       unavailable_reason:
-        e.group_targets.length === 0
-          ? 'NO_FROZEN_GROUP_TARGETS'
-          : null,
+        e.group_targets.length === 0 ? 'NO_FROZEN_GROUP_TARGETS' : null,
 
-      groups:
-        e.group_targets.map(
-          (target) => ({
-            academic_year: {
-              id:
-                target.academic_years.id,
+      groups: e.group_targets.map((target) => ({
+        ...targetLabelView(target, {
+          academic_year: target.academic_years,
+          generation: target.student_generations,
+          major: target.majors,
+          year_level: target.year_level,
+          class_group: target.class_group,
+        }),
+        academic_year: {
+          id: target.academic_years.id,
 
-              name:
-                target.academic_years.name,
+          name: target.academic_years.name,
 
-              start_year:
-                target.academic_years
-                  .start_year,
-            },
+          start_year: target.academic_years.start_year,
+        },
 
-            generation: {
-              id:
-                target.student_generations
-                  .id,
+        generation: {
+          id: target.student_generations.id,
 
-              name:
-                target.student_generations
-                  .name,
-            },
+          name: target.student_generations.name,
+        },
 
-            major: {
-              id:
-                target.majors.id,
+        major: {
+          id: target.majors.id,
 
-              code:
-                target.majors.code,
+          code: target.majors.code,
 
-              name:
-                target.majors.name,
-            },
+          name: target.majors.name,
+        },
 
-            year_level:
-              target.year_level,
+        year_level: target.year_level,
 
-            class_group:
-              target.class_group,
-          }),
-        ),
+        class_group: target.class_group,
+      })),
     },
   };
 }
@@ -232,59 +206,49 @@ function toContext(
 
 @Injectable()
 export class LecturerDashboardService {
-  constructor(
-    private readonly prisma: PrismaService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   // =======================================================
   // MY EVALUATIONS
   // =======================================================
 
-  async findMyEvaluations(
-    lecturerId: bigint,
-  ) {
-    const rows =
-      await this.prisma.evaluations.findMany({
-        where: {
-          status: {
-            not: 'DRAFT',
-          },
-
-          course_offerings: {
-            lecturer_id: lecturerId,
-          },
+  async findMyEvaluations(lecturerId: bigint) {
+    const rows = await this.prisma.evaluations.findMany({
+      where: {
+        status: {
+          not: 'DRAFT',
         },
 
-        select: {
-          ...contextSelect,
+        course_offerings: {
+          lecturer_id: lecturerId,
+        },
+      },
 
-          _count: {
-            select: {
-              evaluation_participants:
-                true,
+      select: {
+        ...contextSelect,
 
-              responses: true,
-            },
+        _count: {
+          select: {
+            evaluation_participants: true,
+
+            responses: true,
           },
         },
+      },
 
-        orderBy: {
-          id: 'desc',
-        },
-      });
+      orderBy: {
+        id: 'desc',
+      },
+    });
 
     return rows.map((row) => ({
       ...toContext(row),
 
-      eligible_count:
-        row._count
-          .evaluation_participants,
+      eligible_count: row._count.evaluation_participants,
 
-      response_count:
-        row._count.responses,
+      response_count: row._count.responses,
 
-      results_available:
-        row.status === 'CLOSED',
+      results_available: row.status === 'CLOSED',
     }));
   }
 
@@ -292,185 +256,130 @@ export class LecturerDashboardService {
   // DASHBOARD
   // =======================================================
 
-  async getDashboard(
-    evaluationId: bigint,
-    lecturerId: bigint,
-  ) {
-    const evaluation =
-      await this.getOwnClosedEvaluation(
-        evaluationId,
-        lecturerId,
-      );
+  async getDashboard(evaluationId: bigint, lecturerId: bigint) {
+    const evaluation = await this.getOwnClosedEvaluation(
+      evaluationId,
+      lecturerId,
+    );
 
-    const [
-      eligibleCount,
-      responseCount,
-      ratingQuestions,
-      grouped,
-    ] = await Promise.all([
-      // Number of eligible students
-      this.prisma.evaluation_participants.count(
-        {
+    const [eligibleCount, responseCount, ratingQuestions, grouped] =
+      await Promise.all([
+        // Number of eligible students
+        this.prisma.evaluation_participants.count({
           where: {
-            evaluation_id:
-              evaluationId,
+            evaluation_id: evaluationId,
           },
-        },
-      ),
+        }),
 
-      // Number of anonymous submissions
-      this.prisma.responses.count({
-        where: {
-          evaluation_id:
-            evaluationId,
-        },
-      }),
+        // Number of anonymous submissions
+        this.prisma.responses.count({
+          where: {
+            evaluation_id: evaluationId,
+          },
+        }),
 
-      // Rating questions for this survey version
-      this.prisma.questions.findMany({
-        where: {
-          question_type:
-            'RATING',
-          OR: [
-            { survey_version_id: evaluation.survey_version_id },
-            { survey_versions: { responses: { some: { evaluation_id: evaluationId } } } },
-          ],
-        },
-
-        orderBy: {
-          display_order:
-            'asc',
-        },
-      }),
-
-      // Count answers grouped by question and score
-      this.prisma.answers.groupBy({
-        by: [
-          'question_id',
-          'rating_value',
-        ],
-
-        where: {
-          rating_value: {
-            not: null,
+        // Rating questions for this survey version
+        this.prisma.questions.findMany({
+          where: {
+            question_type: 'RATING',
+            OR: [
+              { survey_version_id: evaluation.survey_version_id },
+              {
+                survey_versions: {
+                  responses: { some: { evaluation_id: evaluationId } },
+                },
+              },
+            ],
           },
 
-          responses: {
-            evaluation_id:
-              evaluationId,
-            survey_version_id: { not: null },
+          orderBy: {
+            display_order: 'asc',
           },
-        },
+        }),
 
-        _count: {
-          _all: true,
-        },
-      }),
-    ]);
+        // Count answers grouped by question and score
+        this.prisma.answers.groupBy({
+          by: ['question_id', 'rating_value'],
+
+          where: {
+            rating_value: {
+              not: null,
+            },
+
+            responses: {
+              evaluation_id: evaluationId,
+              survey_version_id: { not: null },
+            },
+          },
+
+          _count: {
+            _all: true,
+          },
+        }),
+      ]);
 
     let totalSum = 0;
     let totalCount = 0;
 
-    const questions =
-      ratingQuestions.map((q) => {
-        const min =
-          q.min_rating ?? 1;
+    const questions = ratingQuestions.map((q) => {
+      const min = q.min_rating ?? 1;
 
-        const max =
-          q.max_rating ?? 5;
+      const max = q.max_rating ?? 5;
 
-        // Every possible score begins at 0.
-        const distribution:
-          Record<string, number> = {};
+      // Every possible score begins at 0.
+      const distribution: Record<string, number> = {};
 
-        for (
-          let score = min;
-          score <= max;
-          score++
-        ) {
-          distribution[
-            score.toString()
-          ] = 0;
+      for (let score = min; score <= max; score++) {
+        distribution[score.toString()] = 0;
+      }
+
+      let sum = 0;
+      let count = 0;
+
+      for (const row of grouped) {
+        if (row.question_id !== q.id || row.rating_value === null) {
+          continue;
         }
 
-        let sum = 0;
-        let count = 0;
+        const n = row._count._all;
 
-        for (const row of grouped) {
-          if (
-            row.question_id !== q.id ||
-            row.rating_value === null
-          ) {
-            continue;
-          }
+        distribution[row.rating_value.toString()] =
+          (distribution[row.rating_value.toString()] ?? 0) + n;
 
-          const n =
-            row._count._all;
+        sum += row.rating_value * n;
 
-          distribution[
-            row.rating_value.toString()
-          ] =
-            (distribution[
-              row.rating_value.toString()
-            ] ?? 0) + n;
+        count += n;
+      }
 
-          sum +=
-            row.rating_value * n;
+      totalSum += sum;
+      totalCount += count;
 
-          count += n;
-        }
+      return {
+        question_id: q.id,
 
-        totalSum += sum;
-        totalCount += count;
+        question_text: q.question_text,
 
-        return {
-          question_id:
-            q.id,
+        display_order: q.display_order,
 
-          question_text:
-            q.question_text,
+        response_count: count,
 
-          display_order:
-            q.display_order,
+        average: count > 0 ? round2(sum / count) : null,
 
-          response_count:
-            count,
-
-          average:
-            count > 0
-              ? round2(
-                  sum / count,
-                )
-              : null,
-
-          distribution,
-        };
-      });
+        distribution,
+      };
+    });
 
     return {
       ...toContext(evaluation),
 
-      eligible_count:
-        eligibleCount,
+      eligible_count: eligibleCount,
 
-      response_count:
-        responseCount,
+      response_count: responseCount,
 
       response_rate:
-        eligibleCount > 0
-          ? round4(
-              responseCount /
-                eligibleCount,
-            )
-          : 0,
+        eligibleCount > 0 ? round4(responseCount / eligibleCount) : 0,
 
-      overall_average:
-        totalCount > 0
-          ? round2(
-              totalSum /
-                totalCount,
-            )
-          : null,
+      overall_average: totalCount > 0 ? round2(totalSum / totalCount) : null,
 
       questions,
     };
@@ -488,39 +397,26 @@ export class LecturerDashboardService {
    * 2. Evaluation belongs to this lecturer
    * 3. Evaluation is CLOSED
    */
-  async getOwnClosedEvaluation(
-    evaluationId: bigint,
-    lecturerId: bigint,
-  ) {
-    const evaluation =
-      await this.prisma.evaluations.findUnique(
-        {
-          where: {
-            id: evaluationId,
-          },
+  async getOwnClosedEvaluation(evaluationId: bigint, lecturerId: bigint) {
+    const evaluation = await this.prisma.evaluations.findUnique({
+      where: {
+        id: evaluationId,
+      },
 
-          select: contextSelect,
-        },
-      );
+      select: contextSelect,
+    });
 
     if (!evaluation) {
-      throw new NotFoundException(
-        'Evaluation not found',
-      );
+      throw new NotFoundException('Evaluation not found');
     }
 
-    if (
-      evaluation.course_offerings
-        .lecturer_id !== lecturerId
-    ) {
+    if (evaluation.course_offerings.lecturer_id !== lecturerId) {
       throw new ForbiddenException(
         'You can only view results of your own evaluations',
       );
     }
 
-    if (
-      evaluation.status !== 'CLOSED'
-    ) {
+    if (evaluation.status !== 'CLOSED') {
       throw new ConflictException(
         'Results are available after the evaluation is closed',
       );

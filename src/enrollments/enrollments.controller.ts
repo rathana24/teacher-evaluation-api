@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   HttpCode,
+  Optional,
   Param,
   Post,
   UseGuards,
@@ -11,6 +12,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiOperation,
   ApiParam,
   ApiResponse,
@@ -27,6 +29,9 @@ import {
   EnrollmentReassignmentDto,
 } from './dto/enrollment-reassignment.dto';
 import { EnrollmentsService } from './enrollments.service';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ReviewedWorkflowsService } from '../reviewed-workflows/reviewed-workflows.service';
+import { requireReviewAtCutover } from '../reviewed-workflows/reviewed-operation.store';
 
 const enrollmentExample = {
   id: '1',
@@ -49,6 +54,8 @@ const enrollmentGroupSelectionExample = {
 };
 
 const enrollmentPreviewExample = {
+  review_id: '40aa52de-b777-4e6d-a508-c117f98b8c1a',
+  expires_at: '2026-10-07T12:15:00.000Z',
   course_offering_id: '1',
 
   selection: {
@@ -59,9 +66,9 @@ const enrollmentPreviewExample = {
     class_groups: ['AMS1-A'],
   },
 
-  matched_count: 30,
-  already_enrolled_count: 3,
-  new_enrollment_count: 27,
+  matched_count: 1,
+  already_enrolled_count: 0,
+  new_enrollment_count: 1,
   confirmed_student_ids: ['4'],
 
   students: [
@@ -104,10 +111,12 @@ const enrollmentPreviewExample = {
 };
 
 const bulkEnrollmentExample = {
+  review_id: enrollmentPreviewExample.review_id,
+  already_applied: false,
   course_offering_id: '1',
-  matched_count: 30,
-  enrolled_count: 27,
-  already_enrolled_count: 3,
+  matched_count: 1,
+  enrolled_count: 1,
+  already_enrolled_count: 0,
 };
 
 @ApiTags('enrollments')
@@ -123,12 +132,12 @@ const bulkEnrollmentExample = {
 export class EnrollmentsController {
   constructor(
     private readonly enrollmentsService: EnrollmentsService,
+    @Optional() private readonly reviewedWorkflows?: ReviewedWorkflowsService,
   ) {}
 
   @Get()
   @ApiOperation({
-    summary:
-      'List students enrolled in a course offering',
+    summary: 'List students enrolled in a course offering',
   })
   @ApiResponse({
     status: 200,
@@ -145,15 +154,12 @@ export class EnrollmentsController {
     @Param('offeringId', ParseBigIntPipe)
     offeringId: bigint,
   ) {
-    return this.enrollmentsService.findAllForOffering(
-      offeringId,
-    );
+    return this.enrollmentsService.findAllForOffering(offeringId);
   }
 
   @Post()
   @ApiOperation({
-    summary:
-      'Enroll one student in a course offering',
+    summary: 'Enroll one student in a course offering',
     description:
       'student_id is a user/account ID. Validates ACTIVE status and any saved academic-year/generation/major/year/group scope inside the same serializable transaction as enrollment. Legacy no-scope offerings do not infer restrictions from section_code.',
   })
@@ -185,24 +191,23 @@ export class EnrollmentsController {
     @Body()
     dto: CreateEnrollmentDto,
   ) {
-    return this.enrollmentsService.create(
-      offeringId,
-      dto,
-    );
+    return this.enrollmentsService.create(offeringId, dto);
   }
 
   @Post('preview')
   @HttpCode(200)
+  @ApiBody({
+    type: EnrollmentGroupSelectionDto,
+    examples: { selection: { value: enrollmentGroupSelectionExample } },
+  })
   @ApiOperation({
-    summary:
-      'Preview students matching a group before enrollment',
+    summary: 'Preview students matching a group before enrollment',
     description:
-      'Resolves the selected academic year, generation, effective year level, major, and class groups into explicit ACTIVE student accounts. Send the returned confirmed_student_ids unchanged to the bulk confirmation endpoint. No enrollment rows are created.',
+      'Resolves ACTIVE accounts and returns exact confirmed_student_ids, caller-bound review_id and expires_at (15 minutes). Send the same selection and IDs plus review_id to /bulk. Only administrative review storage changes; no enrollment rows are created.',
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Matching students and enrollment counts',
+    description: 'Matching students and enrollment counts',
     schema: {
       example: enrollmentPreviewExample,
     },
@@ -222,24 +227,34 @@ export class EnrollmentsController {
 
     @Body()
     dto: EnrollmentGroupSelectionDto,
+    @CurrentUser('id') actor: bigint,
   ) {
-    return this.enrollmentsService.previewGroup(
-      offeringId,
-      dto,
-    );
+    if (this.reviewedWorkflows)
+      return this.reviewedWorkflows.previewGroup(offeringId, dto, actor);
+    return this.enrollmentsService.previewGroup(offeringId, dto);
   }
 
   @Post('bulk')
+  @ApiBody({
+    type: EnrollmentGroupSelectionDto,
+    examples: {
+      reviewed: {
+        value: {
+          ...enrollmentGroupSelectionExample,
+          confirmed_student_ids: ['4'],
+          review_id: enrollmentPreviewExample.review_id,
+        },
+      },
+    },
+  })
   @ApiOperation({
-    summary:
-      'Confirm and enroll a selected student group',
+    summary: 'Confirm and enroll a selected student group',
     description:
-      'Requires the confirmed_student_ids returned by preview. Re-resolves the selected group transactionally and rejects confirmation if the student set changed. Students who are already enrolled are skipped.',
+      'With review_id, binds exact account IDs, academic context, placement/status and enrollment impact to preview. Relevant drift returns 409. Completed retry returns original counts and already_applied=true without adding newly eligible accounts. Without review_id, legacy exact-ID compatibility remains until REQUIRE_REVIEWED_CONFIRMATION=true.',
   })
   @ApiResponse({
     status: 201,
-    description:
-      'Group enrollment completed',
+    description: 'Group enrollment completed',
     schema: {
       example: bulkEnrollmentExample,
     },
@@ -259,25 +274,24 @@ export class EnrollmentsController {
 
     @Body()
     dto: EnrollmentGroupSelectionDto,
+    @CurrentUser('id') actor: bigint,
   ) {
-    return this.enrollmentsService.bulkCreate(
-      offeringId,
-      dto,
-    );
+    if (dto.review_id && this.reviewedWorkflows)
+      return this.reviewedWorkflows.confirmGroup(offeringId, dto, actor);
+    requireReviewAtCutover();
+    return this.enrollmentsService.bulkCreate(offeringId, dto);
   }
 
   @Post('reassignment/preview')
   @HttpCode(200)
   @ApiOperation({
-    summary:
-      'Preview the impact of reassigning a student enrollment',
+    summary: 'Preview the impact of reassigning a student enrollment',
     description:
-      'Validates the target offering against the student placement and reports frozen evaluation participants, drafts, and submissions. No enrollment or evaluation data is changed.',
+      'Validates target scope and reports frozen participant/draft/completion impact. Returns caller-bound review_id and 15-minute expires_at. Confirm the same student account, target offering and confirmed_enrollment_id with review_id. Changes only administrative review storage.',
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Reassignment impact preview returned successfully',
+    description: 'Reassignment impact preview returned successfully',
   })
   @ApiResponse({
     status: 400,
@@ -286,13 +300,11 @@ export class EnrollmentsController {
   })
   @ApiResponse({
     status: 404,
-    description:
-      'Source enrollment or target offering not found',
+    description: 'Source enrollment or target offering not found',
   })
   @ApiResponse({
     status: 409,
-    description:
-      'Student is already enrolled in the target offering',
+    description: 'Student is already enrolled in the target offering',
   })
   previewReassignment(
     @Param('offeringId', ParseBigIntPipe)
@@ -300,29 +312,26 @@ export class EnrollmentsController {
 
     @Body()
     dto: EnrollmentReassignmentDto,
+    @CurrentUser('id') actor: bigint,
   ) {
-    return this.enrollmentsService.previewReassignment(
-      offeringId,
-      dto,
-    );
+    if (this.reviewedWorkflows)
+      return this.reviewedWorkflows.previewReassignment(offeringId, dto, actor);
+    return this.enrollmentsService.previewReassignment(offeringId, dto);
   }
 
   @Post('reassignment/confirm')
   @ApiOperation({
-    summary:
-      'Confirm a previewed student enrollment reassignment',
+    summary: 'Confirm a previewed student enrollment reassignment',
     description:
-      'Re-validates the source enrollment, target offering group scope, student placement, target enrollment state, and evaluation impact inside one transaction. The operation moves only the enrollment. Frozen evaluation participants and academic placement records are preserved.',
+      'With review_id, verifies the exact reviewed placement/scope/impact inside the mutation transaction and stores the original result. Completed retry returns that result without moving another enrollment. Frozen participants/placements remain intact. Legacy confirmation without review_id is rejected after REQUIRE_REVIEWED_CONFIRMATION=true.',
   })
   @ApiResponse({
     status: 201,
-    description:
-      'Student enrollment reassigned successfully',
+    description: 'Student enrollment reassigned successfully',
   })
   @ApiResponse({
     status: 400,
-    description:
-      'Invalid reassignment input',
+    description: 'Invalid reassignment input',
   })
   @ApiResponse({
     status: 409,
@@ -335,18 +344,18 @@ export class EnrollmentsController {
 
     @Body()
     dto: ConfirmEnrollmentReassignmentDto,
+    @CurrentUser('id') actor: bigint,
   ) {
-    return this.enrollmentsService.confirmReassignment(
-      offeringId,
-      dto,
-    );
+    if (dto.review_id && this.reviewedWorkflows)
+      return this.reviewedWorkflows.confirmReassignment(offeringId, dto, actor);
+    requireReviewAtCutover();
+    return this.enrollmentsService.confirmReassignment(offeringId, dto);
   }
 
   @Delete(':studentId')
   @HttpCode(204)
   @ApiOperation({
-    summary:
-      'Remove a student from a course offering',
+    summary: 'Remove a student from a course offering',
   })
   @ApiParam({
     name: 'studentId',
@@ -359,8 +368,7 @@ export class EnrollmentsController {
   })
   @ApiResponse({
     status: 404,
-    description:
-      'Course offering not found, or student is not enrolled',
+    description: 'Course offering not found, or student is not enrolled',
   })
   async remove(
     @Param('offeringId', ParseBigIntPipe)
@@ -369,9 +377,6 @@ export class EnrollmentsController {
     @Param('studentId', ParseBigIntPipe)
     studentId: bigint,
   ) {
-    await this.enrollmentsService.remove(
-      offeringId,
-      studentId,
-    );
+    await this.enrollmentsService.remove(offeringId, studentId);
   }
 }

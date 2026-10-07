@@ -5,6 +5,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import {
+  progressionStudentSelect,
+  resolveStudentPlacement,
+} from '../common/utils/student-placement.util';
 import { PrismaService } from '../prisma/prisma.service';
 
 // Only what a student needs to see about an evaluation
@@ -36,6 +40,7 @@ const contextSelect = {
             select: {
               id: true,
               name: true,
+              start_year: true,
             },
           },
         },
@@ -62,10 +67,9 @@ const contextSelect = {
   },
 } satisfies Prisma.evaluationsSelect;
 
-type EvaluationContext =
-  Prisma.evaluationsGetPayload<{
-    select: typeof contextSelect;
-  }>;
+type EvaluationContext = Prisma.evaluationsGetPayload<{
+  select: typeof contextSelect;
+}>;
 
 // What the student needs to render each question.
 // question_options are used by MULTIPLE_CHOICE and CHECKBOX.
@@ -106,42 +110,31 @@ function toSummary(e: EvaluationContext) {
       name: e.course_offerings.courses.course_name,
     },
 
-    section_code:
-      e.course_offerings.section_code,
+    section_code: e.course_offerings.section_code,
 
     semester: {
-      name:
-        e.course_offerings.semesters.semester_name,
+      name: e.course_offerings.semesters.semester_name,
 
-      academic_year_id:
-        e.course_offerings.semesters
-          .academic_year_id,
+      academic_year_id: e.course_offerings.semesters.academic_year_id,
 
-      academic_year:
-        e.course_offerings.semesters
-          .academic_years.name,
+      academic_year: e.course_offerings.semesters.academic_years.name,
     },
 
     lecturer: {
-      full_name:
-        e.course_offerings.users.full_name,
+      full_name: e.course_offerings.users.full_name,
     },
 
     survey: {
-      title:
-        e.survey_versions.surveys.title,
+      title: e.survey_versions.surveys.title,
 
-      version_no:
-        e.survey_versions.version_no,
+      version_no: e.survey_versions.version_no,
     },
   };
 }
 
 @Injectable()
 export class StudentAccessService {
-  constructor(
-    private prisma: PrismaService,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   // =========================================================
   // AVAILABLE EVALUATIONS
@@ -150,49 +143,57 @@ export class StudentAccessService {
   async findAvailable(studentId: bigint) {
     const now = new Date();
 
-    const rows =
-      await this.prisma.evaluation_participants.findMany({
-        where: {
-          student_id: studentId,
-          has_submitted: false,
+    const rows = await this.prisma.evaluation_participants.findMany({
+      where: {
+        student_id: studentId,
+        has_submitted: false,
 
-          evaluations: {
-            status: 'OPEN',
+        evaluations: {
+          status: 'OPEN',
 
-            start_at: {
-              lte: now,
-            },
+          start_at: {
+            lte: now,
+          },
 
-            end_at: {
-              gt: now,
-            },
+          end_at: {
+            gt: now,
+          },
 
-            course_offerings: {
-              enrollments: {
-                some: {
-                  student_id: studentId,
-                },
+          course_offerings: {
+            enrollments: {
+              some: {
+                student_id: studentId,
               },
             },
           },
         },
+      },
 
-        select: {
-          evaluations: {
-            select: contextSelect,
-          },
+      select: {
+        evaluations: {
+          select: contextSelect,
         },
+      },
 
-        orderBy: {
-          evaluations: {
-            end_at: 'asc',
-          },
+      orderBy: {
+        evaluations: {
+          end_at: 'asc',
         },
-      });
+      },
+    });
 
-    return rows.map((row) =>
-      toSummary(row.evaluations),
-    );
+    const student = await this.findPlacementStudent(studentId, this.prisma);
+    return rows
+      .filter(
+        (row) =>
+          student &&
+          resolveStudentPlacement(
+            student.student_generations,
+            student.student_academic_records,
+            row.evaluations.course_offerings.semesters.academic_years,
+          ).placement_eligible,
+      )
+      .map((row) => toSummary(row.evaluations));
   }
 
   // =========================================================
@@ -202,46 +203,41 @@ export class StudentAccessService {
   async findHistory(studentId: bigint) {
     const now = new Date();
 
-    const rows =
-      await this.prisma.evaluation_participants.findMany({
-        where: {
-          student_id: studentId,
+    const rows = await this.prisma.evaluation_participants.findMany({
+      where: {
+        student_id: studentId,
 
-          evaluations: {
-            course_offerings: {
-              enrollments: {
-                some: {
-                  student_id: studentId,
-                },
+        evaluations: {
+          course_offerings: {
+            enrollments: {
+              some: {
+                student_id: studentId,
               },
             },
           },
         },
+      },
 
-        select: {
-          has_submitted: true,
-          submitted_at: true,
+      select: {
+        has_submitted: true,
+        submitted_at: true,
 
-          evaluations: {
-            select: contextSelect,
-          },
+        evaluations: {
+          select: contextSelect,
         },
+      },
 
-        orderBy: {
-          evaluations: {
-            start_at: 'desc',
-          },
+      orderBy: {
+        evaluations: {
+          start_at: 'desc',
         },
-      });
+      },
+    });
 
     return rows.map((row) => {
       const evaluation = row.evaluations;
 
-      let historyStatus:
-        | 'Not Started'
-        | 'Completed'
-        | 'Upcoming'
-        | 'Closed';
+      let historyStatus: 'Not Started' | 'Completed' | 'Upcoming' | 'Closed';
 
       // Student already submitted this evaluation
       if (row.has_submitted) {
@@ -249,10 +245,7 @@ export class StudentAccessService {
       }
 
       // Evaluation has not started yet
-      else if (
-        evaluation.start_at !== null &&
-        evaluation.start_at > now
-      ) {
+      else if (evaluation.start_at !== null && evaluation.start_at > now) {
         historyStatus = 'Upcoming';
       }
 
@@ -276,14 +269,11 @@ export class StudentAccessService {
       return {
         ...toSummary(evaluation),
 
-        has_submitted:
-          row.has_submitted,
+        has_submitted: row.has_submitted,
 
-        submitted_at:
-          row.submitted_at,
+        submitted_at: row.submitted_at,
 
-        history_status:
-          historyStatus,
+        history_status: historyStatus,
       };
     });
   }
@@ -292,43 +282,28 @@ export class StudentAccessService {
   // SURVEY
   // =========================================================
 
-  async getSurvey(
-    evaluationId: bigint,
-    studentId: bigint,
-  ) {
-    const {
-      evaluation,
-      participant,
-      effectiveSurveyVersionId,
-    } =
-      await this.getAnswerableEvaluation(
-        evaluationId,
-        studentId,
-      );
+  async getSurvey(evaluationId: bigint, studentId: bigint) {
+    const { evaluation, participant, effectiveSurveyVersionId } =
+      await this.getAnswerableEvaluation(evaluationId, studentId);
 
-    const questions =
-      await this.prisma.questions.findMany({
-        where: {
-          survey_version_id:
-            effectiveSurveyVersionId,
-        },
+    const questions = await this.prisma.questions.findMany({
+      where: {
+        survey_version_id: effectiveSurveyVersionId,
+      },
 
-        select: questionSelect,
+      select: questionSelect,
 
-        orderBy: {
-          display_order: 'asc',
-        },
-      });
+      orderBy: {
+        display_order: 'asc',
+      },
+    });
 
     return {
-      evaluation:
-        toSummary(evaluation),
+      evaluation: toSummary(evaluation),
 
-      survey_version_id:
-        effectiveSurveyVersionId,
+      survey_version_id: effectiveSurveyVersionId,
 
-      participant_survey_version_id:
-        participant.survey_version_id,
+      participant_survey_version_id: participant.survey_version_id,
 
       questions,
     };
@@ -338,49 +313,35 @@ export class StudentAccessService {
   // SUBMISSION STATUS
   // =========================================================
 
-  async getSubmissionStatus(
-    evaluationId: bigint,
-    studentId: bigint,
-  ) {
-    await this.findEvaluation(
-      evaluationId,
-    );
+  async getSubmissionStatus(evaluationId: bigint, studentId: bigint) {
+    await this.findEvaluation(evaluationId);
 
-    const participant =
-      await this.prisma.evaluation_participants.findFirst({
-        where: {
-          evaluation_id:
-            evaluationId,
+    const participant = await this.prisma.evaluation_participants.findFirst({
+      where: {
+        evaluation_id: evaluationId,
 
-          student_id:
-            studentId,
-        },
+        student_id: studentId,
+      },
 
-        select: {
-          survey_version_id: true,
-          has_submitted: true,
-          submitted_at: true,
-        },
-      });
+      select: {
+        survey_version_id: true,
+        has_submitted: true,
+        submitted_at: true,
+      },
+    });
 
     if (!participant) {
-      throw new ForbiddenException(
-        'You are not eligible for this evaluation',
-      );
+      throw new ForbiddenException('You are not eligible for this evaluation');
     }
 
     return {
-      evaluation_id:
-        evaluationId,
+      evaluation_id: evaluationId,
 
-      survey_version_id:
-        participant.survey_version_id,
+      survey_version_id: participant.survey_version_id,
 
-      has_submitted:
-        participant.has_submitted,
+      has_submitted: participant.has_submitted,
 
-      submitted_at:
-        participant.submitted_at,
+      submitted_at: participant.submitted_at,
     };
   }
 
@@ -397,23 +358,14 @@ export class StudentAccessService {
     studentId: bigint,
     database: PrismaService = this.prisma,
   ) {
-    const evaluation =
-      await this.findEvaluation(
-        evaluationId,
-        database,
-      );
+    const evaluation = await this.findEvaluation(evaluationId, database);
 
-    const [
-      participant,
-      enrollment,
-    ] = await Promise.all([
+    const [participant, enrollment] = await Promise.all([
       database.evaluation_participants.findFirst({
         where: {
-          evaluation_id:
-            evaluationId,
+          evaluation_id: evaluationId,
 
-          student_id:
-            studentId,
+          student_id: studentId,
         },
 
         select: {
@@ -429,11 +381,9 @@ export class StudentAccessService {
 
       database.enrollments.findFirst({
         where: {
-          student_id:
-            studentId,
+          student_id: studentId,
 
-          course_offering_id:
-            evaluation.course_offering_id,
+          course_offering_id: evaluation.course_offering_id,
         },
 
         select: {
@@ -442,29 +392,33 @@ export class StudentAccessService {
       }),
     ]);
 
-    if (
-      !participant ||
-      !enrollment
-    ) {
+    if (!participant || !enrollment) {
+      throw new ForbiddenException('You are not eligible for this evaluation');
+    }
+
+    const student = await this.findPlacementStudent(studentId, database);
+    if (!student) throw new ForbiddenException('You are not an active student');
+    const placement = resolveStudentPlacement(
+      student.student_generations,
+      student.student_academic_records,
+      evaluation.course_offerings.semesters.academic_years,
+    );
+    if (!placement.placement_eligible) {
       throw new ForbiddenException(
-        'You are not eligible for this evaluation',
+        placement.progression_status === 'UNRESOLVED'
+          ? 'Student progression chronology requires administrator review'
+          : placement.progression_status === 'PAUSED'
+            ? 'Student is paused; explicit resumption is required'
+            : 'A class group assignment is required for this academic year',
       );
     }
 
-    if (
-      !this.isOpenNow(evaluation)
-    ) {
-      throw new ConflictException(
-        'This evaluation is not open',
-      );
+    if (!this.isOpenNow(evaluation)) {
+      throw new ConflictException('This evaluation is not open');
     }
 
-    if (
-      participant.has_submitted
-    ) {
-      throw new ConflictException(
-        'You have already submitted this evaluation',
-      );
+    if (participant.has_submitted) {
+      throw new ConflictException('You have already submitted this evaluation');
     }
 
     // New participants are pinned to their own survey version.
@@ -472,8 +426,7 @@ export class StudentAccessService {
     // may still have NULL, so they safely fall back to the
     // evaluation's original/base survey version.
     const effectiveSurveyVersionId =
-      participant.survey_version_id ??
-      evaluation.survey_version_id;
+      participant.survey_version_id ?? evaluation.survey_version_id;
 
     return {
       evaluation,
@@ -490,27 +443,35 @@ export class StudentAccessService {
     evaluationId: bigint,
     database: PrismaService = this.prisma,
   ) {
-    const evaluation =
-      await database.evaluations.findUnique({
-        where: {
-          id: evaluationId,
-        },
+    const evaluation = await database.evaluations.findUnique({
+      where: {
+        id: evaluationId,
+      },
 
-        select: contextSelect,
-      });
+      select: contextSelect,
+    });
 
     if (!evaluation) {
-      throw new NotFoundException(
-        'Evaluation not found',
-      );
+      throw new NotFoundException('Evaluation not found');
     }
 
     return evaluation;
   }
 
-  private isOpenNow(
-    e: EvaluationContext,
+  private async findPlacementStudent(
+    studentId: bigint,
+    database: PrismaService,
   ) {
+    return database.students.findFirst({
+      where: {
+        user_id: studentId,
+        users: { role: 'STUDENT', status: 'ACTIVE' },
+      },
+      select: progressionStudentSelect,
+    });
+  }
+
+  private isOpenNow(e: EvaluationContext) {
     const now = new Date();
 
     return (

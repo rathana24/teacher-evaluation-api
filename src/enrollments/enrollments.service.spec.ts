@@ -14,6 +14,7 @@ import { EnrollmentsService } from './enrollments.service';
 
 type OfferingResult = {
   id: bigint;
+  year_level?: number | null;
   semesters?: { academic_year_id: bigint };
   group_scopes?: ReassignmentOfferingResult['group_scopes'];
 };
@@ -65,6 +66,10 @@ type ReassignmentStudentResult = {
   user_id: bigint;
   generation_id: bigint;
   student_code: string;
+  student_generations: {
+    starting_year_level: number;
+    entry_academic_year: { start_year: number | null };
+  };
   student_academic_records: Array<{
     academic_year_id: bigint;
     year_level: number;
@@ -189,63 +194,35 @@ describe('EnrollmentsService', () => {
 
   const offeringFindUniqueMock =
     jest.fn<
-      () => Promise<
-        | OfferingResult
-        | ReassignmentOfferingResult
-        | null
-      >
+      () => Promise<OfferingResult | ReassignmentOfferingResult | null>
     >();
 
-  const userFindUniqueMock =
-    jest.fn<
-      () => Promise<UserResult | null>
-    >();
+  const userFindUniqueMock = jest.fn<() => Promise<UserResult | null>>();
 
-  const enrollmentFindManyMock =
-    jest.fn<
-      () => Promise<unknown[]>
-    >();
+  const enrollmentFindManyMock = jest.fn<() => Promise<unknown[]>>();
 
-  const enrollmentCreateMock =
-    jest.fn<
-      () => Promise<EnrollmentResult>
-    >();
+  const enrollmentCreateMock = jest.fn<() => Promise<EnrollmentResult>>();
 
-  const enrollmentCreateManyMock =
-    jest.fn<
-      () => Promise<{ count: number }>
-    >();
+  const enrollmentCreateManyMock = jest.fn<() => Promise<{ count: number }>>();
 
   const enrollmentFindFirstMock =
-    jest.fn<
-      () => Promise<EnrollmentForRemoval | null>
-    >();
+    jest.fn<() => Promise<EnrollmentForRemoval | null>>();
 
-  const enrollmentDeleteMock =
-    jest.fn<
-      () => Promise<unknown>
-    >();
+  const enrollmentDeleteMock = jest.fn<() => Promise<unknown>>();
 
   const reassignmentStudentFindFirstMock =
-    jest.fn<
-      () => Promise<
-        ReassignmentStudentResult | null
-      >
-    >();
+    jest.fn<() => Promise<ReassignmentStudentResult | null>>();
 
   const evaluationParticipantFindManyMock =
-    jest.fn<
-      () => Promise<
-        ReassignmentParticipantResult[]
-      >
-    >();
+    jest.fn<() => Promise<ReassignmentParticipantResult[]>>();
 
   const selectStudentsForEnrollmentMock =
-    jest.fn<
-      () => Promise<SelectedStudent[]>
-    >();
+    jest.fn<() => Promise<SelectedStudent[]>>();
+
+  const academicYearFindUniqueMock = jest.fn<() => Promise<any>>();
 
   const transactionMock = {
+    academic_years: { findUnique: academicYearFindUniqueMock },
     course_offerings: {
       findUnique: offeringFindUniqueMock,
     },
@@ -255,8 +232,7 @@ describe('EnrollmentsService', () => {
     },
 
     students: {
-      findFirst:
-        reassignmentStudentFindFirstMock,
+      findFirst: reassignmentStudentFindFirstMock,
     },
 
     enrollments: {
@@ -268,12 +244,12 @@ describe('EnrollmentsService', () => {
     },
 
     evaluation_participants: {
-      findMany:
-        evaluationParticipantFindManyMock,
+      findMany: evaluationParticipantFindManyMock,
     },
   };
 
   const prismaMock = {
+    academic_years: { findUnique: academicYearFindUniqueMock },
     course_offerings: {
       findUnique: offeringFindUniqueMock,
     },
@@ -283,13 +259,11 @@ describe('EnrollmentsService', () => {
     },
 
     students: {
-      findFirst:
-        reassignmentStudentFindFirstMock,
+      findFirst: reassignmentStudentFindFirstMock,
     },
 
     evaluation_participants: {
-      findMany:
-        evaluationParticipantFindManyMock,
+      findMany: evaluationParticipantFindManyMock,
     },
 
     enrollments: {
@@ -302,9 +276,7 @@ describe('EnrollmentsService', () => {
 
     $transaction: jest.fn(
       async (
-        callback: (
-          tx: typeof transactionMock,
-        ) => Promise<unknown>,
+        callback: (tx: typeof transactionMock) => Promise<unknown>,
         _options?: {
           isolationLevel: Prisma.TransactionIsolationLevel;
         },
@@ -313,8 +285,7 @@ describe('EnrollmentsService', () => {
   };
 
   const studentsServiceMock = {
-    selectStudentsForEnrollment:
-      selectStudentsForEnrollmentMock,
+    selectStudentsForEnrollment: selectStudentsForEnrollmentMock,
   };
 
   const selectedStudent1: SelectedStudent = {
@@ -323,12 +294,8 @@ describe('EnrollmentsService', () => {
     student_code: 'e20230001',
     generation_id: BigInt(1),
     notes: null,
-    created_at: new Date(
-      '2026-01-01T00:00:00.000Z',
-    ),
-    updated_at: new Date(
-      '2026-01-01T00:00:00.000Z',
-    ),
+    created_at: new Date('2026-01-01T00:00:00.000Z'),
+    updated_at: new Date('2026-01-01T00:00:00.000Z'),
 
     users: {
       id: BigInt(100),
@@ -337,12 +304,8 @@ describe('EnrollmentsService', () => {
       gender: 'MALE',
       role: 'STUDENT',
       status: 'ACTIVE',
-      created_at: new Date(
-        '2026-01-01T00:00:00.000Z',
-      ),
-      updated_at: new Date(
-        '2026-01-01T00:00:00.000Z',
-      ),
+      created_at: new Date('2026-01-01T00:00:00.000Z'),
+      updated_at: new Date('2026-01-01T00:00:00.000Z'),
     },
 
     student_generations: {
@@ -366,12 +329,8 @@ describe('EnrollmentsService', () => {
         year_level: 4,
         major_id: BigInt(1),
         class_group: 'AMS1-A',
-        created_at: new Date(
-          '2026-01-01T00:00:00.000Z',
-        ),
-        updated_at: new Date(
-          '2026-01-01T00:00:00.000Z',
-        ),
+        created_at: new Date('2026-01-01T00:00:00.000Z'),
+        updated_at: new Date('2026-01-01T00:00:00.000Z'),
 
         academic_years: {
           id: BigInt(2),
@@ -383,8 +342,7 @@ describe('EnrollmentsService', () => {
         majors: {
           id: BigInt(1),
           code: 'AMS',
-          name:
-            'Applied Mathematics and Statistics',
+          name: 'Applied Mathematics and Statistics',
           department_id: BigInt(1),
         },
       },
@@ -404,12 +362,8 @@ describe('EnrollmentsService', () => {
         year_level: 4,
         major_id: BigInt(1),
         class_group: 'AMS1-A',
-        created_at: new Date(
-          '2026-01-01T00:00:00.000Z',
-        ),
-        updated_at: new Date(
-          '2026-01-01T00:00:00.000Z',
-        ),
+        created_at: new Date('2026-01-01T00:00:00.000Z'),
+        updated_at: new Date('2026-01-01T00:00:00.000Z'),
 
         academic_years: {
           id: BigInt(2),
@@ -421,57 +375,54 @@ describe('EnrollmentsService', () => {
         majors: {
           id: BigInt(1),
           code: 'AMS',
-          name:
-            'Applied Mathematics and Statistics',
+          name: 'Applied Mathematics and Statistics',
           department_id: BigInt(1),
         },
       },
 
       calculated_year_level: 4,
       effective_year_level: 4,
-      year_level_source:
-        'ACADEMIC_RECORD',
+      year_level_source: 'ACADEMIC_RECORD',
     },
   };
 
-  const reassignmentTargetOffering:
-    ReassignmentOfferingResult = {
-      id: BigInt(2),
-      course_id: BigInt(10),
-      semester_id: BigInt(20),
-      year_level: 4,
+  const reassignmentTargetOffering: ReassignmentOfferingResult = {
+    id: BigInt(2),
+    course_id: BigInt(10),
+    semester_id: BigInt(20),
+    year_level: 4,
 
-      semesters: {
+    semesters: {
+      academic_year_id: BigInt(2),
+    },
+
+    group_scopes: [
+      {
         academic_year_id: BigInt(2),
+        generation_id: BigInt(1),
+        major_id: BigInt(1),
+        year_level: 4,
+        class_group: 'AMS1-B',
       },
+    ],
+  };
 
-      group_scopes: [
-        {
-          academic_year_id: BigInt(2),
-          generation_id: BigInt(1),
-          major_id: BigInt(1),
-          year_level: 4,
-          class_group: 'AMS1-B',
-        },
-      ],
-    };
+  const reassignmentStudent: ReassignmentStudentResult = {
+    id: BigInt(10),
+    user_id: BigInt(100),
+    generation_id: BigInt(1),
+    student_code: 'e20230001',
+    student_generations: selectedStudent1.student_generations,
 
-  const reassignmentStudent:
-    ReassignmentStudentResult = {
-      id: BigInt(10),
-      user_id: BigInt(100),
-      generation_id: BigInt(1),
-      student_code: 'e20230001',
-
-      student_academic_records: [
-        {
-          academic_year_id: BigInt(2),
-          year_level: 4,
-          major_id: BigInt(1),
-          class_group: 'AMS1-B',
-        },
-      ],
-    };
+    student_academic_records: [
+      {
+        academic_year_id: BigInt(2),
+        year_level: 4,
+        major_id: BigInt(1),
+        class_group: 'AMS1-B',
+      },
+    ],
+  };
 
   const reassignmentDto = {
     student_id: '100',
@@ -519,38 +470,34 @@ describe('EnrollmentsService', () => {
     year_level: 4,
     major_id: '1',
     class_groups: [' AMS1-A '],
-    confirmed_student_ids: [
-      '100',
-      '101',
-      '102',
-    ],
+    confirmed_student_ids: ['100', '101', '102'],
   };
 
   beforeEach(async () => {
     jest.clearAllMocks();
 
-    const module: TestingModule =
-      await Test.createTestingModule({
-        providers: [
-          EnrollmentsService,
-          {
-            provide: PrismaService,
-            useValue: prismaMock,
-          },
-          {
-            provide: StudentsService,
-            useValue: studentsServiceMock,
-          },
-        ],
-      }).compile();
-
-    service =
-      module.get<EnrollmentsService>(
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
         EnrollmentsService,
-      );
+        {
+          provide: PrismaService,
+          useValue: prismaMock,
+        },
+        {
+          provide: StudentsService,
+          useValue: studentsServiceMock,
+        },
+      ],
+    }).compile();
+
+    service = module.get<EnrollmentsService>(EnrollmentsService);
+
+    academicYearFindUniqueMock.mockResolvedValue({ id: 2n, start_year: 2026 });
+    reassignmentStudentFindFirstMock.mockResolvedValue(reassignmentStudent);
 
     offeringFindUniqueMock.mockResolvedValue({
       id: BigInt(1),
+      year_level: null,
       semesters: { academic_year_id: 2n },
       group_scopes: [],
     });
@@ -560,17 +507,13 @@ describe('EnrollmentsService', () => {
       status: 'ACTIVE',
     });
 
-    enrollmentFindManyMock.mockResolvedValue(
-      [],
-    );
+    enrollmentFindManyMock.mockResolvedValue([]);
 
     enrollmentCreateMock.mockResolvedValue({
       id: BigInt(1),
       student_id: BigInt(100),
       course_offering_id: BigInt(1),
-      enrolled_at: new Date(
-        '2026-10-01T00:00:00.000Z',
-      ),
+      enrolled_at: new Date('2026-10-01T00:00:00.000Z'),
 
       users: {
         id: BigInt(100),
@@ -591,12 +534,11 @@ describe('EnrollmentsService', () => {
       id: BigInt(1),
     });
 
-    selectStudentsForEnrollmentMock
-      .mockResolvedValue([
-        selectedStudent1,
-        selectedStudent2,
-        selectedStudent3,
-      ]);
+    selectStudentsForEnrollmentMock.mockResolvedValue([
+      selectedStudent1,
+      selectedStudent2,
+      selectedStudent3,
+    ]);
   });
 
   it('should be defined', () => {
@@ -612,17 +554,11 @@ describe('EnrollmentsService', () => {
         },
       ];
 
-      enrollmentFindManyMock
-        .mockResolvedValue(enrollments);
+      enrollmentFindManyMock.mockResolvedValue(enrollments);
 
-      const result =
-        await service.findAllForOffering(
-          BigInt(1),
-        );
+      const result = await service.findAllForOffering(BigInt(1));
 
-      expect(
-        offeringFindUniqueMock,
-      ).toHaveBeenCalledWith({
+      expect(offeringFindUniqueMock).toHaveBeenCalledWith({
         where: {
           id: BigInt(1),
         },
@@ -631,9 +567,7 @@ describe('EnrollmentsService', () => {
         },
       });
 
-      expect(
-        enrollmentFindManyMock,
-      ).toHaveBeenCalledWith({
+      expect(enrollmentFindManyMock).toHaveBeenCalledWith({
         where: {
           course_offering_id: BigInt(1),
         },
@@ -655,22 +589,13 @@ describe('EnrollmentsService', () => {
     });
 
     it('should throw when the course offering does not exist', async () => {
-      offeringFindUniqueMock
-        .mockResolvedValue(null);
+      offeringFindUniqueMock.mockResolvedValue(null);
 
-      await expect(
-        service.findAllForOffering(
-          BigInt(999),
-        ),
-      ).rejects.toThrow(
-        new NotFoundException(
-          'Course offering not found',
-        ),
+      await expect(service.findAllForOffering(BigInt(999))).rejects.toThrow(
+        new NotFoundException('Course offering not found'),
       );
 
-      expect(
-        enrollmentFindManyMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentFindManyMock).not.toHaveBeenCalled();
     });
   });
 
@@ -689,27 +614,33 @@ describe('EnrollmentsService', () => {
       async (_, group, generation, major, year, scopeYear, allowed) => {
         offeringFindUniqueMock.mockResolvedValue({
           id: 1n,
+          year_level: 4,
           semesters: { academic_year_id: 2n },
-          group_scopes: [{
-            academic_year_id: scopeYear,
-            generation_id: 1n,
-            major_id: 1n,
-            year_level: 4,
-            class_group: 'A',
-          }],
+          group_scopes: [
+            {
+              academic_year_id: scopeYear,
+              generation_id: 1n,
+              major_id: 1n,
+              year_level: 4,
+              class_group: 'A',
+            },
+          ],
         });
 
         reassignmentStudentFindFirstMock.mockResolvedValue({
           id: 10n,
           user_id: 100n,
           student_code: 'test',
+          student_generations: selectedStudent1.student_generations,
           generation_id: generation,
-          student_academic_records: [{
-            academic_year_id: 2n,
-            major_id: major,
-            year_level: year,
-            class_group: group,
-          }],
+          student_academic_records: [
+            {
+              academic_year_id: 2n,
+              major_id: major,
+              year_level: year,
+              class_group: group,
+            },
+          ],
         });
 
         const operation = service.create(1n, {
@@ -727,16 +658,11 @@ describe('EnrollmentsService', () => {
     );
 
     it('should enroll an ACTIVE STUDENT account', async () => {
-      const result = await service.create(
-        BigInt(1),
-        {
-          student_id: '100',
-        },
-      );
+      const result = await service.create(BigInt(1), {
+        student_id: '100',
+      });
 
-      expect(
-        userFindUniqueMock,
-      ).toHaveBeenCalledWith({
+      expect(userFindUniqueMock).toHaveBeenCalledWith({
         where: {
           id: BigInt(100),
         },
@@ -746,9 +672,7 @@ describe('EnrollmentsService', () => {
         },
       });
 
-      expect(
-        enrollmentCreateMock,
-      ).toHaveBeenCalledWith({
+      expect(enrollmentCreateMock).toHaveBeenCalledWith({
         data: {
           student_id: BigInt(100),
           course_offering_id: BigInt(1),
@@ -766,9 +690,7 @@ describe('EnrollmentsService', () => {
         },
       });
 
-      expect(result.student_id).toBe(
-        BigInt(100),
-      );
+      expect(result.student_id).toBe(BigInt(100));
     });
 
     it('should reject a user that is not a STUDENT', async () => {
@@ -787,14 +709,11 @@ describe('EnrollmentsService', () => {
         ),
       );
 
-      expect(
-        enrollmentCreateMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentCreateMock).not.toHaveBeenCalled();
     });
 
     it('should reject a missing user', async () => {
-      userFindUniqueMock
-        .mockResolvedValue(null);
+      userFindUniqueMock.mockResolvedValue(null);
 
       await expect(
         service.create(BigInt(1), {
@@ -806,9 +725,7 @@ describe('EnrollmentsService', () => {
         ),
       );
 
-      expect(
-        enrollmentCreateMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentCreateMock).not.toHaveBeenCalled();
     });
 
     it('should reject an inactive student account', async () => {
@@ -822,28 +739,22 @@ describe('EnrollmentsService', () => {
           student_id: '100',
         }),
       ).rejects.toThrow(
-        new BadRequestException(
-          'Student account must be ACTIVE',
-        ),
+        new BadRequestException('Student account must be ACTIVE'),
       );
 
-      expect(
-        enrollmentCreateMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentCreateMock).not.toHaveBeenCalled();
     });
 
     it('should map a duplicate enrollment to ConflictException', async () => {
-      const prismaError =
-        new Prisma.PrismaClientKnownRequestError(
-          'Unique constraint failed',
-          {
-            code: 'P2002',
-            clientVersion: '6.19.3',
-          },
-        );
+      const prismaError = new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed',
+        {
+          code: 'P2002',
+          clientVersion: '6.19.3',
+        },
+      );
 
-      enrollmentCreateMock
-        .mockRejectedValue(prismaError);
+      enrollmentCreateMock.mockRejectedValue(prismaError);
 
       await expect(
         service.create(BigInt(1), {
@@ -857,33 +768,23 @@ describe('EnrollmentsService', () => {
     });
 
     it('should rethrow a non-duplicate Prisma error', async () => {
-      const error =
-        new Error('Database unavailable');
+      const error = new Error('Database unavailable');
 
-      enrollmentCreateMock
-        .mockRejectedValue(error);
+      enrollmentCreateMock.mockRejectedValue(error);
 
       await expect(
         service.create(BigInt(1), {
           student_id: '100',
         }),
-      ).rejects.toThrow(
-        'Database unavailable',
-      );
+      ).rejects.toThrow('Database unavailable');
     });
   });
 
   describe('previewGroup', () => {
     it('should resolve the selected group without creating enrollments', async () => {
-      const result =
-        await service.previewGroup(
-          BigInt(1),
-          groupDto,
-        );
+      const result = await service.previewGroup(BigInt(1), groupDto);
 
-      expect(
-        selectStudentsForEnrollmentMock,
-      ).toHaveBeenCalledWith({
+      expect(selectStudentsForEnrollmentMock).toHaveBeenCalledWith({
         academic_year_id: '2',
         generation_id: '1',
         year_level: 4,
@@ -891,67 +792,38 @@ describe('EnrollmentsService', () => {
         class_groups: ['AMS1-A'],
       });
 
-      expect(
-        enrollmentCreateManyMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentCreateManyMock).not.toHaveBeenCalled();
 
       expect(result.matched_count).toBe(3);
 
-      expect(
-        result.confirmed_student_ids,
-      ).toEqual([
-        '100',
-        '101',
-        '102',
-      ]);
+      expect(result.confirmed_student_ids).toEqual(['100', '101', '102']);
+
+      expect(result.already_enrolled_count).toBe(0);
+
+      expect(result.new_enrollment_count).toBe(3);
+
+      expect(result.students).toHaveLength(3);
 
       expect(
-        result.already_enrolled_count,
-      ).toBe(0);
-
-      expect(
-        result.new_enrollment_count,
-      ).toBe(3);
-
-      expect(result.students).toHaveLength(
-        3,
-      );
-
-      expect(
-        result.students.every(
-          (student) =>
-            student.already_enrolled ===
-            false,
-        ),
+        result.students.every((student) => student.already_enrolled === false),
       ).toBe(true);
     });
 
     it('should mark students that are already enrolled', async () => {
-      enrollmentFindManyMock
-        .mockResolvedValue([
-          {
-            student_id: BigInt(101),
-          } satisfies ExistingEnrollmentResult,
-        ]);
+      enrollmentFindManyMock.mockResolvedValue([
+        {
+          student_id: BigInt(101),
+        } satisfies ExistingEnrollmentResult,
+      ]);
 
-      const result =
-        await service.previewGroup(
-          BigInt(1),
-          groupDto,
-        );
+      const result = await service.previewGroup(BigInt(1), groupDto);
 
-      expect(
-        enrollmentFindManyMock,
-      ).toHaveBeenCalledWith({
+      expect(enrollmentFindManyMock).toHaveBeenCalledWith({
         where: {
           course_offering_id: BigInt(1),
 
           student_id: {
-            in: [
-              BigInt(100),
-              BigInt(101),
-              BigInt(102),
-            ],
+            in: [BigInt(100), BigInt(101), BigInt(102)],
           },
         },
 
@@ -962,70 +834,41 @@ describe('EnrollmentsService', () => {
 
       expect(result.matched_count).toBe(3);
 
-      expect(
-        result.already_enrolled_count,
-      ).toBe(1);
+      expect(result.already_enrolled_count).toBe(1);
 
-      expect(
-        result.new_enrollment_count,
-      ).toBe(2);
+      expect(result.new_enrollment_count).toBe(2);
 
-      const student100 =
-        result.students.find(
-          (student) =>
-            student.user_id ===
-            BigInt(100),
-        );
+      const student100 = result.students.find(
+        (student) => student.user_id === BigInt(100),
+      );
 
-      const student101 =
-        result.students.find(
-          (student) =>
-            student.user_id ===
-            BigInt(101),
-        );
+      const student101 = result.students.find(
+        (student) => student.user_id === BigInt(101),
+      );
 
-      expect(
-        student100?.already_enrolled,
-      ).toBe(false);
+      expect(student100?.already_enrolled).toBe(false);
 
-      expect(
-        student101?.already_enrolled,
-      ).toBe(true);
+      expect(student101?.already_enrolled).toBe(true);
     });
 
     it('should return an empty preview when no students match', async () => {
-      selectStudentsForEnrollmentMock
-        .mockResolvedValue([]);
+      selectStudentsForEnrollmentMock.mockResolvedValue([]);
 
-      const result =
-        await service.previewGroup(
-          BigInt(1),
-          groupDto,
-        );
+      const result = await service.previewGroup(BigInt(1), groupDto);
 
       expect(result.matched_count).toBe(0);
 
-      expect(
-        result.already_enrolled_count,
-      ).toBe(0);
+      expect(result.already_enrolled_count).toBe(0);
 
-      expect(
-        result.new_enrollment_count,
-      ).toBe(0);
+      expect(result.new_enrollment_count).toBe(0);
 
       expect(result.students).toEqual([]);
 
-      expect(
-        enrollmentFindManyMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentFindManyMock).not.toHaveBeenCalled();
     });
 
     it('should normalize the class group in the preview selection summary', async () => {
-      const result =
-        await service.previewGroup(
-          BigInt(1),
-          groupDto,
-        );
+      const result = await service.previewGroup(BigInt(1), groupDto);
 
       expect(result.selection).toEqual({
         academic_year_id: '2',
@@ -1037,16 +880,11 @@ describe('EnrollmentsService', () => {
     });
 
     it('should return null for optional selection filters that are not provided', async () => {
-      selectStudentsForEnrollmentMock
-        .mockResolvedValue([]);
+      selectStudentsForEnrollmentMock.mockResolvedValue([]);
 
-      const result =
-        await service.previewGroup(
-          BigInt(1),
-          {
-            academic_year_id: '2',
-          },
-        );
+      const result = await service.previewGroup(BigInt(1), {
+        academic_year_id: '2',
+      });
 
       expect(result.selection).toEqual({
         academic_year_id: '2',
@@ -1070,26 +908,17 @@ describe('EnrollmentsService', () => {
         ),
       );
 
-      expect(
-        selectStudentsForEnrollmentMock,
-      ).not.toHaveBeenCalled();
+      expect(selectStudentsForEnrollmentMock).not.toHaveBeenCalled();
     });
 
     it('should create explicit enrollments for all matching students', async () => {
-      enrollmentCreateManyMock
-        .mockResolvedValue({
-          count: 3,
-        });
+      enrollmentCreateManyMock.mockResolvedValue({
+        count: 3,
+      });
 
-      const result =
-        await service.bulkCreate(
-          BigInt(1),
-          groupDto,
-        );
+      const result = await service.bulkCreate(BigInt(1), groupDto);
 
-      expect(
-        selectStudentsForEnrollmentMock,
-      ).toHaveBeenCalledWith(
+      expect(selectStudentsForEnrollmentMock).toHaveBeenCalledWith(
         {
           academic_year_id: '2',
           generation_id: '1',
@@ -1100,9 +929,7 @@ describe('EnrollmentsService', () => {
         transactionMock,
       );
 
-      expect(
-        enrollmentCreateManyMock,
-      ).toHaveBeenCalledWith({
+      expect(enrollmentCreateManyMock).toHaveBeenCalledWith({
         data: [
           {
             student_id: BigInt(100),
@@ -1133,27 +960,19 @@ describe('EnrollmentsService', () => {
     });
 
     it('should skip students that are already enrolled', async () => {
-      enrollmentFindManyMock
-        .mockResolvedValue([
-          {
-            student_id: BigInt(101),
-          } satisfies ExistingEnrollmentResult,
-        ]);
+      enrollmentFindManyMock.mockResolvedValue([
+        {
+          student_id: BigInt(101),
+        } satisfies ExistingEnrollmentResult,
+      ]);
 
-      enrollmentCreateManyMock
-        .mockResolvedValue({
-          count: 2,
-        });
+      enrollmentCreateManyMock.mockResolvedValue({
+        count: 2,
+      });
 
-      const result =
-        await service.bulkCreate(
-          BigInt(1),
-          groupDto,
-        );
+      const result = await service.bulkCreate(BigInt(1), groupDto);
 
-      expect(
-        enrollmentCreateManyMock,
-      ).toHaveBeenCalledWith({
+      expect(enrollmentCreateManyMock).toHaveBeenCalledWith({
         data: [
           {
             student_id: BigInt(100),
@@ -1179,28 +998,21 @@ describe('EnrollmentsService', () => {
     });
 
     it('should not create anything when every matching student is already enrolled', async () => {
-      enrollmentFindManyMock
-        .mockResolvedValue([
-          {
-            student_id: BigInt(100),
-          },
-          {
-            student_id: BigInt(101),
-          },
-          {
-            student_id: BigInt(102),
-          },
-        ]);
+      enrollmentFindManyMock.mockResolvedValue([
+        {
+          student_id: BigInt(100),
+        },
+        {
+          student_id: BigInt(101),
+        },
+        {
+          student_id: BigInt(102),
+        },
+      ]);
 
-      const result =
-        await service.bulkCreate(
-          BigInt(1),
-          groupDto,
-        );
+      const result = await service.bulkCreate(BigInt(1), groupDto);
 
-      expect(
-        enrollmentCreateManyMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentCreateManyMock).not.toHaveBeenCalled();
 
       expect(result).toEqual({
         course_offering_id: BigInt(1),
@@ -1211,25 +1023,16 @@ describe('EnrollmentsService', () => {
     });
 
     it('should return zero counts when no students match the selection', async () => {
-      selectStudentsForEnrollmentMock
-        .mockResolvedValue([]);
+      selectStudentsForEnrollmentMock.mockResolvedValue([]);
 
-      const result =
-        await service.bulkCreate(
-          BigInt(1),
-          {
-            ...groupDto,
-            confirmed_student_ids: [],
-          },
-        );
+      const result = await service.bulkCreate(BigInt(1), {
+        ...groupDto,
+        confirmed_student_ids: [],
+      });
 
-      expect(
-        enrollmentFindManyMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentFindManyMock).not.toHaveBeenCalled();
 
-      expect(
-        enrollmentCreateManyMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentCreateManyMock).not.toHaveBeenCalled();
 
       expect(result).toEqual({
         course_offering_id: BigInt(1),
@@ -1240,18 +1043,11 @@ describe('EnrollmentsService', () => {
     });
 
     it('should re-resolve the student group during confirmation', async () => {
-      await service.bulkCreate(
-        BigInt(1),
-        groupDto,
-      );
+      await service.bulkCreate(BigInt(1), groupDto);
 
-      expect(
-        selectStudentsForEnrollmentMock,
-      ).toHaveBeenCalledTimes(1);
+      expect(selectStudentsForEnrollmentMock).toHaveBeenCalledTimes(1);
 
-      expect(
-        selectStudentsForEnrollmentMock,
-      ).toHaveBeenCalledWith(
+      expect(selectStudentsForEnrollmentMock).toHaveBeenCalledWith(
         {
           academic_year_id: '2',
           generation_id: '1',
@@ -1264,25 +1060,15 @@ describe('EnrollmentsService', () => {
     });
 
     it('should reject confirmation when the matched student set has changed', async () => {
-      selectStudentsForEnrollmentMock
-        .mockResolvedValueOnce([
-          selectedStudent1,
-        ]);
+      selectStudentsForEnrollmentMock.mockResolvedValueOnce([selectedStudent1]);
 
-      await expect(
-        service.bulkCreate(
-          BigInt(1),
-          groupDto,
-        ),
-      ).rejects.toThrow(
+      await expect(service.bulkCreate(BigInt(1), groupDto)).rejects.toThrow(
         new ConflictException(
           'Enrollment selection changed after preview. Please preview the group again before confirming.',
         ),
       );
 
-      expect(
-        enrollmentCreateManyMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentCreateManyMock).not.toHaveBeenCalled();
     });
   });
 
@@ -1313,26 +1099,32 @@ describe('EnrollmentsService', () => {
     ])(
       'excludes %s from preview and rejects confirmation',
       async (_, changes, generation, missingPlacement) => {
-        selectStudentsForEnrollmentMock.mockResolvedValue([{
-          ...selectedStudent1,
-          generation_id: generation,
-          student_academic_records: missingPlacement
-            ? []
-            : [{
-                ...selectedStudent1.student_academic_records[0],
-                ...changes,
-              }],
-        }]);
+        selectStudentsForEnrollmentMock.mockResolvedValue([
+          {
+            ...selectedStudent1,
+            generation_id: generation,
+            student_academic_records: missingPlacement
+              ? []
+              : [
+                  {
+                    ...selectedStudent1.student_academic_records[0],
+                    ...changes,
+                  },
+                ],
+          },
+        ]);
 
         const preview = await service.previewGroup(1n, groupDto);
 
         expect(preview.confirmed_student_ids).toEqual([]);
         expect(preview.matched_count).toBe(0);
 
-        await expect(service.bulkCreate(1n, {
-          ...groupDto,
-          confirmed_student_ids: ['100'],
-        })).rejects.toThrow(ConflictException);
+        await expect(
+          service.bulkCreate(1n, {
+            ...groupDto,
+            confirmed_student_ids: ['100'],
+          }),
+        ).rejects.toThrow(ConflictException);
 
         expect(enrollmentCreateManyMock).not.toHaveBeenCalled();
       },
@@ -1342,20 +1134,19 @@ describe('EnrollmentsService', () => {
       offeringFindUniqueMock.mockResolvedValue({
         id: 1n,
         semesters: { academic_year_id: 2n },
-        group_scopes: [
-          scope,
-          { ...scope, class_group: 'AMS1-B' },
-        ],
+        group_scopes: [scope, { ...scope, class_group: 'AMS1-B' }],
       });
 
       selectStudentsForEnrollmentMock.mockResolvedValue([
         selectedStudent1,
         {
           ...selectedStudent2,
-          student_academic_records: [{
-            ...selectedStudent2.student_academic_records[0],
-            class_group: 'AMS1-B',
-          }],
+          student_academic_records: [
+            {
+              ...selectedStudent2.student_academic_records[0],
+              class_group: 'AMS1-B',
+            },
+          ],
         },
       ]);
 
@@ -1396,13 +1187,13 @@ describe('EnrollmentsService', () => {
     it('rejects selection from another academic year without writing', async () => {
       const dto = { ...groupDto, academic_year_id: '3' };
 
-      await expect(
-        service.previewGroup(1n, dto),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.previewGroup(1n, dto)).rejects.toThrow(
+        BadRequestException,
+      );
 
-      await expect(
-        service.bulkCreate(1n, dto),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.bulkCreate(1n, dto)).rejects.toThrow(
+        BadRequestException,
+      );
 
       expect(enrollmentCreateManyMock).not.toHaveBeenCalled();
     });
@@ -1418,10 +1209,12 @@ describe('EnrollmentsService', () => {
         group_scopes: [{ ...scope, class_group: 'AMS1-B' }],
       });
 
-      await expect(service.bulkCreate(1n, {
-        ...groupDto,
-        confirmed_student_ids: preview.confirmed_student_ids,
-      })).rejects.toThrow(ConflictException);
+      await expect(
+        service.bulkCreate(1n, {
+          ...groupDto,
+          confirmed_student_ids: preview.confirmed_student_ids,
+        }),
+      ).rejects.toThrow(ConflictException);
 
       expect(enrollmentCreateManyMock).not.toHaveBeenCalled();
     });
@@ -1436,22 +1229,16 @@ describe('EnrollmentsService', () => {
         .mockResolvedValueOnce(null);
 
       offeringFindUniqueMock
-        .mockResolvedValueOnce(
-          reassignmentTargetOffering,
-        )
+        .mockResolvedValueOnce(reassignmentTargetOffering)
         .mockResolvedValueOnce({
           id: BigInt(1),
           course_id: BigInt(10),
           semester_id: BigInt(20),
         });
 
-      reassignmentStudentFindFirstMock
-        .mockResolvedValue(
-          reassignmentStudent,
-        );
+      reassignmentStudentFindFirstMock.mockResolvedValue(reassignmentStudent);
 
-      evaluationParticipantFindManyMock
-        .mockResolvedValue([]);
+      evaluationParticipantFindManyMock.mockResolvedValue([]);
     });
 
     afterEach(() => {
@@ -1459,11 +1246,10 @@ describe('EnrollmentsService', () => {
     });
 
     it('should preview a valid enrollment reassignment without changing data', async () => {
-      const result =
-        await service.previewReassignment(
-          BigInt(1),
-          reassignmentDto,
-        );
+      const result = await service.previewReassignment(
+        BigInt(1),
+        reassignmentDto,
+      );
 
       expect(result).toMatchObject({
         source_offering_id: '1',
@@ -1490,49 +1276,36 @@ describe('EnrollmentsService', () => {
         can_confirm: true,
       });
 
-      expect(
-        enrollmentDeleteMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentDeleteMock).not.toHaveBeenCalled();
 
-      expect(
-        enrollmentCreateMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentCreateMock).not.toHaveBeenCalled();
     });
 
     it('should reject preview when the student does not match the target group scope', async () => {
-      reassignmentStudentFindFirstMock
-        .mockResolvedValue({
-          ...reassignmentStudent,
+      reassignmentStudentFindFirstMock.mockResolvedValue({
+        ...reassignmentStudent,
 
-          student_academic_records: [
-            {
-              academic_year_id:
-                BigInt(2),
-              year_level: 4,
-              major_id: BigInt(1),
-              class_group: 'AMS1-A',
-            },
-          ],
-        });
+        student_academic_records: [
+          {
+            academic_year_id: BigInt(2),
+            year_level: 4,
+            major_id: BigInt(1),
+            class_group: 'AMS1-A',
+          },
+        ],
+      });
 
       await expect(
-        service.previewReassignment(
-          BigInt(1),
-          reassignmentDto,
-        ),
+        service.previewReassignment(BigInt(1), reassignmentDto),
       ).rejects.toThrow(
         new BadRequestException(
           'Student placement does not match the target course offering group scope',
         ),
       );
 
-      expect(
-        enrollmentDeleteMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentDeleteMock).not.toHaveBeenCalled();
 
-      expect(
-        enrollmentCreateMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentCreateMock).not.toHaveBeenCalled();
     });
   });
 
@@ -1557,59 +1330,45 @@ describe('EnrollmentsService', () => {
           course_id: BigInt(10),
           semester_id: BigInt(20),
         })
-        .mockResolvedValueOnce(
-          reassignmentTargetOffering,
-        );
+        .mockResolvedValueOnce(reassignmentTargetOffering);
 
-      reassignmentStudentFindFirstMock
-        .mockResolvedValue(
-          reassignmentStudent,
-        );
+      reassignmentStudentFindFirstMock.mockResolvedValue(reassignmentStudent);
 
-      evaluationParticipantFindManyMock
-        .mockResolvedValue([
-          {
-            id: BigInt(50),
-            evaluation_id: BigInt(60),
-            has_submitted: false,
-            submitted_at: null,
-            assessment_drafts: null,
-          },
-        ]);
+      evaluationParticipantFindManyMock.mockResolvedValue([
+        {
+          id: BigInt(50),
+          evaluation_id: BigInt(60),
+          has_submitted: false,
+          submitted_at: null,
+          assessment_drafts: null,
+        },
+      ]);
 
-      enrollmentCreateMock
-        .mockResolvedValue({
-          id: BigInt(2),
-          student_id: BigInt(100),
-          course_offering_id: BigInt(2),
-          enrolled_at: new Date(
-            '2026-10-06T00:00:00.000Z',
-          ),
+      enrollmentCreateMock.mockResolvedValue({
+        id: BigInt(2),
+        student_id: BigInt(100),
+        course_offering_id: BigInt(2),
+        enrolled_at: new Date('2026-10-06T00:00:00.000Z'),
 
-          users: {
-            id: BigInt(100),
-            full_name: 'Student One',
-            email: 'student1@itc.edu.kh',
-          },
-        });
+        users: {
+          id: BigInt(100),
+          full_name: 'Student One',
+          email: 'student1@itc.edu.kh',
+        },
+      });
 
-      const result =
-        await service.confirmReassignment(
-          BigInt(1),
-          confirmReassignmentDto,
-        );
+      const result = await service.confirmReassignment(
+        BigInt(1),
+        confirmReassignmentDto,
+      );
 
-      expect(
-        enrollmentDeleteMock,
-      ).toHaveBeenCalledWith({
+      expect(enrollmentDeleteMock).toHaveBeenCalledWith({
         where: {
           id: BigInt(1),
         },
       });
 
-      expect(
-        enrollmentCreateMock,
-      ).toHaveBeenCalledWith({
+      expect(enrollmentCreateMock).toHaveBeenCalledWith({
         data: {
           student_id: BigInt(100),
           course_offering_id: BigInt(2),
@@ -1631,9 +1390,7 @@ describe('EnrollmentsService', () => {
         source_enrollment_id: '1',
         target_enrollment_id: '2',
 
-        preserved_evaluation_participant_ids: [
-          '50',
-        ],
+        preserved_evaluation_participant_ids: ['50'],
 
         placement_changed: false,
         evaluation_participants_changed: false,
@@ -1654,47 +1411,34 @@ describe('EnrollmentsService', () => {
           course_id: BigInt(10),
           semester_id: BigInt(20),
         })
-        .mockResolvedValueOnce(
-          reassignmentTargetOffering,
-        );
+        .mockResolvedValueOnce(reassignmentTargetOffering);
 
-      reassignmentStudentFindFirstMock
-        .mockResolvedValue(
-          reassignmentStudent,
-        );
+      reassignmentStudentFindFirstMock.mockResolvedValue(reassignmentStudent);
 
-      evaluationParticipantFindManyMock
-        .mockResolvedValue([
-          {
-            id: BigInt(50),
-            evaluation_id: BigInt(60),
-            has_submitted: false,
-            submitted_at: null,
+      evaluationParticipantFindManyMock.mockResolvedValue([
+        {
+          id: BigInt(50),
+          evaluation_id: BigInt(60),
+          has_submitted: false,
+          submitted_at: null,
 
-            assessment_drafts: {
-              id: BigInt(70),
-            },
+          assessment_drafts: {
+            id: BigInt(70),
           },
-        ]);
+        },
+      ]);
 
       await expect(
-        service.confirmReassignment(
-          BigInt(1),
-          confirmReassignmentDto,
-        ),
+        service.confirmReassignment(BigInt(1), confirmReassignmentDto),
       ).rejects.toThrow(
         new ConflictException(
           'Reassignment cannot be confirmed because the student has an evaluation draft or submission in the source offering.',
         ),
       );
 
-      expect(
-        enrollmentDeleteMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentDeleteMock).not.toHaveBeenCalled();
 
-      expect(
-        enrollmentCreateMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentCreateMock).not.toHaveBeenCalled();
     });
 
     it('should reject reassignment when the student has submitted an evaluation', async () => {
@@ -1710,71 +1454,47 @@ describe('EnrollmentsService', () => {
           course_id: BigInt(10),
           semester_id: BigInt(20),
         })
-        .mockResolvedValueOnce(
-          reassignmentTargetOffering,
-        );
+        .mockResolvedValueOnce(reassignmentTargetOffering);
 
-      reassignmentStudentFindFirstMock
-        .mockResolvedValue(
-          reassignmentStudent,
-        );
+      reassignmentStudentFindFirstMock.mockResolvedValue(reassignmentStudent);
 
-      evaluationParticipantFindManyMock
-        .mockResolvedValue([
-          {
-            id: BigInt(50),
-            evaluation_id: BigInt(60),
-            has_submitted: true,
-            submitted_at: new Date(
-              '2026-10-06T00:00:00.000Z',
-            ),
-            assessment_drafts: null,
-          },
-        ]);
+      evaluationParticipantFindManyMock.mockResolvedValue([
+        {
+          id: BigInt(50),
+          evaluation_id: BigInt(60),
+          has_submitted: true,
+          submitted_at: new Date('2026-10-06T00:00:00.000Z'),
+          assessment_drafts: null,
+        },
+      ]);
 
       await expect(
-        service.confirmReassignment(
-          BigInt(1),
-          confirmReassignmentDto,
-        ),
+        service.confirmReassignment(BigInt(1), confirmReassignmentDto),
       ).rejects.toThrow(
         new ConflictException(
           'Reassignment cannot be confirmed because the student has an evaluation draft or submission in the source offering.',
         ),
       );
 
-      expect(
-        enrollmentDeleteMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentDeleteMock).not.toHaveBeenCalled();
 
-      expect(
-        enrollmentCreateMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentCreateMock).not.toHaveBeenCalled();
     });
 
     it('should reject confirmation when the source enrollment changed after preview', async () => {
-      enrollmentFindFirstMock.mockResolvedValueOnce(
-        null,
-      );
+      enrollmentFindFirstMock.mockResolvedValueOnce(null);
 
       await expect(
-        service.confirmReassignment(
-          BigInt(1),
-          confirmReassignmentDto,
-        ),
+        service.confirmReassignment(BigInt(1), confirmReassignmentDto),
       ).rejects.toThrow(
         new ConflictException(
           'Reassignment state changed after preview. Please preview again before confirming.',
         ),
       );
 
-      expect(
-        enrollmentDeleteMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentDeleteMock).not.toHaveBeenCalled();
 
-      expect(
-        enrollmentCreateMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentCreateMock).not.toHaveBeenCalled();
     });
 
     it('should reject confirmation when the student placement no longer matches the target scope', async () => {
@@ -1790,43 +1510,32 @@ describe('EnrollmentsService', () => {
           course_id: BigInt(10),
           semester_id: BigInt(20),
         })
-        .mockResolvedValueOnce(
-          reassignmentTargetOffering,
-        );
+        .mockResolvedValueOnce(reassignmentTargetOffering);
 
-      reassignmentStudentFindFirstMock
-        .mockResolvedValue({
-          ...reassignmentStudent,
+      reassignmentStudentFindFirstMock.mockResolvedValue({
+        ...reassignmentStudent,
 
-          student_academic_records: [
-            {
-              academic_year_id:
-                BigInt(2),
-              year_level: 4,
-              major_id: BigInt(1),
-              class_group: 'AMS1-A',
-            },
-          ],
-        });
+        student_academic_records: [
+          {
+            academic_year_id: BigInt(2),
+            year_level: 4,
+            major_id: BigInt(1),
+            class_group: 'AMS1-A',
+          },
+        ],
+      });
 
       await expect(
-        service.confirmReassignment(
-          BigInt(1),
-          confirmReassignmentDto,
-        ),
+        service.confirmReassignment(BigInt(1), confirmReassignmentDto),
       ).rejects.toThrow(
         new ConflictException(
           'Student no longer matches the target course offering group scope. Please preview again before confirming.',
         ),
       );
 
-      expect(
-        enrollmentDeleteMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentDeleteMock).not.toHaveBeenCalled();
 
-      expect(
-        enrollmentCreateMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentCreateMock).not.toHaveBeenCalled();
     });
 
     it('should reject confirmation when the student became enrolled in the target offering after preview', async () => {
@@ -1844,33 +1553,21 @@ describe('EnrollmentsService', () => {
           course_id: BigInt(10),
           semester_id: BigInt(20),
         })
-        .mockResolvedValueOnce(
-          reassignmentTargetOffering,
-        );
+        .mockResolvedValueOnce(reassignmentTargetOffering);
 
-      reassignmentStudentFindFirstMock
-        .mockResolvedValue(
-          reassignmentStudent,
-        );
+      reassignmentStudentFindFirstMock.mockResolvedValue(reassignmentStudent);
 
       await expect(
-        service.confirmReassignment(
-          BigInt(1),
-          confirmReassignmentDto,
-        ),
+        service.confirmReassignment(BigInt(1), confirmReassignmentDto),
       ).rejects.toThrow(
         new ConflictException(
           'Student enrollment state changed after preview. Please preview again before confirming.',
         ),
       );
 
-      expect(
-        enrollmentDeleteMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentDeleteMock).not.toHaveBeenCalled();
 
-      expect(
-        enrollmentCreateMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentCreateMock).not.toHaveBeenCalled();
     });
   });
 
@@ -1910,15 +1607,10 @@ describe('EnrollmentsService', () => {
           semester_id: 20n,
         });
 
-      reassignmentStudentFindFirstMock.mockResolvedValue(
-        reassignmentStudent,
-      );
+      reassignmentStudentFindFirstMock.mockResolvedValue(reassignmentStudent);
       evaluationParticipantFindManyMock.mockResolvedValue([]);
 
-      const preview = await service.previewReassignment(
-        1n,
-        reassignmentDto,
-      );
+      const preview = await service.previewReassignment(1n, reassignmentDto);
 
       expect(preview.can_confirm).toBe(true);
 
@@ -1969,9 +1661,7 @@ describe('EnrollmentsService', () => {
           semester_id: 20n,
         });
 
-      reassignmentStudentFindFirstMock.mockResolvedValue(
-        reassignmentStudent,
-      );
+      reassignmentStudentFindFirstMock.mockResolvedValue(reassignmentStudent);
 
       await expect(
         service.previewReassignment(1n, reassignmentDto),
@@ -1984,23 +1674,16 @@ describe('EnrollmentsService', () => {
 
   describe('remove', () => {
     it('should remove an existing enrollment', async () => {
-      await service.remove(
-        BigInt(1),
-        BigInt(100),
-      );
+      await service.remove(BigInt(1), BigInt(100));
 
-      expect(
-        enrollmentFindFirstMock,
-      ).toHaveBeenCalledWith({
+      expect(enrollmentFindFirstMock).toHaveBeenCalledWith({
         where: {
           course_offering_id: BigInt(1),
           student_id: BigInt(100),
         },
       });
 
-      expect(
-        enrollmentDeleteMock,
-      ).toHaveBeenCalledWith({
+      expect(enrollmentDeleteMock).toHaveBeenCalledWith({
         where: {
           id: BigInt(1),
         },
@@ -2008,69 +1691,39 @@ describe('EnrollmentsService', () => {
     });
 
     it('should throw when the student is not enrolled', async () => {
-      enrollmentFindFirstMock
-        .mockResolvedValue(null);
+      enrollmentFindFirstMock.mockResolvedValue(null);
 
-      await expect(
-        service.remove(
-          BigInt(1),
-          BigInt(100),
-        ),
-      ).rejects.toThrow(
+      await expect(service.remove(BigInt(1), BigInt(100))).rejects.toThrow(
         new NotFoundException(
           'Student is not enrolled in this course offering',
         ),
       );
 
-      expect(
-        enrollmentDeleteMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentDeleteMock).not.toHaveBeenCalled();
     });
   });
 
   describe('course offering validation', () => {
     it('should reject preview when the course offering does not exist', async () => {
-      offeringFindUniqueMock
-        .mockResolvedValue(null);
+      offeringFindUniqueMock.mockResolvedValue(null);
 
-      await expect(
-        service.previewGroup(
-          BigInt(999),
-          groupDto,
-        ),
-      ).rejects.toThrow(
-        new NotFoundException(
-          'Course offering not found',
-        ),
+      await expect(service.previewGroup(BigInt(999), groupDto)).rejects.toThrow(
+        new NotFoundException('Course offering not found'),
       );
 
-      expect(
-        selectStudentsForEnrollmentMock,
-      ).not.toHaveBeenCalled();
+      expect(selectStudentsForEnrollmentMock).not.toHaveBeenCalled();
     });
 
     it('should reject bulk enrollment when the course offering does not exist', async () => {
-      offeringFindUniqueMock
-        .mockResolvedValue(null);
+      offeringFindUniqueMock.mockResolvedValue(null);
 
-      await expect(
-        service.bulkCreate(
-          BigInt(999),
-          groupDto,
-        ),
-      ).rejects.toThrow(
-        new NotFoundException(
-          'Course offering not found',
-        ),
+      await expect(service.bulkCreate(BigInt(999), groupDto)).rejects.toThrow(
+        new NotFoundException('Course offering not found'),
       );
 
-      expect(
-        selectStudentsForEnrollmentMock,
-      ).not.toHaveBeenCalled();
+      expect(selectStudentsForEnrollmentMock).not.toHaveBeenCalled();
 
-      expect(
-        enrollmentCreateManyMock,
-      ).not.toHaveBeenCalled();
+      expect(enrollmentCreateManyMock).not.toHaveBeenCalled();
     });
   });
 });

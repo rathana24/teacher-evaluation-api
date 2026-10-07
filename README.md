@@ -2,7 +2,9 @@
 
 For professor review and frontend handoff, read the [consolidated project report](docs/BACKEND_PROJECT_REPORT.md) or its [Word version](docs/BACKEND_PROJECT_REPORT.docx).
 
-> **Backend status:** Safety improvements implemented; full frontend acceptance awaits agreed contracts and school policies. See [current requirements review](docs/BACKEND_PROJECT_REPORT.md#7-backend-improvement-requirements-and-delivery-status).
+For frontend testing, start with the [handoff checklist and request examples](docs/BACKEND_PROJECT_REPORT.md#88-frontend-team-handoff-and-acceptance-checklist) and [isolated setup guide](TESTING.md#frontend-team-preview-from-the-github-repository). Clone the delivery commit identified by the project owner; the earlier `578c63f` baseline does not contain these improvements.
+
+> **Backend status:** Review-bound confirmation, exact-result retries, older-version retention, version-update impact and approved repeat/transfer/pause/resume/yearly-group progression, academic-year curriculum revisions and retained global question-set titles and immutable historical target labels are implemented and tested. Frontend integration/cutover, official recovery evidence and school deployment remain pending. Deploy all four additive review, progression, curriculum and historical-label migrations before using the updated backend. See [current requirements review](docs/BACKEND_PROJECT_REPORT.md#7-backend-improvement-requirements-and-delivery-status).
 > **Stack:** NestJS · TypeScript · PostgreSQL · Prisma · JWT/Passport · Swagger · Jest · ts-jest · Supertest  
 > **Roles:** ADMIN · LECTURER · STUDENT  
 > **API base path:** `/api`

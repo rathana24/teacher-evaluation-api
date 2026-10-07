@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Optional,
   Param,
   Post,
   Put,
@@ -34,6 +35,9 @@ import { StudentQueryDto } from './dto/student-query.dto';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ParseBigIntPipe } from '../common/pipes/parse-bigint.pipe';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ReviewedWorkflowsService } from '../reviewed-workflows/reviewed-workflows.service';
+import { requireReviewAtCutover } from '../reviewed-workflows/reviewed-operation.store';
 
 @ApiTags('students')
 @ApiBearerAuth()
@@ -44,6 +48,7 @@ export class StudentsController {
     private readonly studentsService: StudentsService,
     private readonly studentImportService: StudentImportService,
     private readonly studentExportService: StudentExportService,
+    @Optional() private readonly reviewedWorkflows?: ReviewedWorkflowsService,
   ) {}
 
   @Post()
@@ -55,9 +60,7 @@ export class StudentsController {
     status: 201,
     description: 'Student created successfully',
   })
-  async create(
-    @Body() dto: CreateStudentDto,
-  ) {
+  async create(@Body() dto: CreateStudentDto) {
     return this.studentsService.create(dto);
   }
 
@@ -70,15 +73,10 @@ export class StudentsController {
   })
   @ApiResponse({
     status: 201,
-    description:
-      'Student import completed',
+    description: 'Student import completed',
   })
-  async importStudents(
-    @Body() dto: ImportStudentsDto,
-  ) {
-    return this.studentImportService.importStudents(
-      dto,
-    );
+  async importStudents(@Body() dto: ImportStudentsDto) {
+    return this.studentImportService.importStudents(dto);
   }
 
   @Get()
@@ -88,12 +86,9 @@ export class StudentsController {
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Paginated student list with evaluation progress',
+    description: 'Paginated student list with evaluation progress',
   })
-  async findAll(
-    @Query() query: StudentQueryDto,
-  ) {
+  async findAll(@Query() query: StudentQueryDto) {
     return this.studentsService.findAll(query);
   }
 
@@ -106,46 +101,36 @@ export class StudentsController {
   @Get('export')
   @Roles('ADMIN')
   @ApiOperation({
-    summary:
-      'Get student progress export data',
+    summary: 'Get student progress export data',
     description:
       'Returns the complete authorized student progress dataset for frontend Excel/CSV generation. This endpoint contains identifiable participation data and does not expose anonymous evaluation answers.',
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Complete student progress export dataset',
+    description: 'Complete student progress export dataset',
   })
   @ApiResponse({
     status: 400,
-    description:
-      'Invalid export scope',
+    description: 'Invalid export scope',
   })
   @ApiResponse({
     status: 404,
-    description:
-      'Generation, academic year, or semester not found',
+    description: 'Generation, academic year, or semester not found',
   })
-  async exportStudents(
-    @Query() query: StudentExportQueryDto,
-  ) {
-    return this.studentExportService.getExportData(
-      query,
-    );
+  async exportStudents(@Query() query: StudentExportQueryDto) {
+    return this.studentExportService.getExportData(query);
   }
 
   @Get('group-options')
   @Roles('ADMIN')
   @ApiOperation({
-    summary:
-      'List class group options for a student placement scope',
+    summary: 'List class group options for a student placement scope',
     description:
       'Returns normalized class groups found in existing student academic records for the selected academic year, generation, and major.',
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Class group options returned successfully',
+    description: 'Class group options returned successfully',
   })
   async getGroupOptions(
     @Query()
@@ -161,15 +146,13 @@ export class StudentsController {
   @Put('bulk/class-group')
   @Roles('ADMIN')
   @ApiOperation({
-    summary:
-      'Bulk update student class group',
+    summary: 'Bulk update student class group',
     description:
-      'Atomically updates only the class group of confirmed students who already have placement records in the selected academic year. Missing placements are not created.',
+      'Updates existing academic-year placements using PROFILE student_ids. Use POST /bulk/class-group/preview and /confirm for review-bound impact and durable retry. This PUT also accepts review_id with identical inputs. Legacy omission is rejected after REQUIRE_REVIEWED_CONFIRMATION=true. No missing placements or historical enrollment/participant rows are created or rewritten.',
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Student class groups updated successfully',
+    description: 'Student class groups updated successfully',
   })
   @ApiResponse({
     status: 400,
@@ -179,14 +162,18 @@ export class StudentsController {
   async bulkUpdateClassGroup(
     @Body()
     dto: BulkUpdateStudentGroupDto,
+    @CurrentUser('id') actor: bigint,
   ) {
+    if (dto.review_id && this.reviewedWorkflows)
+      return this.reviewedWorkflows.confirmPlacement(
+        { ...dto, review_id: dto.review_id },
+        actor,
+      );
+    requireReviewAtCutover();
     return this.studentsService.bulkUpdateClassGroup(
       BigInt(dto.academic_year_id),
 
-      dto.student_ids.map(
-        (studentId) =>
-          BigInt(studentId),
-      ),
+      dto.student_ids.map((studentId) => BigInt(studentId)),
 
       dto.class_group,
     );
@@ -211,13 +198,11 @@ export class StudentsController {
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Student details',
+    description: 'Student details',
   })
   @ApiResponse({
     status: 404,
-    description:
-      'Student not found',
+    description: 'Student not found',
   })
   async findOne(
     @Param('id', ParseBigIntPipe)
@@ -226,10 +211,7 @@ export class StudentsController {
     @Query('academic_year_id')
     academicYearId?: string,
   ) {
-    return this.studentsService.findOne(
-      id,
-      academicYearId,
-    );
+    return this.studentsService.findOne(id, academicYearId);
   }
 
   @Put(':id')
@@ -244,13 +226,11 @@ export class StudentsController {
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Student updated successfully',
+    description: 'Student updated successfully',
   })
   @ApiResponse({
     status: 404,
-    description:
-      'Student not found',
+    description: 'Student not found',
   })
   async update(
     @Param('id', ParseBigIntPipe)
@@ -259,10 +239,7 @@ export class StudentsController {
     @Body()
     dto: UpdateStudentDto,
   ) {
-    return this.studentsService.update(
-      id,
-      dto,
-    );
+    return this.studentsService.update(id, dto);
   }
 
   @Delete(':id')
@@ -277,8 +254,7 @@ export class StudentsController {
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Student deleted successfully',
+    description: 'Student deleted successfully',
   })
   @ApiResponse({
     status: 409,

@@ -1,8 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  INestApplication,
-  ValidationPipe,
-} from '@nestjs/common';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -48,13 +45,9 @@ describe('Assessment Drafts (e2e)', () => {
 
   const stamp = Date.now();
 
-  const hourAgo = new Date(
-    stamp - 60 * 60 * 1000,
-  ).toISOString();
+  const hourAgo = new Date(stamp - 60 * 60 * 1000).toISOString();
 
-  const nextWeek = new Date(
-    stamp + 7 * 24 * 60 * 60 * 1000,
-  ).toISOString();
+  const nextWeek = new Date(stamp + 7 * 24 * 60 * 60 * 1000).toISOString();
 
   const api = () => request(app.getHttpServer());
 
@@ -66,49 +59,29 @@ describe('Assessment Drafts (e2e)', () => {
     Authorization: `Bearer ${adminToken}`,
   });
 
-  const saveDraft = (
-    token: string,
-    answers: unknown[],
-  ) =>
+  const saveDraft = (token: string, answers: unknown[]) =>
     api()
-      .put(
-        `/api/student/evaluations/${evaluationId}/draft`,
-      )
+      .put(`/api/student/evaluations/${evaluationId}/draft`)
       .set(as(token))
       .send({ answers });
 
   const getDraft = (token: string) =>
-    api()
-      .get(
-        `/api/student/evaluations/${evaluationId}/draft`,
-      )
-      .set(as(token));
+    api().get(`/api/student/evaluations/${evaluationId}/draft`).set(as(token));
 
   const deleteDraft = (token: string) =>
     api()
-      .delete(
-        `/api/student/evaluations/${evaluationId}/draft`,
-      )
+      .delete(`/api/student/evaluations/${evaluationId}/draft`)
       .set(as(token));
 
-  const submit = (
-    token: string,
-    answers: unknown[],
-  ) =>
+  const submit = (token: string, answers: unknown[]) =>
     api()
-      .post(
-        `/api/student/evaluations/${evaluationId}/responses`,
-      )
+      .post(`/api/student/evaluations/${evaluationId}/responses`)
       .set(as(token))
       .send({ answers });
 
-  async function addQuestion(
-    body: Record<string, unknown>,
-  ) {
+  async function addQuestion(body: Record<string, unknown>) {
     return api()
-      .post(
-        `/api/survey-versions/${versionId}/questions`,
-      )
+      .post(`/api/survey-versions/${versionId}/questions`)
       .set(admin())
       .send(body);
   }
@@ -136,18 +109,14 @@ describe('Assessment Drafts (e2e)', () => {
     },
     {
       question_id: qCheckbox,
-      selected_option_ids: [
-        checkboxOption1,
-        checkboxOption2,
-      ],
+      selected_option_ids: [checkboxOption1, checkboxOption2],
     },
   ];
 
   beforeAll(async () => {
-    const moduleFixture: TestingModule =
-      await Test.createTestingModule({
-        imports: [AppModule],
-      }).compile();
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
 
     app = moduleFixture.createNestApplication();
 
@@ -249,6 +218,18 @@ describe('Assessment Drafts (e2e)', () => {
             user_id: user.id,
             student_code: `E2E-DR-${stamp}-${index}`,
             generation_id: generation.id,
+            student_academic_records: {
+              create: {
+                academic_year_id: year.id,
+                year_level: 1,
+                major_id: (
+                  await tx.majors.findFirstOrThrow({
+                    where: { department_id: department.id },
+                  })
+                ).id,
+                class_group: 'TEST-A',
+              },
+            },
           },
         });
       }
@@ -326,8 +307,7 @@ describe('Assessment Drafts (e2e)', () => {
     // ------------------------------------------------
 
     const rating = await addQuestion({
-      question_text:
-        'How clearly did the lecturer explain?',
+      question_text: 'How clearly did the lecturer explain?',
       question_type: 'RATING',
       min_rating: 1,
       max_rating: 5,
@@ -342,8 +322,7 @@ describe('Assessment Drafts (e2e)', () => {
     // ------------------------------------------------
 
     const text = await addQuestion({
-      question_text:
-        'What could be improved?',
+      question_text: 'What could be improved?',
       question_type: 'TEXT',
       is_required: false,
     });
@@ -357,8 +336,7 @@ describe('Assessment Drafts (e2e)', () => {
     // ------------------------------------------------
 
     const agreement = await addQuestion({
-      question_text:
-        'I agree that the lecturer was prepared.',
+      question_text: 'I agree that the lecturer was prepared.',
       question_type: 'AGREEMENT',
     });
 
@@ -371,8 +349,7 @@ describe('Assessment Drafts (e2e)', () => {
     // ------------------------------------------------
 
     const frequency = await addQuestion({
-      question_text:
-        'How often were examples provided?',
+      question_text: 'How often were examples provided?',
       question_type: 'FREQUENCY',
     });
 
@@ -385,8 +362,7 @@ describe('Assessment Drafts (e2e)', () => {
     // ------------------------------------------------
 
     const multipleChoice = await addQuestion({
-      question_text:
-        'Which resource was most useful?',
+      question_text: 'Which resource was most useful?',
       question_type: 'MULTIPLE_CHOICE',
       options: [
         {
@@ -402,22 +378,18 @@ describe('Assessment Drafts (e2e)', () => {
 
     expect(multipleChoice.status).toBe(201);
 
-    qMultipleChoice =
-      multipleChoice.body.id;
+    qMultipleChoice = multipleChoice.body.id;
 
-    mcOption1 =
-      multipleChoice.body.question_options[0].id;
+    mcOption1 = multipleChoice.body.question_options[0].id;
 
-    mcOption2 =
-      multipleChoice.body.question_options[1].id;
+    mcOption2 = multipleChoice.body.question_options[1].id;
 
     // ------------------------------------------------
     // CHECKBOX
     // ------------------------------------------------
 
     const checkbox = await addQuestion({
-      question_text:
-        'Which activities were useful?',
+      question_text: 'Which activities were useful?',
       question_type: 'CHECKBOX',
       options: [
         {
@@ -435,25 +407,20 @@ describe('Assessment Drafts (e2e)', () => {
 
     qCheckbox = checkbox.body.id;
 
-    checkboxOption1 =
-      checkbox.body.question_options[0].id;
+    checkboxOption1 = checkbox.body.question_options[0].id;
 
-    checkboxOption2 =
-      checkbox.body.question_options[1].id;
+    checkboxOption2 = checkbox.body.question_options[1].id;
 
     // ------------------------------------------------
     // Create evaluation
     // ------------------------------------------------
 
-    const evaluation = await api()
-      .post('/api/evaluations')
-      .set(admin())
-      .send({
-        course_offering_id: offeringId,
-        survey_version_id: versionId,
-        start_at: hourAgo,
-        end_at: nextWeek,
-      });
+    const evaluation = await api().post('/api/evaluations').set(admin()).send({
+      course_offering_id: offeringId,
+      survey_version_id: versionId,
+      start_at: hourAgo,
+      end_at: nextWeek,
+    });
 
     expect(evaluation.status).toBe(201);
 
@@ -466,9 +433,7 @@ describe('Assessment Drafts (e2e)', () => {
     // ------------------------------------------------
 
     const opened = await api()
-      .post(
-        `/api/evaluations/${evaluationId}/open`,
-      )
+      .post(`/api/evaluations/${evaluationId}/open`)
       .set(admin());
 
     expect(opened.status).toBe(200);
@@ -480,157 +445,143 @@ describe('Assessment Drafts (e2e)', () => {
     try {
       if (prisma) {
         await prisma.$transaction(async (tx) => {
-    if (evaluationId) {
-      const evaluationIdBigInt =
-        BigInt(evaluationId);
+          if (evaluationId) {
+            const evaluationIdBigInt = BigInt(evaluationId);
 
-      // ------------------------------------------------
-      // Drafts must be removed before participants.
-      // ------------------------------------------------
+            // ------------------------------------------------
+            // Drafts must be removed before participants.
+            // ------------------------------------------------
 
-      const participants =
-        await tx.evaluation_participants.findMany({
-          where: {
-            evaluation_id: evaluationIdBigInt,
-          },
-          select: {
-            id: true,
-          },
-        });
-
-      const participantIds =
-        participants.map(
-          (participant) => participant.id,
-        );
-
-      if (participantIds.length > 0) {
-        await tx.assessment_drafts.deleteMany({
-          where: {
-            participant_id: {
-              in: participantIds,
-            },
-          },
-        });
-      }
-
-      // ------------------------------------------------
-      // Clean responses
-      // answer_options -> answers -> responses
-      // ------------------------------------------------
-
-      const responseRows =
-        await tx.responses.findMany({
-          where: {
-            evaluation_id: evaluationIdBigInt,
-          },
-          select: {
-            id: true,
-          },
-        });
-
-      const responseIds =
-        responseRows.map(
-          (response) => response.id,
-        );
-
-      if (responseIds.length > 0) {
-        const answerRows =
-          await tx.answers.findMany({
-            where: {
-              response_id: {
-                in: responseIds,
+            const participants = await tx.evaluation_participants.findMany({
+              where: {
+                evaluation_id: evaluationIdBigInt,
               },
-            },
-            select: {
-              id: true,
-            },
-          });
-
-        const answerIds =
-          answerRows.map(
-            (answer) => answer.id,
-          );
-
-        if (answerIds.length > 0) {
-          await tx.answer_options.deleteMany({
-            where: {
-              answer_id: {
-                in: answerIds,
+              select: {
+                id: true,
               },
-            },
-          });
-        }
+            });
 
-        await tx.answers.deleteMany({
-          where: {
-            response_id: {
-              in: responseIds,
-            },
-          },
-        });
-      }
+            const participantIds = participants.map(
+              (participant) => participant.id,
+            );
 
-      await tx.responses.deleteMany({
-        where: {
-          evaluation_id: evaluationIdBigInt,
-        },
-      });
+            if (participantIds.length > 0) {
+              await tx.assessment_drafts.deleteMany({
+                where: {
+                  participant_id: {
+                    in: participantIds,
+                  },
+                },
+              });
+            }
 
-      await tx.evaluation_participants.deleteMany({
-        where: {
-          evaluation_id: evaluationIdBigInt,
-        },
-      });
+            // ------------------------------------------------
+            // Clean responses
+            // answer_options -> answers -> responses
+            // ------------------------------------------------
 
-      await tx.evaluations.deleteMany({
-        where: {
-          id: evaluationIdBigInt,
-        },
-      });
-    }
+            const responseRows = await tx.responses.findMany({
+              where: {
+                evaluation_id: evaluationIdBigInt,
+              },
+              select: {
+                id: true,
+              },
+            });
 
-    // ------------------------------------------------
-    // Clean questions, options, version
-    // ------------------------------------------------
+            const responseIds = responseRows.map((response) => response.id);
 
-    if (versionId) {
-      const versionIdBigInt =
-        BigInt(versionId);
+            if (responseIds.length > 0) {
+              const answerRows = await tx.answers.findMany({
+                where: {
+                  response_id: {
+                    in: responseIds,
+                  },
+                },
+                select: {
+                  id: true,
+                },
+              });
 
-      await tx.question_options.deleteMany({
-        where: {
-          questions: {
-            survey_version_id:
-              versionIdBigInt,
-          },
-        },
-      });
+              const answerIds = answerRows.map((answer) => answer.id);
 
-      await tx.questions.deleteMany({
-        where: {
-          survey_version_id:
-            versionIdBigInt,
-        },
-      });
+              if (answerIds.length > 0) {
+                await tx.answer_options.deleteMany({
+                  where: {
+                    answer_id: {
+                      in: answerIds,
+                    },
+                  },
+                });
+              }
 
-      await tx.survey_versions.deleteMany({
-        where: {
-          id: versionIdBigInt,
-        },
-      });
-    }
+              await tx.answers.deleteMany({
+                where: {
+                  response_id: {
+                    in: responseIds,
+                  },
+                },
+              });
+            }
 
-    // ------------------------------------------------
-    // Clean survey
-    // ------------------------------------------------
+            await tx.responses.deleteMany({
+              where: {
+                evaluation_id: evaluationIdBigInt,
+              },
+            });
 
-    if (surveyId) {
-      await tx.surveys.deleteMany({
-        where: {
-          id: BigInt(surveyId),
-        },
-      });
-    }
+            await tx.evaluation_participants.deleteMany({
+              where: {
+                evaluation_id: evaluationIdBigInt,
+              },
+            });
+
+            await tx.evaluations.deleteMany({
+              where: {
+                id: evaluationIdBigInt,
+              },
+            });
+          }
+
+          // ------------------------------------------------
+          // Clean questions, options, version
+          // ------------------------------------------------
+
+          if (versionId) {
+            const versionIdBigInt = BigInt(versionId);
+
+            await tx.question_options.deleteMany({
+              where: {
+                questions: {
+                  survey_version_id: versionIdBigInt,
+                },
+              },
+            });
+
+            await tx.questions.deleteMany({
+              where: {
+                survey_version_id: versionIdBigInt,
+              },
+            });
+
+            await tx.survey_versions.deleteMany({
+              where: {
+                id: versionIdBigInt,
+              },
+            });
+          }
+
+          // ------------------------------------------------
+          // Clean survey
+          // ------------------------------------------------
+
+          if (surveyId) {
+            await tx.surveys.deleteMany({
+              where: {
+                id: BigInt(surveyId),
+              },
+            });
+          }
 
           if (courseId !== undefined) {
             const offerings = await tx.course_offerings.findMany({
@@ -649,6 +600,9 @@ describe('Assessment Drafts (e2e)', () => {
           }
 
           if (fixtureUserIds.length > 0) {
+            await tx.student_academic_records.deleteMany({
+              where: { academic_year_id: academicYearId },
+            });
             await tx.students.deleteMany({
               where: { user_id: { in: fixtureUserIds } },
             });
@@ -686,19 +640,13 @@ describe('Assessment Drafts (e2e)', () => {
 
   describe('access control', () => {
     it('ADMIN cannot save a draft -> 403', async () => {
-      const res = await saveDraft(
-        adminToken,
-        [],
-      );
+      const res = await saveDraft(adminToken, []);
 
       expect(res.status).toBe(403);
     });
 
     it('LECTURER cannot save a draft -> 403', async () => {
-      const res = await saveDraft(
-        lecturerToken,
-        [],
-      );
+      const res = await saveDraft(lecturerToken, []);
 
       expect(res.status).toBe(403);
     });
@@ -710,21 +658,16 @@ describe('Assessment Drafts (e2e)', () => {
 
   describe('basic draft flow', () => {
     it('student can save an incomplete draft -> 200', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: qRating,
-            rating_value: 4,
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: qRating,
+          rating_value: 4,
+        },
+      ]);
 
       expect(res.status).toBe(200);
 
-      expect(res.body.evaluation_id).toBe(
-        evaluationId,
-      );
+      expect(res.body.evaluation_id).toBe(evaluationId);
 
       expect(res.body.draft.answers).toEqual([
         {
@@ -755,9 +698,7 @@ describe('Assessment Drafts (e2e)', () => {
     });
 
     it('student can load the saved draft -> 200', async () => {
-      const res = await getDraft(
-        student1Token,
-      );
+      const res = await getDraft(student1Token);
 
       expect(res.status).toBe(200);
 
@@ -770,35 +711,26 @@ describe('Assessment Drafts (e2e)', () => {
     });
 
     it('saving again updates the same draft -> 200', async () => {
-      const before = await getDraft(
-        student1Token,
-      );
+      const before = await getDraft(student1Token);
 
       expect(before.status).toBe(200);
 
-      const originalDraftId =
-        before.body.draft.id;
+      const originalDraftId = before.body.draft.id;
 
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: qRating,
-            rating_value: 5,
-          },
-          {
-            question_id: qText,
-            text_value:
-              '  More practical examples  ',
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: qRating,
+          rating_value: 5,
+        },
+        {
+          question_id: qText,
+          text_value: '  More practical examples  ',
+        },
+      ]);
 
       expect(res.status).toBe(200);
 
-      expect(res.body.draft.id).toBe(
-        originalDraftId,
-      );
+      expect(res.body.draft.id).toBe(originalDraftId);
 
       expect(res.body.draft.answers).toEqual([
         {
@@ -807,30 +739,24 @@ describe('Assessment Drafts (e2e)', () => {
         },
         {
           question_id: qText,
-          text_value:
-            'More practical examples',
+          text_value: 'More practical examples',
         },
       ]);
     });
 
     it('another student cannot see student1 draft -> 404', async () => {
-      const res = await getDraft(
-        student2Token,
-      );
+      const res = await getDraft(student2Token);
 
       expect(res.status).toBe(404);
     });
 
     it('student2 can create a separate draft -> 200', async () => {
-      const res = await saveDraft(
-        student2Token,
-        [
-          {
-            question_id: qRating,
-            rating_value: 3,
-          },
-        ],
-      );
+      const res = await saveDraft(student2Token, [
+        {
+          question_id: qRating,
+          rating_value: 3,
+        },
+      ]);
 
       expect(res.status).toBe(200);
 
@@ -843,33 +769,24 @@ describe('Assessment Drafts (e2e)', () => {
     });
 
     it('student2 can delete own draft -> 200', async () => {
-      const res = await deleteDraft(
-        student2Token,
-      );
+      const res = await deleteDraft(student2Token);
 
       expect(res.status).toBe(200);
       expect(res.body.deleted).toBe(true);
     });
 
     it('deleted draft can no longer be loaded -> 404', async () => {
-      const res = await getDraft(
-        student2Token,
-      );
+      const res = await getDraft(student2Token);
 
       expect(res.status).toBe(404);
     });
 
     it('student can save an empty draft -> 200', async () => {
-      const res = await saveDraft(
-        student2Token,
-        [],
-      );
+      const res = await saveDraft(student2Token, []);
 
       expect(res.status).toBe(200);
 
-      expect(
-        res.body.draft.answers,
-      ).toEqual([]);
+      expect(res.body.draft.answers).toEqual([]);
     });
   });
 
@@ -941,108 +858,87 @@ describe('Assessment Drafts (e2e)', () => {
     };
 
     it('question outside the survey -> 400', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: '999999',
-            rating_value: 4,
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: '999999',
+          rating_value: 4,
+        },
+      ]);
 
       expect(res.status).toBe(400);
       await expectDraftUnchanged();
     });
 
     it('same question twice -> 400', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: qRating,
-            rating_value: 4,
-          },
-          {
-            question_id: qRating,
-            rating_value: 5,
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: qRating,
+          rating_value: 4,
+        },
+        {
+          question_id: qRating,
+          rating_value: 5,
+        },
+      ]);
 
       expect(res.status).toBe(400);
       await expectDraftUnchanged();
     });
 
     it('RATING above 5 -> 400', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: qRating,
-            rating_value: 6,
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: qRating,
+          rating_value: 6,
+        },
+      ]);
 
       expect(res.status).toBe(400);
       await expectDraftUnchanged();
     });
 
     it('RATING rejects text -> 400', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: qRating,
-            text_value: 'Wrong type',
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: qRating,
+          text_value: 'Wrong type',
+        },
+      ]);
 
       expect(res.status).toBe(400);
       await expectDraftUnchanged();
     });
 
     it('TEXT rejects rating_value -> 400', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: qText,
-            rating_value: 3,
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: qText,
+          rating_value: 3,
+        },
+      ]);
 
       expect(res.status).toBe(400);
       await expectDraftUnchanged();
     });
 
     it('AGREEMENT accepts a valid numeric draft -> 200', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: qAgreement,
-            rating_value: 5,
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: qAgreement,
+          rating_value: 5,
+        },
+      ]);
 
       expect(res.status).toBe(200);
     });
 
     it('FREQUENCY accepts a valid numeric draft -> 200', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: qFrequency,
-            rating_value: 2,
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: qFrequency,
+          rating_value: 2,
+        },
+      ]);
 
       expect(res.status).toBe(200);
     });
@@ -1052,51 +948,35 @@ describe('Assessment Drafts (e2e)', () => {
     // ------------------------------------------------
 
     it('MULTIPLE_CHOICE accepts one option -> 200', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: qMultipleChoice,
-            selected_option_ids: [
-              mcOption1,
-            ],
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: qMultipleChoice,
+          selected_option_ids: [mcOption1],
+        },
+      ]);
 
       expect(res.status).toBe(200);
     });
 
     it('MULTIPLE_CHOICE rejects multiple options -> 400', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: qMultipleChoice,
-            selected_option_ids: [
-              mcOption1,
-              mcOption2,
-            ],
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: qMultipleChoice,
+          selected_option_ids: [mcOption1, mcOption2],
+        },
+      ]);
 
       expect(res.status).toBe(400);
       await expectDraftUnchanged();
     });
 
     it('MULTIPLE_CHOICE rejects option from another question -> 400', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: qMultipleChoice,
-            selected_option_ids: [
-              checkboxOption1,
-            ],
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: qMultipleChoice,
+          selected_option_ids: [checkboxOption1],
+        },
+      ]);
 
       expect(res.status).toBe(400);
       await expectDraftUnchanged();
@@ -1107,68 +987,47 @@ describe('Assessment Drafts (e2e)', () => {
     // ------------------------------------------------
 
     it('CHECKBOX accepts multiple valid options -> 200', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: qCheckbox,
-            selected_option_ids: [
-              checkboxOption1,
-              checkboxOption2,
-            ],
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: qCheckbox,
+          selected_option_ids: [checkboxOption1, checkboxOption2],
+        },
+      ]);
 
       expect(res.status).toBe(200);
     });
 
     it('CHECKBOX rejects option from another question -> 400', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: qCheckbox,
-            selected_option_ids: [
-              checkboxOption1,
-              mcOption1,
-            ],
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: qCheckbox,
+          selected_option_ids: [checkboxOption1, mcOption1],
+        },
+      ]);
 
       expect(res.status).toBe(400);
       await expectDraftUnchanged();
     });
 
     it('CHECKBOX rejects duplicate option IDs -> 400', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: qCheckbox,
-            selected_option_ids: [
-              checkboxOption1,
-              checkboxOption1,
-            ],
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: qCheckbox,
+          selected_option_ids: [checkboxOption1, checkboxOption1],
+        },
+      ]);
 
       expect(res.status).toBe(400);
       await expectDraftUnchanged();
     });
 
     it('non-numeric question_id -> 400', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: 'abc',
-            rating_value: 4,
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: 'abc',
+          rating_value: 4,
+        },
+      ]);
 
       expect(res.status).toBe(400);
       await expectDraftUnchanged();
@@ -1181,20 +1040,13 @@ describe('Assessment Drafts (e2e)', () => {
 
   describe('all question types', () => {
     it('can save all six question types in one draft -> 200', async () => {
-      const res = await saveDraft(
-        student1Token,
-        completeAnswers(),
-      );
+      const res = await saveDraft(student1Token, completeAnswers());
 
       expect(res.status).toBe(200);
 
-      expect(
-        res.body.draft.answers,
-      ).toHaveLength(6);
+      expect(res.body.draft.answers).toHaveLength(6);
 
-      expect(
-        res.body.draft.answers,
-      ).toEqual(completeAnswers());
+      expect(res.body.draft.answers).toEqual(completeAnswers());
     });
   });
 
@@ -1204,55 +1056,41 @@ describe('Assessment Drafts (e2e)', () => {
 
   describe('final submission', () => {
     it('successful final submission deletes the saved draft', async () => {
-      const saved = await saveDraft(
-        student1Token,
-        completeAnswers(),
-      );
+      const saved = await saveDraft(student1Token, completeAnswers());
 
       expect(saved.status).toBe(200);
 
-      const participant =
-        await prisma.evaluation_participants.findUnique({
-          where: {
-            evaluation_id_student_id: {
-              evaluation_id:
-                BigInt(evaluationId),
-                student_id: fixtureUserIds[0],
-            },
+      const participant = await prisma.evaluation_participants.findUnique({
+        where: {
+          evaluation_id_student_id: {
+            evaluation_id: BigInt(evaluationId),
+            student_id: fixtureUserIds[0],
           },
-        });
+        },
+      });
 
       expect(participant).not.toBeNull();
 
-      const before =
-        await prisma.assessment_drafts.findUnique({
-          where: {
-            participant_id:
-              participant!.id,
-          },
-        });
+      const before = await prisma.assessment_drafts.findUnique({
+        where: {
+          participant_id: participant!.id,
+        },
+      });
 
       expect(before).not.toBeNull();
       expect(before!.survey_version_id).toBe(BigInt(versionId));
 
-      const submitted = await submit(
-        student1Token,
-        completeAnswers(),
-      );
+      const submitted = await submit(student1Token, completeAnswers());
 
       expect(submitted.status).toBe(201);
 
-      expect(
-        submitted.body.submitted,
-      ).toBe(true);
+      expect(submitted.body.submitted).toBe(true);
 
-      const after =
-        await prisma.assessment_drafts.findUnique({
-          where: {
-            participant_id:
-              participant!.id,
-          },
-        });
+      const after = await prisma.assessment_drafts.findUnique({
+        where: {
+          participant_id: participant!.id,
+        },
+      });
 
       expect(after).toBeNull();
 
@@ -1272,15 +1110,12 @@ describe('Assessment Drafts (e2e)', () => {
     });
 
     it('student cannot save another draft after final submission -> 409', async () => {
-      const res = await saveDraft(
-        student1Token,
-        [
-          {
-            question_id: qRating,
-            rating_value: 5,
-          },
-        ],
-      );
+      const res = await saveDraft(student1Token, [
+        {
+          question_id: qRating,
+          rating_value: 5,
+        },
+      ]);
 
       expect(res.status).toBe(409);
     });

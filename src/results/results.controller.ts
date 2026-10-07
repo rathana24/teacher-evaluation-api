@@ -1,13 +1,9 @@
-import {
-  Controller,
-  Get,
-  Param,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
   ApiParam,
+  ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
@@ -17,6 +13,12 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ParseBigIntPipe } from '../common/pipes/parse-bigint.pipe';
+import { assertWholeAnonymousAggregate } from '../common/utils/anonymous-report-scope.util';
+import {
+  capturedTargetLabelExample,
+  legacyTargetLabelExample,
+  targetLabelDescription,
+} from '../common/swagger/target-label.example';
 
 // =========================================================
 // ADMIN RESULTS
@@ -28,9 +30,7 @@ import { ParseBigIntPipe } from '../common/pipes/parse-bigint.pipe';
 @Roles('ADMIN')
 @Controller('admin/results')
 export class AdminResultsController {
-  constructor(
-    private readonly resultsService: ResultsService,
-  ) {}
+  constructor(private readonly resultsService: ResultsService) {}
 
   /**
    * GET /admin/results
@@ -42,9 +42,27 @@ export class AdminResultsController {
   @ApiOperation({
     summary: 'Get all anonymous evaluation results',
     description:
-      'Returns aggregated evaluation results for all lecturers without exposing student identities.',
+      'Returns aggregated evaluation results for all lecturers without exposing student identities. ' +
+      targetLabelDescription,
   })
-  getAllResults() {
+  @ApiResponse({
+    status: 200,
+    schema: {
+      example: [
+        {
+          target_scope: {
+            groups: [capturedTargetLabelExample, legacyTargetLabelExample],
+          },
+        },
+      ],
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'UNSUPPORTED_ANONYMOUS_SCOPE: query slicing is unsupported',
+  })
+  getAllResults(@Query() query: Record<string, unknown> = {}) {
+    assertWholeAnonymousAggregate(query);
     return this.resultsService.getAdminResults();
   }
 
@@ -56,8 +74,7 @@ export class AdminResultsController {
    */
   @Get(':lecturerId')
   @ApiOperation({
-    summary:
-      'Get anonymous evaluation results for one lecturer',
+    summary: 'Get anonymous evaluation results for one lecturer',
     description:
       'Returns aggregated evaluation results for the selected lecturer without exposing student identities.',
   })
@@ -69,10 +86,10 @@ export class AdminResultsController {
   getResultsByLecturer(
     @Param('lecturerId', ParseBigIntPipe)
     lecturerId: bigint,
+    @Query() query: Record<string, unknown> = {},
   ) {
-    return this.resultsService.getAdminResultsByLecturer(
-      lecturerId,
-    );
+    assertWholeAnonymousAggregate(query);
+    return this.resultsService.getAdminResultsByLecturer(lecturerId);
   }
 }
 
@@ -86,9 +103,7 @@ export class AdminResultsController {
 @Roles('LECTURER')
 @Controller('lecturer/results')
 export class LecturerResultsController {
-  constructor(
-    private readonly resultsService: ResultsService,
-  ) {}
+  constructor(private readonly resultsService: ResultsService) {}
 
   /**
    * GET /lecturer/results
@@ -100,14 +115,33 @@ export class LecturerResultsController {
   @ApiOperation({
     summary: 'Get my anonymous evaluation results',
     description:
-      'Returns aggregated evaluation results for the authenticated lecturer without exposing student identities.',
+      'Returns aggregated evaluation results for the authenticated lecturer without exposing student identities. ' +
+      targetLabelDescription,
+  })
+  @ApiResponse({
+    status: 200,
+    schema: {
+      example: {
+        evaluations: [
+          {
+            target_scope: {
+              groups: [capturedTargetLabelExample, legacyTargetLabelExample],
+            },
+          },
+        ],
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'UNSUPPORTED_ANONYMOUS_SCOPE: query slicing is unsupported',
   })
   getMyResults(
     @CurrentUser()
     currentUser: { id: bigint },
+    @Query() query: Record<string, unknown> = {},
   ) {
-    return this.resultsService.getLecturerResults(
-      currentUser.id,
-    );
+    assertWholeAnonymousAggregate(query);
+    return this.resultsService.getLecturerResults(currentUser.id);
   }
 }

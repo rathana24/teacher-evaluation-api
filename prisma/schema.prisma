@@ -58,6 +58,7 @@ model academic_years {
   student_academic_records     student_academic_records[]
   course_offering_group_scopes course_offering_group_scopes[]
   evaluation_group_targets     evaluation_group_targets[]
+  curriculum_revisions         curriculum_revisions[]
 }
 
 model departments {
@@ -132,14 +133,15 @@ model students {
 }
 
 model student_academic_records {
-  id               BigInt   @id @default(autoincrement())
-  student_id       BigInt
-  academic_year_id BigInt
-  year_level       Int
-  major_id         BigInt
-  class_group      String?  @db.VarChar(50)
-  created_at       DateTime @default(now()) @db.Timestamp(6)
-  updated_at       DateTime @updatedAt @db.Timestamp(6)
+  id                 BigInt                     @id @default(autoincrement())
+  student_id         BigInt
+  academic_year_id   BigInt
+  year_level         Int
+  major_id           BigInt
+  class_group        String?                    @db.VarChar(50)
+  progression_action student_progression_action @default(NORMAL)
+  created_at         DateTime                   @default(now()) @db.Timestamp(6)
+  updated_at         DateTime                   @updatedAt @db.Timestamp(6)
 
   students       students       @relation(fields: [student_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   academic_years academic_years @relation(fields: [academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -170,22 +172,25 @@ model course_offerings {
 }
 
 model course_offering_group_scopes {
-  id                 BigInt   @id @default(autoincrement())
-  course_offering_id BigInt
-  academic_year_id   BigInt
-  generation_id      BigInt
-  major_id           BigInt
-  year_level         Int
-  class_group        String   @db.VarChar(50)
-  created_at         DateTime @default(now()) @db.Timestamp(6)
+  id                     BigInt   @id @default(autoincrement())
+  course_offering_id     BigInt
+  academic_year_id       BigInt
+  generation_id          BigInt
+  major_id               BigInt
+  year_level             Int
+  class_group            String   @db.VarChar(50)
+  curriculum_revision_id BigInt?
+  created_at             DateTime @default(now()) @db.Timestamp(6)
 
-  course_offerings    course_offerings    @relation(fields: [course_offering_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  academic_years      academic_years      @relation(fields: [academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  student_generations student_generations @relation(fields: [generation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  majors              majors              @relation(fields: [major_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  course_offerings    course_offerings      @relation(fields: [course_offering_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  academic_years      academic_years        @relation(fields: [academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  student_generations student_generations   @relation(fields: [generation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  majors              majors                @relation(fields: [major_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  curriculum_revision curriculum_revisions? @relation(fields: [curriculum_revision_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([course_offering_id, academic_year_id, generation_id, major_id, year_level, class_group], map: "course_offering_group_scope_unique_idx")
   @@index([academic_year_id, generation_id, major_id, year_level], map: "course_offering_group_scope_context_idx")
+  @@index([curriculum_revision_id])
 }
 
 model courses {
@@ -210,10 +215,31 @@ model course_year_rules {
   created_at DateTime @default(now()) @db.Timestamp(6)
   updated_at DateTime @updatedAt @db.Timestamp(6)
 
-  courses courses @relation(fields: [course_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  majors  majors  @relation(fields: [major_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  courses   courses                @relation(fields: [course_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  majors    majors                 @relation(fields: [major_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  revisions curriculum_revisions[]
 
   @@unique([course_id, major_id, year_level], map: "course_year_rules_course_major_year_idx")
+}
+
+// Append-only approvals for a stable course/major/year-level rule. Moving a
+// course to another level means disabling this rule and approving a new rule.
+model curriculum_revisions {
+  id                         BigInt   @id @default(autoincrement())
+  rule_id                    BigInt
+  revision_no                Int
+  effective_academic_year_id BigInt
+  effective_start_year       Int
+  enabled                    Boolean
+  reason                     String?  @db.VarChar(2000)
+  created_at                 DateTime @default(now()) @db.Timestamp(6)
+
+  rule           course_year_rules              @relation(fields: [rule_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  academic_years academic_years                 @relation(fields: [effective_academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  group_scopes   course_offering_group_scopes[]
+
+  @@unique([rule_id, revision_no])
+  @@unique([rule_id, effective_start_year])
 }
 
 model enrollments {
@@ -269,9 +295,11 @@ model evaluations {
 }
 
 model evaluation_generation_targets {
-  evaluation_id BigInt
-  generation_id BigInt
-  created_at    DateTime @default(now()) @db.Timestamp(6)
+  evaluation_id      BigInt
+  generation_id      BigInt
+  created_at         DateTime  @default(now()) @db.Timestamp(6)
+  historical_labels  Json?
+  labels_captured_at DateTime? @db.Timestamp(6)
 
   evaluations         evaluations         @relation(fields: [evaluation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   student_generations student_generations @relation(fields: [generation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -280,14 +308,16 @@ model evaluation_generation_targets {
 }
 
 model evaluation_group_targets {
-  id               BigInt   @id @default(autoincrement())
-  evaluation_id    BigInt
-  academic_year_id BigInt
-  generation_id    BigInt
-  major_id         BigInt
-  year_level       Int
-  class_group      String   @db.VarChar(50)
-  created_at       DateTime @default(now()) @db.Timestamp(6)
+  id                 BigInt    @id @default(autoincrement())
+  evaluation_id      BigInt
+  academic_year_id   BigInt
+  generation_id      BigInt
+  major_id           BigInt
+  year_level         Int
+  class_group        String    @db.VarChar(50)
+  created_at         DateTime  @default(now()) @db.Timestamp(6)
+  historical_labels  Json?
+  labels_captured_at DateTime? @db.Timestamp(6)
 
   evaluations         evaluations         @relation(fields: [evaluation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   academic_years      academic_years      @relation(fields: [academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -413,6 +443,34 @@ model users {
   survey_versions         survey_versions[]
   user_departments        user_departments[]
   student                 students?
+  reviewed_operations     reviewed_operations[]
+}
+
+// Administrative previews/results only; never anonymous response content.
+model reviewed_operations {
+  id                   String    @id @default(uuid()) @db.Uuid
+  operation_kind       String    @db.VarChar(40)
+  actor_id             BigInt
+  resource_key         String    @db.VarChar(100)
+  request_json         Json
+  request_fingerprint  String    @db.Char(64)
+  snapshot_fingerprint String    @db.Char(64)
+  created_at           DateTime  @default(now()) @db.Timestamp(6)
+  expires_at           DateTime  @db.Timestamp(6)
+  completed_at         DateTime? @db.Timestamp(6)
+  result_json          Json?
+
+  actor users @relation(fields: [actor_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([actor_id, operation_kind, created_at])
+}
+
+enum student_progression_action {
+  NORMAL
+  REPEAT
+  TRANSFER
+  PAUSE
+  RESUME
 }
 
 enum evaluation_status {

@@ -31,6 +31,7 @@ import { LecturerDashboardModule } from './lecturer-dashboard/lecturer-dashboard
 import { CommentsModule } from './comments/comments.module';
 import { StudentsModule } from './students/students.module';
 import { StudentAcademicRecordsModule } from './student-academic-records/student-academic-records.module';
+import { ReviewedWorkflowsModule } from './reviewed-workflows/reviewed-workflows.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { StudentAcademicRecordsModule } from './student-academic-records/student
     }),
 
     PrismaModule,
+    ReviewedWorkflowsModule,
     AuthModule,
     CoursesModule,
     SemestersModule,

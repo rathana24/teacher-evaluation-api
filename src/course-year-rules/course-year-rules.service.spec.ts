@@ -12,31 +12,24 @@ import { CourseYearRulesService } from './course-year-rules.service';
 describe('CourseYearRulesService', () => {
   let service: CourseYearRulesService;
 
-  const findManyMock =
-    jest.fn<(args: any) => Promise<any>>();
+  const findManyMock = jest.fn<(args: any) => Promise<any>>();
 
-  const findUniqueMock =
-    jest.fn<(args: any) => Promise<any>>();
+  const findUniqueMock = jest.fn<(args: any) => Promise<any>>();
 
-  const findFirstMock =
-    jest.fn<(args: any) => Promise<any>>();
+  const findFirstMock = jest.fn<(args: any) => Promise<any>>();
 
-  const createMock =
-    jest.fn<(args: any) => Promise<any>>();
+  const createMock = jest.fn<(args: any) => Promise<any>>();
 
-  const updateMock =
-    jest.fn<(args: any) => Promise<any>>();
+  const updateMock = jest.fn<(args: any) => Promise<any>>();
 
-  const deleteMock =
-    jest.fn<(args: any) => Promise<any>>();
+  const deleteMock = jest.fn<(args: any) => Promise<any>>();
 
-  const courseFindUniqueMock =
-    jest.fn<(args: any) => Promise<any>>();
+  const courseFindUniqueMock = jest.fn<(args: any) => Promise<any>>();
 
-  const majorFindUniqueMock =
-    jest.fn<(args: any) => Promise<any>>();
+  const majorFindUniqueMock = jest.fn<(args: any) => Promise<any>>();
 
   const prismaMock = {
+    $transaction: jest.fn<any>(async (operation: any) => operation(prismaMock)),
     course_year_rules: {
       findMany: findManyMock,
       findUnique: findUniqueMock,
@@ -169,9 +162,7 @@ describe('CourseYearRulesService', () => {
   it('returns one curriculum rule', async () => {
     findUniqueMock.mockResolvedValue(rule);
 
-    await expect(
-      service.findOne(1n),
-    ).resolves.toEqual(rule);
+    await expect(service.findOne(1n)).resolves.toEqual(rule);
 
     expect(findUniqueMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -185,9 +176,9 @@ describe('CourseYearRulesService', () => {
   it('throws when a curriculum rule does not exist', async () => {
     findUniqueMock.mockResolvedValue(null);
 
-    await expect(
-      service.findOne(999n),
-    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.findOne(999n)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('creates a curriculum rule when references are valid', async () => {
@@ -420,9 +411,9 @@ describe('CourseYearRulesService', () => {
   it('does not delete a missing curriculum rule', async () => {
     findUniqueMock.mockResolvedValue(null);
 
-    await expect(
-      service.remove(999n),
-    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.remove(999n)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
 
     expect(deleteMock).not.toHaveBeenCalled();
   });

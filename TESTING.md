@@ -4,6 +4,40 @@ Use this guide to evaluate every backend feature with repeatable steps and recor
 
 ## 1. Test environment
 
+### Frontend team preview from the GitHub repository
+
+The project owner has no frontend UI or frontend project available. This delivery is a backend repository handoff. The frontend team can clone the delivered branch/commit, run the API locally, inspect Swagger and execute the included API/database tests before connecting their own UI. Actual browser integration remains NOT TESTED until that team runs it.
+
+Start with the [frontend handoff and acceptance checklist](docs/BACKEND_PROJECT_REPORT.md#88-frontend-team-handoff-and-acceptance-checklist): it provides all six reviewed request sequences, account/profile ID rules, error/retry handling and FE-01-FE-09 acceptance records. These changes are currently local and uncommitted; the team needs the published delivery commit after publication is authorized.
+
+Install PostgreSQL, create a separate local database named teacher_evaluation_test, then run these commands from the cloned repository:
+
+```powershell
+npm.cmd ci
+if (-not (Test-Path -LiteralPath .env.test.local)) {
+  Copy-Item -LiteralPath .env.test.example -Destination .env.test.local
+}
+```
+
+Edit .env.test.local with your local PostgreSQL credentials and a random test JWT secret. Keep DB_NAME and DATABASE_URL on teacher_evaluation_test. If a password contains URL-special characters, encode it in DATABASE_URL. Keep this file private; do not overwrite an existing tester's configuration. Then:
+
+```powershell
+npm.cmd run test:e2e:generate
+npm.cmd run test:e2e:check
+npm.cmd run test:e2e:migrate
+npm.cmd run test:e2e:seed
+npm.cmd test -- --runInBand
+npm.cmd run test:e2e
+npm.cmd run build
+npm.cmd run start:test
+```
+
+Open http://localhost:3000/api/docs and http://localhost:3000/api/health. For a different preview port, use npm.cmd run start:test -- --port 3001. The guarded preview runner loads .env.test.local and rejects another database, a remote host or NODE_ENV other than test. It does not load normal database credentials as its connection source. Stop with Ctrl+C.
+
+Synthetic test logins use Password123: ADMIN admin@itc.edu.kh; LECTURER sokdara@itc.edu.kh; STUDENT student1@itc.edu.kh. Use POST /api/auth/login, copy the access_token into Swagger Authorize and follow the reviewed requests in the consolidated report. These accounts belong to the isolated seeded test database. The seed restores test passwords; run it only when other testers are not using the same database.
+
+Record the Git commit/branch, local test results and API acceptance cases. This procedure runs the backend; it does not supply a frontend UI. Publishing the current changes to GitHub remains a separate commit/push step.
+
 Run commands from `D:\internship\teacher-evaluation-api` in PowerShell. Dependencies and PostgreSQL must be available. The test runner requires Node.js 20.12 or newer; use the project's installed compatible runtime.
 
 | Database | Use during testing |
@@ -67,9 +101,40 @@ npm run test:cov -- --runInBand
 
 Coverage opens at `coverage/lcov-report/index.html`. Review uncovered decision branches, particularly authorization, eligibility, history and error handling. Coverage percentage alone is not an acceptance result, and the current configuration has no enforced coverage threshold.
 
-Previously saved results: 39 unit suites / 476 tests and 17 API suites / 334 tests passed. The API total includes 23 consistency/recovery tests; do not add those 23 again. These are prior results, not a fresh execution of all tests when this guide was written. Record your own run and any changed totals. The prior lint run had six warnings and no errors.
+Latest recorded follow-up results (8 October 2026): 41 unit suites / 500 tests and 18 API suites / 398 tests passed (23 curriculum/title and 10 historical-label cases included). The API total includes 64 consistency/recovery/progression/label tests (23 existing, 19 reviewed-workflow, 12 progression and 10 label cases); do not add those again. Build and schema validation passed; lint has five existing warnings and no errors. Six fresh built-server progression/OpenAPI checks passed; the twelve earlier reviewed-workflow startup/Swagger/authentication/CORS checks remain separate evidence. Record your own run and changed totals; backend checks are not actual frontend acceptance.
+
+On this Windows environment, PowerShell's execution policy blocks `npm.ps1`. Use `npm.cmd` in place of `npm` in the commands below when that occurs; no system execution-policy change is needed.
 
 ## 3. Use one test-case structure
+
+### Reviewed workflow evaluation
+
+The updated backend needs migration `20261007140000_add_reviewed_operations` on its selected database. Apply it to the guarded test database with `npm.cmd run test:e2e:migrate`; do not run a normal-database migration as a test shortcut.
+
+For each workflow, first call its preview as ADMIN, inspect the exact selection/impact, then confirm with that fresh `review_id` and unchanged input. Review IDs are UUIDs, not account IDs. Enrollment, targeting and reassignment use account IDs; bulk placement uses profile IDs.
+
+| Workflow | Preview | Confirmation |
+| --- | --- | --- |
+| Enrollment | POST `/api/course-offerings/:id/enrollments/preview` | POST `/api/course-offerings/:id/enrollments/bulk`, same selection/account IDs plus review_id. |
+| Evaluation creation | POST `/api/evaluations/create-preview`, explicit latest version and full creation input. | POST `/api/evaluations`, unchanged creation fields plus confirmed_student_ids/review_id. |
+| Reassignment | POST `/api/course-offerings/:id/enrollments/reassignment/preview` | POST `/reassignment/confirm`, same account/target/source-enrollment ID plus review_id. |
+| Bulk placement | POST `/api/students/bulk/class-group/preview` | POST `/api/students/bulk/class-group/confirm`, same academic year/profile IDs/group plus review_id. |
+| Assigned-version opening | POST `/api/evaluations/:id/open/preview` | POST `/api/evaluations/:id/open/confirm`, review_id, explicit decision and assigned version ID. |
+| Latest application | POST `/api/surveys/:id/versions/:versionId/apply-to-unfinished/preview` | POST the same path ending `/confirm`, with review_id. |
+
+Check these in order: unchanged confirmation succeeds; same-ID relevant placement/impact drift conflicts; unrelated account name/notes changes do not conflict; wrong input/resource/caller and expiry reject; completed retry returns original counts/IDs with `already_applied=true`. Creation additionally binds selected generation/major/year labels: renaming these before confirmation requires a fresh review. Create another eligible student or remove a protected draft after completion, then retry: that new eligibility must not expand the old operation. A fresh preview is a separate operation. For retention, also close the evaluation after success and retry; it must stay CLOSED. For placement, make a later correction and retry; it must not undo the correction.
+
+Expiry is 15 minutes for first execution; completed retries can return the saved result afterward. Another administrator's review returns 404 without its stored context. A receipt represents the original operation outcome; reload the resource for current state. New confirmation routes always require reviews. Existing legacy callers remain compatible until the operator sets `REQUIRE_REVIEWED_CONFIRMATION=true` at the agreed integration cutover and restarts the API. Then all five relevant legacy mutation routes reject omitted reviews with 400/REVIEW_REQUIRED. Do not enable that switch in school deployment before frontend callers are ready.
+
+Run the focused real PostgreSQL reviewed cases:
+
+```powershell
+node test/run-e2e.cjs test --runTestsByPath test/consistency.e2e-spec.ts -t "Reviewed frontend operations"
+```
+
+The focused run has 19 cases; the other 45 consistency cases are skipped by this filter. Use the full API run to cover all 64. Full contract/examples and RV-01-RV-19 acceptance results are in the [consolidated report](docs/BACKEND_PROJECT_REPORT.md#95-reviewed-workflow-acceptance-results).
+
+### Case record
 
 For each operation, cover these applicable categories:
 
@@ -117,7 +182,7 @@ All route prefixes below start with `/api`. "No dedicated API suite" means other
 | Reassignment under enrollment route | Preview/confirm only intended account; compatible saved scopes; protected draft/completed work; stale preview and concurrent draft saving; full rollback. | Enrollment service spec and consistency suite. |
 | Question sets `/surveys` | Atomic first version, title uniqueness, usage, update, archive, continuing existing assignments, reject new archived assignments, protected delete. | Survey lifecycle spec, `test/surveys.e2e-spec.ts`, consistency suite. |
 | Versions `/surveys/:surveyId/versions` | Clone preserves previous version, sequential version numbers, same-set ownership, archive/delete restrictions, latest checks, no silent empty-version fallback. | Version service/lifecycle specs, `test/survey-versions.e2e-spec.ts`, consistency suite. |
-| Apply newer version to unfinished | Move only safe same-set participants; keep drafts and submitted users pinned; safe NULL-version movement; reject superseded target; overlapping draft save rolls back; repeat under unchanged eligibility moves zero. | Version lifecycle spec and consistency suite. Separate reviewed preview/receipt remains pending. |
+| Apply newer version to unfinished | Preview exact proposed moved/skipped impact; confirm unchanged review; preserve drafts/completions/base versions; reject drift; safe NULL movement; no downgrade; overlapping save rollback; completed retry cannot move newly eligible users. | Version lifecycle spec and reviewed PostgreSQL consistency cases; actual frontend cutover pending. |
 | Questions `/survey-versions/:versionId/questions`, `/questions/:questionId` | All six types, valid options, type-specific bounds, option ownership, reorder uniqueness/atomicity; assigned and older questions immutable; edit/use race. | Question lifecycle spec, `test/questions.e2e-spec.ts`, `test/questions-reorder.e2e-spec.ts`, consistency suite. |
 | Evaluations `/evaluations` | Participant preview/exact confirmation, frozen targets, schedule validation, DRAFT -> OPEN -> CLOSED, stale version create/open, archived continuity, duplicate/delete restrictions. | Evaluation service/lifecycle specs, `test/evaluations.e2e-spec.ts`, consistency suite. |
 | Student access `/student/evaluations` | Assigned-only list/history/survey/status, correct effective version, active schedule, already submitted, inactive/nonparticipant/wrong role. | Student access service spec, `test/student-access.e2e-spec.ts`. |
@@ -164,7 +229,7 @@ Follow this dependency order for a complete new scenario:
 6. STUDENT sees only the assigned survey; saves and reloads a draft; submits once. Verify draft removal, completed status, rejection of a second submission and exclusion of an unassigned student.
 7. LECTURER checks the owned evaluation list; the second lecturer is denied access to the first lecturer's dashboard/comments. The owner's dashboard/comments return 409 until the evaluation closes.
 8. ADMIN creates V2 while a different student has a V1 draft. Applying the latest version keeps that draft pinned; only safe unfinished participants move. Submit appropriate V1 and V2 answers and verify separate canonical version results.
-9. Test stale creation/opening against a newer version, A-only/shared scope rejection/acceptance, and historical preservation after a later placement change. Do not expect a new route for intentional older-version retention: that contract is pending.
+9. Test ordinary stale creation/opening, A-only/shared scope, and history after placement changes. For intentional older-version retention, call POST `/api/evaluations/:id/open/preview`, then `/open/confirm` with `review_id`, `decision: "RETAIN_ASSIGNED_VERSION"` and the assigned `retain_assigned_version_id`. Check expiry/drift rejection and exact frozen participants. Never use a force flag.
 10. Close the evaluation; verify student writes return 409. LECTURER checks counts, comments and canonical version results; ADMIN checks aggregate results. Record protected deletion behavior. Clean up only your own disposable fixture IDs where permitted; retain evidence needed for reviewing protected history.
 
 For aggregate accuracy, prepare a tiny known dataset. For a rating question permitting 2 and 4, two answers of 2 and 4 must have mean 3 and count 2 in that version's result. Keep V1 and V2 calculations separate; compare expected checkbox/choice counts against each selected option, not just the total participant count. Submitted/assigned response rates need the exact frozen denominator used by the endpoint.
@@ -176,13 +241,13 @@ Run the full suites and then review these demonstrations against [the implementa
 | Handoff requirement | Demonstration and remaining acceptance limit |
 | --- | --- |
 | 1. Eligibility | A-only versus A+B; wrong year/generation/major/year-level/group; inactive account; consistent single/bulk/reassignment behavior; documented legacy behavior. |
-| 2. Concurrency | Run consistency suite; inspect complete snapshot or 409, full rollback and reviewed retry. Signed context tokens and durable receipts remain pending, so current tests cannot establish those proposed behaviors. |
-| 3. Questionnaire lifecycle | Stale explicit version and stale opening return 409; empty latest has no fallback; assigned questions immutable; archived assignment continues. Intentional older-version opening and mandatory explicit-version policy remain pending. |
-| 4. Progression exceptions | Test existing generation formula and explicit placement overrides, years 1-5, preservation. Full repeat/pause/transfer acceptance is BLOCKED until school policy is specified. |
-| 5. Apply to unfinished | Saved drafts/completions protected, same-set latest only, safe NULL movement, concurrent rollback. Separate preview/confirmation and durable operation retry acceptance remain pending. |
+| 2. Concurrency | Run reviewed consistency cases: same-ID context drift, unrelated-field allowance, expiry/caller/input/resource binding, durable exact retry, simultaneous confirmation and complete rollback. Verify bypass rejection with cutover enabled. |
+| 3. Questionnaire lifecycle | Ordinary stale opening conflicts; explicit reviewed retention opens valid assigned V1 with current V2; changed review conflicts; invalid dates/empty/archived versions fail; questions/membership remain protected. Reviewed creation requires explicit version; legacy mandatory selection awaits cutover. |
+| 4. Progression exceptions | Approved and implemented: test repeat/transfer from last approved placement, persistent pause and explicit resume, missing/null/blank annual group, cross-API agreement, stale reviewed confirmation and preservation. Twelve PostgreSQL cases and sixteen resolver cases pass; actual frontend acceptance remains pending. |
+| 5. Apply to unfinished | ADMIN preview/confirm, exact proposed/committed counts and skipped reasons, protected drafts/completions/base versions, same-set latest, safe NULL movement, race rollback and original receipt replay without additional movement. |
 | 6. Historical metadata | Synthetic recovery scenarios and truthful unversioned counts. Passing them does not authorize school data recovery or prove official provenance/backup recovery. |
-| 7. Curriculum/title policy | Test current rule CRUD and global title uniqueness. Effective-year/revision and department ownership decisions remain pending. |
-| 8. Labels/privacy | Verify preserved IDs/group strings, current-label behavior, whole anonymous aggregates and scope restrictions. Immutable historical labels remain a school decision. |
+| 7. Curriculum/title policy | Approved academic-year revisions and global titles are implemented; 23 PostgreSQL cases pass. Test saved bindings, withdrawals/reapproval, stale selections, chronology, concurrent approvals and global/archived title collisions. Frontend adoption and intended-database migration remain pending. |
+| 8. Historical labels | Approved snapshots are implemented. Verify historical_labels/current_labels separation, UNKNOWN legacy names, rename-stale reviews, stable retry, unchanged drafts/answers and explicit rejection of anonymous query slicing. Ten PostgreSQL and eight unit cases pass. |
 
 A concurrent confirmation may serialize before a later placement/status change. A complete reviewed snapshot followed by that later change can be valid. Require consistent atomic history or a conflict; do not demand 409 for every overlap. Deterministic overlap tests in the consistency suite are stronger evidence than manually clicking Submit twice.
 
@@ -193,3 +258,49 @@ Copy [the evaluation template in Appendix C](docs/BACKEND_PROJECT_REPORT.md#appe
 Prioritize missing dedicated API coverage for students, academic structure, curriculum, import/export, lecturer offerings and full results/password authorization. Setup calls and mocked service tests do not replace those checks. Browser CORS, bootstrap wiring, load behavior and a backup/restore drill also need separate evaluation; the functional suite does not establish them. Agree school load targets before performance testing; record concurrent users, data volume, latency, errors and PostgreSQL behavior on a suitable test environment.
 
 Accept a feature only when applicable cases pass, expected database effects are verified, and material defects are resolved. Record unresolved policy/contract items as BLOCKED. A passing test count is useful evidence, but does not make all eight frontend requirements complete.
+
+## Approved progression evaluation
+
+The user approved repeat/transfer progression from the last approved placement, persistent pause until explicit RESUME, and a required yearly group. The progression migration has been applied only to teacher_evaluation_test. The earlier progression delivery passed 40 unit suites / 492 tests and 17 API suites / 365 tests; the later curriculum delivery passed 18 API suites / 388 tests. The API total includes 54 consistency cases, 12 specifically for progression. All passed. Lint has five existing warnings and no errors.
+
+Run the policy checks in PowerShell (use npm.cmd if execution policy blocks npm.ps1):
+
+```powershell
+npm.cmd test -- --runInBand --runTestsByPath src/common/utils/student-placement.util.spec.ts
+npm.cmd run test:e2e -- --runTestsByPath test/consistency.e2e-spec.ts -t "Approved student progression"
+```
+
+For manual testing, authenticate as ADMIN and use POST/PUT /api/student-academic-records with profile IDs and progression_action NORMAL/REPEAT/TRANSFER/PAUSE/RESUME. Choose structured academic years, the approved actual level/major and an explicit group. Test a repeat or transfer whose original generation formula differs from its approved placement; compare Students academic_context and export academic_context, enrollment previews, single enrollment and evaluation targeting. A calculated future year must never inherit the old group.
+
+Pause an assigned student and confirm questionnaire access, available evaluations, draft saving, submission, new enrollment and reassignment reject eligibility. A later NORMAL record or group edit must not resume the student. Explicitly RESUME and verify that a missing yearly group still blocks eligibility; assign a group and check access again. Compare exact frozen participant, original enrollment, saved draft/version and response rows before/after. Test invalid/null action, missing/conflicting chronology and resume without pause. Change progression after a reviewed preview and require 409 with no enrollment or completed receipt; completed retries must keep the original result.
+
+The 12 SP acceptance scenarios and requests/errors are recorded in Sections 8.5 and 9.6 of the consolidated report. Raw progression evidence is ignored under .tmp/progression-unit-final.json and .tmp/progression-api-final.json; the newer historical-label full runs include these regressions. Historical-label and curriculum policies are approved and implemented. Actual frontend integration and intended-database deployment remain separate acceptance work.
+
+The requested guided four-step walkthrough was executed against the built test API on 08 October 2026 at 01:13:16, Asia/Phnom_Penh. All four scenarios passed: repeat/transfer, pause/resume, missing yearly group and preservation of drafts/completed history. There were 87 HTTP assertions and 42 database assertions; these are separate from the Jest totals. The 16 resolver cases and 12 PostgreSQL progression cases also passed a focused rerun. Temporary fixtures were removed, the owned server was stopped and the normal database was unchanged. Section 9.7 of the consolidated report records the exact outcomes. Raw sanitized evidence is .tmp/four-progression-scenarios-result.json. The configured frontend at http://localhost:5173 was unavailable, so actual browser integration remains NOT TESTED.
+
+## Approved curriculum revisions and retained global titles
+
+Requirement 7 is approved and implemented. Fresh full regression: 40 unit suites/492 tests and 18 API suites/388 tests passed. The new test/curriculum-revisions.e2e-spec.ts contributes 23 PostgreSQL cases, already included in 388. Nine built-server Swagger/JWT/cleanup checks also passed. The additive 20261008020000_add_curriculum_revisions migration was applied only to teacher_evaluation_test.
+
+```powershell
+npm.cmd run test:e2e:check
+npm.cmd run test:e2e:migrate
+npm.cmd run test:e2e -- --testPathPatterns curriculum-revisions
+```
+
+Use ADMIN to create a rule with effective_academic_year_id, inspect /:id/revisions and /:id/applicable?academic_year_id=..., and create a scoped offering with its expected curriculum_revision_id. Append a later-year enabled:false withdrawal: new assignments reject with 409, while saved bindings, enrollment, frozen participants, drafts and answers stay unchanged. Append a still later enabled:true revision to resume new assignments. Same-year/backdated revisions, wrong/obsolete selections and edits/deletion of revisioned identities must reject. Moving a course to another level uses a new rule identity. Legacy/unscoped null bindings are unknown compatibility state, not historical backfill.
+
+Create and rename titles under different ADMIN accounts/departments; case changes and surrounding whitespace cannot bypass global uniqueness. Archive a set and verify that its title remains reserved. Overlapping creation attempts must commit one set only. Section 8.6 documents requests/errors and Section 9.8 maps all 23 acceptance cases. Raw evidence is .tmp/curriculum-*.json. Actual frontend integration and school deployment remain separate acceptance work.
+
+## Approved immutable historical target labels
+
+Requirement 8 is approved and implemented. Latest full results: 41 unit suites/500 tests and 18 API suites/398 tests. Ten new PostgreSQL cases are included in the 64 consistency cases; eight new helper cases are included in the unit total. The additive 20261008030000_add_historical_target_labels migration was applied only to teacher_evaluation_test. Older target names remain null and UNKNOWN; no current names were backfilled.
+
+```powershell
+npm.cmd run test:e2e -- --testPathPatterns consistency -t "Immutable historical target labels"
+npm.cmd test -- --runInBand --testPathPatterns target-labels
+```
+
+Preview/confirm a scoped evaluation and inspect target_labels, then saved historical_labels/capture time. Rename generation, major and year before first confirmation: expect 409/REVIEW_STALE and no partial rows; fresh review captures new names. Rename after confirmation: saved labels remain unchanged, current_labels reflect the rename, and drafts/completed answers retain their exact rows. Retry a completed review: its original result remains stable; reload for live current labels. Opening/closing/version application must not recapture names. Older targets show UNKNOWN/LEGACY_LABELS_NOT_CAPTURED and must never substitute today's name as historical proof.
+
+Use historical_labels for historical display. Existing name/relation fields retain current-name compatibility semantics. Inspect all canonical/lecturer/evaluation target readers. Anonymous reports reject query parameters with 400/UNSUPPORTED_ANONYMOUS_SCOPE, including mixed/unknown single-generation/group slices; unfiltered reports retain whole aggregates and expose no student-answer link. Detailed contract/case mapping is in Sections 8.7 and 9.9. Raw evidence is .tmp/labels-*.json. Actual frontend integration remains for the frontend team; commit/push requires the owner's explicit permission.

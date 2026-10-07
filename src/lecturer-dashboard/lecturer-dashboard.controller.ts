@@ -1,9 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 
 import { AuthGuard } from '@nestjs/passport';
 
@@ -20,6 +15,11 @@ import { ParseBigIntPipe } from '../common/pipes/parse-bigint.pipe';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { assertWholeAnonymousAggregate } from '../common/utils/anonymous-report-scope.util';
+import {
+  capturedTargetLabelExample,
+  targetLabelDescription,
+} from '../common/swagger/target-label.example';
 
 @ApiTags('lecturer')
 @ApiBearerAuth()
@@ -43,8 +43,8 @@ export class LecturerDashboardController {
 
   @Get(':id/dashboard')
   @ApiOperation({
-    summary:
-      'Aggregated, anonymous results of one of my closed evaluations',
+    summary: 'Aggregated, anonymous results of one of my closed evaluations',
+    description: targetLabelDescription,
   })
   @ApiParam({
     name: 'id',
@@ -54,6 +54,9 @@ export class LecturerDashboardController {
   @ApiResponse({
     status: 200,
     description: 'Evaluation dashboard returned successfully',
+    schema: {
+      example: { group_scope: { groups: [capturedTargetLabelExample] } },
+    },
   })
   @ApiResponse({
     status: 403,
@@ -70,10 +73,9 @@ export class LecturerDashboardController {
   getDashboard(
     @Param('id', ParseBigIntPipe) id: bigint,
     @CurrentUser() currentUser: { id: bigint },
+    @Query() query: Record<string, unknown> = {},
   ) {
-    return this.dashboardService.getDashboard(
-      id,
-      currentUser.id,
-    );
+    assertWholeAnonymousAggregate(query);
+    return this.dashboardService.getDashboard(id, currentUser.id);
   }
 }

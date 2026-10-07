@@ -41,8 +41,7 @@ type AcademicYearMockResult = {
   is_active?: boolean;
 };
 
-type AcademicYearOrNullResult =
-  AcademicYearMockResult | null;
+type AcademicYearOrNullResult = AcademicYearMockResult | null;
 
 type CreatedStudentResult = {
   id: bigint;
@@ -105,41 +104,25 @@ type CreatedStudentResult = {
 
 type TxMock = {
   users: {
-    create: jest.Mock<
-      () => Promise<IdResult>
-    >;
+    create: jest.Mock<() => Promise<IdResult>>;
 
-    update: jest.Mock<
-      () => Promise<unknown>
-    >;
+    update: jest.Mock<() => Promise<unknown>>;
 
-    delete: jest.Mock<
-      () => Promise<unknown>
-    >;
+    delete: jest.Mock<() => Promise<unknown>>;
   };
 
   students: {
-    create: jest.Mock<
-      () => Promise<IdResult>
-    >;
+    create: jest.Mock<() => Promise<IdResult>>;
 
-    update: jest.Mock<
-      () => Promise<unknown>
-    >;
+    update: jest.Mock<() => Promise<unknown>>;
 
-    delete: jest.Mock<
-      () => Promise<unknown>
-    >;
+    delete: jest.Mock<() => Promise<unknown>>;
 
-    findUniqueOrThrow: jest.Mock<
-      () => Promise<CreatedStudentResult>
-    >;
+    findUniqueOrThrow: jest.Mock<() => Promise<CreatedStudentResult>>;
   };
 
   student_academic_records: {
-    create: jest.Mock<
-      () => Promise<IdResult>
-    >;
+    create: jest.Mock<() => Promise<IdResult>>;
     findMany: jest.Mock<
       () => Promise<
         Array<{
@@ -164,39 +147,20 @@ describe('StudentsService', () => {
   let service: StudentsService;
 
   const studentGenerationFindUniqueMock =
-    jest.fn<
-      () => Promise<IdOrNullResult>
-    >();
+    jest.fn<() => Promise<IdOrNullResult>>();
 
   const academicYearFindUniqueMock =
-    jest.fn<
-      () => Promise<AcademicYearOrNullResult>
-    >();
+    jest.fn<() => Promise<AcademicYearOrNullResult>>();
 
-  const majorFindUniqueMock =
-    jest.fn<
-      () => Promise<IdOrNullResult>
-    >();
+  const majorFindUniqueMock = jest.fn<() => Promise<IdOrNullResult>>();
 
-  const studentsFindUniqueMock =
-    jest.fn<
-      () => Promise<unknown>
-    >();
+  const studentsFindUniqueMock = jest.fn<() => Promise<unknown>>();
 
-  const studentsFindManyMock =
-    jest.fn<
-      () => Promise<unknown[]>
-    >();
+  const studentsFindManyMock = jest.fn<() => Promise<unknown[]>>();
 
-  const enrollmentCountMock =
-    jest.fn<
-      () => Promise<number>
-    >();
+  const enrollmentCountMock = jest.fn<() => Promise<number>>();
 
-  const participantCountMock =
-    jest.fn<
-      () => Promise<number>
-    >();
+  const participantCountMock = jest.fn<() => Promise<number>>();
 
   /*
    * Student progress mocks.
@@ -206,114 +170,86 @@ describe('StudentsService', () => {
    * not use these methods, but Nest still needs the dependency
    * when constructing StudentsService.
    */
-  const getProgressForUsersMock =
-    jest.fn<
-      (
-        userIds: bigint[],
-        now?: Date,
-      ) => Promise<
-        Map<
-          bigint,
-          {
-            active: {
-              completed: number;
-              assigned: number;
-            };
-            total: {
-              completed: number;
-              assigned: number;
-            };
-          }
-        >
+  const getProgressForUsersMock = jest.fn<
+    (
+      userIds: bigint[],
+      now?: Date,
+    ) => Promise<
+      Map<
+        bigint,
+        {
+          active: {
+            completed: number;
+            assigned: number;
+          };
+          total: {
+            completed: number;
+            assigned: number;
+          };
+        }
       >
-    >();
+    >
+  >();
 
-  const getProgressForUserMock =
-    jest.fn<
-      (
-        userId: bigint,
-        now?: Date,
-      ) => Promise<{
-        active: {
-          completed: number;
-          assigned: number;
-        };
-        total: {
-          completed: number;
-          assigned: number;
-        };
-      }>
-    >();
+  const getProgressForUserMock = jest.fn<
+    (
+      userId: bigint,
+      now?: Date,
+    ) => Promise<{
+      active: {
+        completed: number;
+        assigned: number;
+      };
+      total: {
+        completed: number;
+        assigned: number;
+      };
+    }>
+  >();
 
-  const usersCreateMock =
-    jest.fn<
-      () => Promise<IdResult>
-    >();
+  const usersCreateMock = jest.fn<() => Promise<IdResult>>();
 
-  const usersUpdateMock =
-    jest.fn<
-      () => Promise<unknown>
-    >();
+  const usersUpdateMock = jest.fn<() => Promise<unknown>>();
 
-  const usersDeleteMock =
-    jest.fn<
-      () => Promise<unknown>
-    >();
+  const usersDeleteMock = jest.fn<() => Promise<unknown>>();
 
-  const studentsCreateMock =
-    jest.fn<
-      () => Promise<IdResult>
-    >();
+  const studentsCreateMock = jest.fn<() => Promise<IdResult>>();
 
-  const studentsUpdateMock =
-    jest.fn<
-      () => Promise<unknown>
-    >();
+  const studentsUpdateMock = jest.fn<() => Promise<unknown>>();
 
-  const studentsDeleteMock =
-    jest.fn<
-      () => Promise<unknown>
-    >();
+  const studentsDeleteMock = jest.fn<() => Promise<unknown>>();
 
   const studentsFindUniqueOrThrowMock =
-    jest.fn<
-      () => Promise<CreatedStudentResult>
-    >();
+    jest.fn<() => Promise<CreatedStudentResult>>();
 
-  const academicRecordCreateMock =
-    jest.fn<
-      () => Promise<IdResult>
-    >();
+  const academicRecordCreateMock = jest.fn<() => Promise<IdResult>>();
 
-  const transactionAcademicRecordFindManyMock =
-    jest.fn<
-      () => Promise<
-        Array<{
-          id: bigint;
-          student_id: bigint;
-          academic_year_id: bigint;
-          year_level: number;
-          major_id: bigint;
-          class_group: string | null;
-        }>
-      >
-    >();
-
-  const academicRecordUpdateManyMock =
-    jest.fn<
-      () => Promise<{
-        count: number;
+  const transactionAcademicRecordFindManyMock = jest.fn<
+    () => Promise<
+      Array<{
+        id: bigint;
+        student_id: bigint;
+        academic_year_id: bigint;
+        year_level: number;
+        major_id: bigint;
+        class_group: string | null;
       }>
-    >();
+    >
+  >();
 
-  const academicRecordFindManyMock =
-    jest.fn<
-      () => Promise<
-        Array<{
-          class_group: string | null;
-        }>
-      >
-    >();
+  const academicRecordUpdateManyMock = jest.fn<
+    () => Promise<{
+      count: number;
+    }>
+  >();
+
+  const academicRecordFindManyMock = jest.fn<
+    () => Promise<
+      Array<{
+        class_group: string | null;
+      }>
+    >
+  >();
 
   const txMock: TxMock = {
     users: {
@@ -326,79 +262,58 @@ describe('StudentsService', () => {
       create: studentsCreateMock,
       update: studentsUpdateMock,
       delete: studentsDeleteMock,
-      findUniqueOrThrow:
-        studentsFindUniqueOrThrowMock,
+      findUniqueOrThrow: studentsFindUniqueOrThrowMock,
     },
 
     student_academic_records: {
       create: academicRecordCreateMock,
-      findMany:
-        transactionAcademicRecordFindManyMock,
-      updateMany:
-        academicRecordUpdateManyMock,
+      findMany: transactionAcademicRecordFindManyMock,
+      updateMany: academicRecordUpdateManyMock,
     },
   };
 
-  type TransactionCallback =
-    (
-      tx: TxMock,
-    ) => Promise<unknown>;
+  type TransactionCallback = (tx: TxMock) => Promise<unknown>;
 
   const transactionMock =
-    jest.fn<
-      (
-        callback: TransactionCallback,
-      ) => Promise<unknown>
-    >();
+    jest.fn<(callback: TransactionCallback) => Promise<unknown>>();
 
   const prismaMock = {
     student_academic_records: {
-      findMany:
-        academicRecordFindManyMock,
+      findMany: academicRecordFindManyMock,
     },
 
     student_generations: {
-      findUnique:
-        studentGenerationFindUniqueMock,
+      findUnique: studentGenerationFindUniqueMock,
     },
 
     academic_years: {
-      findUnique:
-        academicYearFindUniqueMock,
+      findUnique: academicYearFindUniqueMock,
     },
 
     majors: {
-      findUnique:
-        majorFindUniqueMock,
+      findUnique: majorFindUniqueMock,
     },
 
     students: {
-      findUnique:
-        studentsFindUniqueMock,
-      findMany:
-        studentsFindManyMock,
+      findUnique: studentsFindUniqueMock,
+      findMany: studentsFindManyMock,
     },
 
     enrollments: {
-      count:
-        enrollmentCountMock,
+      count: enrollmentCountMock,
     },
 
     evaluation_participants: {
-      count:
-        participantCountMock,
+      count: participantCountMock,
     },
 
-    $transaction:
-      transactionMock,
+    $transaction: transactionMock,
   };
 
   const progressServiceMock = {
-    getProgressForUsers:
-      getProgressForUsersMock,
+    getProgressForUsers: getProgressForUsersMock,
 
-    getProgressForUser:
-      getProgressForUserMock,
+    getProgressForUser: getProgressForUserMock,
   };
 
   const createDto: CreateStudentDto = {
@@ -471,8 +386,7 @@ describe('StudentsService', () => {
         majors: {
           id: BigInt(1),
           code: 'AMS',
-          name:
-            'Applied Mathematics & Statistics',
+          name: 'Applied Mathematics & Statistics',
           department_id: BigInt(1),
         },
       },
@@ -482,87 +396,66 @@ describe('StudentsService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
 
-    const module: TestingModule =
-      await Test.createTestingModule({
-        providers: [
-          StudentsService,
-          {
-            provide: PrismaService,
-            useValue: prismaMock,
-          },
-          {
-            provide:
-              StudentEvaluationProgressService,
-            useValue:
-              progressServiceMock,
-          },
-        ],
-      }).compile();
-
-    service =
-      module.get<StudentsService>(
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
         StudentsService,
-      );
+        {
+          provide: PrismaService,
+          useValue: prismaMock,
+        },
+        {
+          provide: StudentEvaluationProgressService,
+          useValue: progressServiceMock,
+        },
+      ],
+    }).compile();
 
-    studentGenerationFindUniqueMock
-      .mockResolvedValue({
-        id: BigInt(1),
-      });
+    service = module.get<StudentsService>(StudentsService);
 
-    academicYearFindUniqueMock
-      .mockResolvedValue({
-        id: BigInt(1),
-      });
+    studentGenerationFindUniqueMock.mockResolvedValue({
+      id: BigInt(1),
+    });
 
-    majorFindUniqueMock
-      .mockResolvedValue({
-        id: BigInt(1),
-      });
+    academicYearFindUniqueMock.mockResolvedValue({
+      id: BigInt(1),
+    });
 
-    usersCreateMock
-      .mockResolvedValue({
-        id: BigInt(100),
-      });
+    majorFindUniqueMock.mockResolvedValue({
+      id: BigInt(1),
+    });
 
-    studentsCreateMock
-      .mockResolvedValue({
-        id: BigInt(10),
-      });
+    usersCreateMock.mockResolvedValue({
+      id: BigInt(100),
+    });
 
-    academicRecordCreateMock
-      .mockResolvedValue({
-        id: BigInt(20),
-      });
+    studentsCreateMock.mockResolvedValue({
+      id: BigInt(10),
+    });
 
-    studentsFindUniqueOrThrowMock
-      .mockResolvedValue(
-        createdStudent,
-      );
+    academicRecordCreateMock.mockResolvedValue({
+      id: BigInt(20),
+    });
+
+    studentsFindUniqueOrThrowMock.mockResolvedValue(createdStudent);
 
     /*
      * Safe defaults for Student Progress.
      */
-    getProgressForUsersMock
-      .mockResolvedValue(
-        new Map(),
-      );
+    getProgressForUsersMock.mockResolvedValue(new Map());
 
-    getProgressForUserMock
-      .mockResolvedValue({
-        active: {
-          completed: 0,
-          assigned: 0,
-        },
-        total: {
-          completed: 0,
-          assigned: 0,
-        },
-      });
+    getProgressForUserMock.mockResolvedValue({
+      active: {
+        completed: 0,
+        assigned: 0,
+      },
+      total: {
+        completed: 0,
+        assigned: 0,
+      },
+    });
 
-    transactionMock.mockImplementation(
-      async (
-        callback: TransactionCallback,
-      ) => callback(completeTransactionMock(prismaMock, txMock)),
+    transactionMock.mockImplementation(async (callback: TransactionCallback) =>
+      callback(completeTransactionMock(prismaMock, txMock)),
     );
   });
 
@@ -572,12 +465,9 @@ describe('StudentsService', () => {
 
   describe('create', () => {
     it('should create user, student profile, and initial academic record in one transaction', async () => {
-      const result =
-        await service.create(createDto);
+      const result = await service.create(createDto);
 
-      expect(
-        studentGenerationFindUniqueMock,
-      ).toHaveBeenCalledWith({
+      expect(studentGenerationFindUniqueMock).toHaveBeenCalledWith({
         where: {
           id: BigInt(1),
         },
@@ -586,9 +476,7 @@ describe('StudentsService', () => {
         },
       });
 
-      expect(
-        academicYearFindUniqueMock,
-      ).toHaveBeenCalledWith({
+      expect(academicYearFindUniqueMock).toHaveBeenCalledWith({
         where: {
           id: BigInt(1),
         },
@@ -597,9 +485,7 @@ describe('StudentsService', () => {
         },
       });
 
-      expect(
-        majorFindUniqueMock,
-      ).toHaveBeenCalledWith({
+      expect(majorFindUniqueMock).toHaveBeenCalledWith({
         where: {
           id: BigInt(1),
         },
@@ -608,51 +494,35 @@ describe('StudentsService', () => {
         },
       });
 
-      expect(
-        transactionMock,
-      ).toHaveBeenCalledTimes(1);
+      expect(transactionMock).toHaveBeenCalledTimes(1);
 
-      expect(
-        usersCreateMock,
-      ).toHaveBeenCalledWith(
+      expect(usersCreateMock).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            email:
-              'test@itc.edu.kh',
+            email: 'test@itc.edu.kh',
 
-            full_name:
-              'Test Student',
+            full_name: 'Test Student',
 
-            gender:
-              'MALE',
+            gender: 'MALE',
 
-            role:
-              'STUDENT',
+            role: 'STUDENT',
 
-            status:
-              'ACTIVE',
+            status: 'ACTIVE',
 
-            password_hash:
-              expect.any(String),
+            password_hash: expect.any(String),
           }),
         }),
       );
 
-      expect(
-        studentsCreateMock,
-      ).toHaveBeenCalledWith({
+      expect(studentsCreateMock).toHaveBeenCalledWith({
         data: {
-          user_id:
-            BigInt(100),
+          user_id: BigInt(100),
 
-          student_code:
-            'e20229999',
+          student_code: 'e20229999',
 
-          generation_id:
-            BigInt(1),
+          generation_id: BigInt(1),
 
-          notes:
-            'Test student',
+          notes: 'Test student',
         },
 
         select: {
@@ -660,30 +530,21 @@ describe('StudentsService', () => {
         },
       });
 
-      expect(
-        academicRecordCreateMock,
-      ).toHaveBeenCalledWith({
+      expect(academicRecordCreateMock).toHaveBeenCalledWith({
         data: {
-          student_id:
-            BigInt(10),
+          student_id: BigInt(10),
 
-          academic_year_id:
-            BigInt(1),
+          academic_year_id: BigInt(1),
 
-          year_level:
-            2,
+          year_level: 2,
 
-          major_id:
-            BigInt(1),
+          major_id: BigInt(1),
 
-          class_group:
-            'AMS2-A',
+          class_group: 'AMS2-A',
         },
       });
 
-      expect(
-        studentsFindUniqueOrThrowMock,
-      ).toHaveBeenCalledWith(
+      expect(studentsFindUniqueOrThrowMock).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
             id: BigInt(10),
@@ -691,64 +552,46 @@ describe('StudentsService', () => {
         }),
       );
 
-      expect(result).toEqual(
-        createdStudent,
-      );
+      expect(result).toEqual(createdStudent);
     });
 
     it('should support a student without email, gender, notes, or class group', async () => {
       const dto: CreateStudentDto = {
-        student_code:
-          'e20228888',
+        student_code: 'e20228888',
 
-        full_name:
-          'Student Two',
+        full_name: 'Student Two',
 
-        password:
-          'Password123',
+        password: 'Password123',
 
-        generation_id:
-          '1',
+        generation_id: '1',
 
-        academic_year_id:
-          '1',
+        academic_year_id: '1',
 
-        year_level:
-          1,
+        year_level: 1,
 
-        major_id:
-          '1',
+        major_id: '1',
       };
 
       await service.create(dto);
 
-      expect(
-        usersCreateMock,
-      ).toHaveBeenCalledWith(
+      expect(usersCreateMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          data:
-            expect.objectContaining({
-              email: null,
-              gender: null,
-            }),
+          data: expect.objectContaining({
+            email: null,
+            gender: null,
+          }),
         }),
       );
 
-      expect(
-        studentsCreateMock,
-      ).toHaveBeenCalledWith({
+      expect(studentsCreateMock).toHaveBeenCalledWith({
         data: {
-          user_id:
-            BigInt(100),
+          user_id: BigInt(100),
 
-          student_code:
-            'e20228888',
+          student_code: 'e20228888',
 
-          generation_id:
-            BigInt(1),
+          generation_id: BigInt(1),
 
-          notes:
-            null,
+          notes: null,
         },
 
         select: {
@@ -756,153 +599,103 @@ describe('StudentsService', () => {
         },
       });
 
-      expect(
-        academicRecordCreateMock,
-      ).toHaveBeenCalledWith({
+      expect(academicRecordCreateMock).toHaveBeenCalledWith({
         data: {
-          student_id:
-            BigInt(10),
+          student_id: BigInt(10),
 
-          academic_year_id:
-            BigInt(1),
+          academic_year_id: BigInt(1),
 
-          year_level:
-            1,
+          year_level: 1,
 
-          major_id:
-            BigInt(1),
+          major_id: BigInt(1),
 
-          class_group:
-            null,
+          class_group: null,
         },
       });
     });
 
     it('should throw when generation does not exist', async () => {
-      studentGenerationFindUniqueMock
-        .mockResolvedValue(null);
+      studentGenerationFindUniqueMock.mockResolvedValue(null);
 
-      await expect(
-        service.create(createDto),
-      ).rejects.toThrow(
-        new NotFoundException(
-          'Student generation not found',
-        ),
+      await expect(service.create(createDto)).rejects.toThrow(
+        new NotFoundException('Student generation not found'),
       );
 
       expect(usersCreateMock).not.toHaveBeenCalled();
-expect(studentsCreateMock).not.toHaveBeenCalled();
-expect(academicRecordCreateMock).not.toHaveBeenCalled();
-expect(studentsUpdateMock).not.toHaveBeenCalled();
+      expect(studentsCreateMock).not.toHaveBeenCalled();
+      expect(academicRecordCreateMock).not.toHaveBeenCalled();
+      expect(studentsUpdateMock).not.toHaveBeenCalled();
 
-      expect(
-        usersCreateMock,
-      ).not.toHaveBeenCalled();
+      expect(usersCreateMock).not.toHaveBeenCalled();
     });
 
     it('should throw when academic year does not exist', async () => {
-      academicYearFindUniqueMock
-        .mockResolvedValue(null);
+      academicYearFindUniqueMock.mockResolvedValue(null);
 
-      await expect(
-        service.create(createDto),
-      ).rejects.toThrow(
-        new NotFoundException(
-          'Academic year not found',
-        ),
+      await expect(service.create(createDto)).rejects.toThrow(
+        new NotFoundException('Academic year not found'),
       );
 
       expect(usersCreateMock).not.toHaveBeenCalled();
-expect(studentsCreateMock).not.toHaveBeenCalled();
-expect(academicRecordCreateMock).not.toHaveBeenCalled();
-expect(studentsUpdateMock).not.toHaveBeenCalled();
+      expect(studentsCreateMock).not.toHaveBeenCalled();
+      expect(academicRecordCreateMock).not.toHaveBeenCalled();
+      expect(studentsUpdateMock).not.toHaveBeenCalled();
 
-      expect(
-        usersCreateMock,
-      ).not.toHaveBeenCalled();
+      expect(usersCreateMock).not.toHaveBeenCalled();
     });
 
     it('should throw when major does not exist', async () => {
-      majorFindUniqueMock
-        .mockResolvedValue(null);
+      majorFindUniqueMock.mockResolvedValue(null);
 
-      await expect(
-        service.create(createDto),
-      ).rejects.toThrow(
-        new NotFoundException(
-          'Major not found',
-        ),
+      await expect(service.create(createDto)).rejects.toThrow(
+        new NotFoundException('Major not found'),
       );
 
       expect(usersCreateMock).not.toHaveBeenCalled();
-expect(studentsCreateMock).not.toHaveBeenCalled();
-expect(academicRecordCreateMock).not.toHaveBeenCalled();
-expect(studentsUpdateMock).not.toHaveBeenCalled();
+      expect(studentsCreateMock).not.toHaveBeenCalled();
+      expect(academicRecordCreateMock).not.toHaveBeenCalled();
+      expect(studentsUpdateMock).not.toHaveBeenCalled();
 
-      expect(
-        usersCreateMock,
-      ).not.toHaveBeenCalled();
+      expect(usersCreateMock).not.toHaveBeenCalled();
     });
 
     it('should map duplicate student code to ConflictException', async () => {
-      const prismaError =
-        new Prisma.PrismaClientKnownRequestError(
-          'Unique constraint failed',
-          {
-            code: 'P2002',
-            clientVersion:
-              '6.19.3',
+      const prismaError = new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed',
+        {
+          code: 'P2002',
+          clientVersion: '6.19.3',
 
-            meta: {
-              target: [
-                'student_code',
-              ],
-            },
+          meta: {
+            target: ['student_code'],
           },
-        );
+        },
+      );
 
-      transactionMock
-        .mockRejectedValue(
-          prismaError,
-        );
+      transactionMock.mockRejectedValue(prismaError);
 
-      await expect(
-        service.create(createDto),
-      ).rejects.toThrow(
-        new ConflictException(
-          'Student code already exists',
-        ),
+      await expect(service.create(createDto)).rejects.toThrow(
+        new ConflictException('Student code already exists'),
       );
     });
 
     it('should map duplicate email to ConflictException', async () => {
-      const prismaError =
-        new Prisma.PrismaClientKnownRequestError(
-          'Unique constraint failed',
-          {
-            code: 'P2002',
-            clientVersion:
-              '6.19.3',
+      const prismaError = new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed',
+        {
+          code: 'P2002',
+          clientVersion: '6.19.3',
 
-            meta: {
-              target: [
-                'email',
-              ],
-            },
+          meta: {
+            target: ['email'],
           },
-        );
+        },
+      );
 
-      transactionMock
-        .mockRejectedValue(
-          prismaError,
-        );
+      transactionMock.mockRejectedValue(prismaError);
 
-      await expect(
-        service.create(createDto),
-      ).rejects.toThrow(
-        new ConflictException(
-          'Email is already in use',
-        ),
+      await expect(service.create(createDto)).rejects.toThrow(
+        new ConflictException('Email is already in use'),
       );
     });
   });
@@ -921,27 +714,18 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
        * context because effective year level is calculated from
        * start_year when an explicit record is not available.
        */
-      academicYearFindUniqueMock
-        .mockResolvedValue(
-          selectedAcademicYear,
-        );
+      academicYearFindUniqueMock.mockResolvedValue(selectedAcademicYear);
 
-      studentsFindManyMock
-        .mockResolvedValue([
-          createdStudent,
-        ]);
+      studentsFindManyMock.mockResolvedValue([createdStudent]);
     });
 
     it('should select ACTIVE students using the requested academic year and generation', async () => {
-      const result =
-        await service.selectStudentsForEnrollment({
-          generation_id: '1',
-          academic_year_id: '1',
-        });
+      const result = await service.selectStudentsForEnrollment({
+        generation_id: '1',
+        academic_year_id: '1',
+      });
 
-      expect(
-        academicYearFindUniqueMock,
-      ).toHaveBeenCalledWith({
+      expect(academicYearFindUniqueMock).toHaveBeenCalledWith({
         where: {
           id: BigInt(1),
         },
@@ -953,9 +737,7 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
         },
       });
 
-      expect(
-        studentGenerationFindUniqueMock,
-      ).toHaveBeenCalledWith({
+      expect(studentGenerationFindUniqueMock).toHaveBeenCalledWith({
         where: {
           id: BigInt(1),
         },
@@ -964,13 +746,10 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
         },
       });
 
-      expect(
-        studentsFindManyMock,
-      ).toHaveBeenCalledWith(
+      expect(studentsFindManyMock).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
-            generation_id:
-              BigInt(1),
+            generation_id: BigInt(1),
 
             users: {
               is: {
@@ -992,20 +771,15 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
         expect.objectContaining({
           id: BigInt(10),
           user_id: BigInt(100),
-          student_code:
-            'e20229999',
+          student_code: 'e20229999',
 
-          academic_context:
-            expect.objectContaining({
-              academic_year:
-                selectedAcademicYear,
+          academic_context: expect.objectContaining({
+            academic_year: selectedAcademicYear,
 
-              effective_year_level:
-                2,
+            effective_year_level: 2,
 
-              year_level_source:
-                'ACADEMIC_RECORD',
-            }),
+            year_level_source: 'ACADEMIC_RECORD',
+          }),
         }),
       );
     });
@@ -1014,29 +788,24 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
       const studentWithUnnormalizedGroup = {
         ...createdStudent,
 
-        student_academic_records:
-          createdStudent.student_academic_records.map(
-            (record) => ({
-              ...record,
-              class_group: '  a  ',
-            }),
-          ),
+        student_academic_records: createdStudent.student_academic_records.map(
+          (record) => ({
+            ...record,
+            class_group: '  a  ',
+          }),
+        ),
       };
 
-      studentsFindManyMock
-        .mockResolvedValueOnce([
-          studentWithUnnormalizedGroup,
-        ]);
+      studentsFindManyMock.mockResolvedValueOnce([
+        studentWithUnnormalizedGroup,
+      ]);
 
-      const result =
-        await service.selectStudentsForEnrollment({
-          generation_id: '1',
-          academic_year_id: '1',
-        });
+      const result = await service.selectStudentsForEnrollment({
+        generation_id: '1',
+        academic_year_id: '1',
+      });
 
-      expect(
-        result[0].academic_context.placement,
-      ).toEqual({
+      expect(result[0].academic_context.placement).toEqual({
         academic_year_id: BigInt(1),
         source: 'ACADEMIC_RECORD',
         year_level: 2,
@@ -1045,9 +814,7 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
       });
 
       expect(
-        studentWithUnnormalizedGroup
-          .student_academic_records[0]
-          .class_group,
+        studentWithUnnormalizedGroup.student_academic_records[0].class_group,
       ).toBe('  a  ');
     });
 
@@ -1057,58 +824,39 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
         academic_year_id: '1',
       });
 
-      expect(
-        getProgressForUsersMock,
-      ).not.toHaveBeenCalled();
+      expect(getProgressForUsersMock).not.toHaveBeenCalled();
 
-      expect(
-        getProgressForUserMock,
-      ).not.toHaveBeenCalled();
+      expect(getProgressForUserMock).not.toHaveBeenCalled();
     });
 
     it('should throw when the selected academic year does not exist', async () => {
-      academicYearFindUniqueMock
-        .mockResolvedValue(null);
+      academicYearFindUniqueMock.mockResolvedValue(null);
 
       await expect(
         service.selectStudentsForEnrollment({
           generation_id: '1',
           academic_year_id: '999',
         }),
-      ).rejects.toThrow(
-        new NotFoundException(
-          'Academic year not found',
-        ),
-      );
+      ).rejects.toThrow(new NotFoundException('Academic year not found'));
 
-      expect(
-        studentsFindManyMock,
-      ).not.toHaveBeenCalled();
+      expect(studentsFindManyMock).not.toHaveBeenCalled();
     });
 
     it('should throw when the selected generation does not exist', async () => {
-      studentGenerationFindUniqueMock
-        .mockResolvedValue(null);
+      studentGenerationFindUniqueMock.mockResolvedValue(null);
 
       await expect(
         service.selectStudentsForEnrollment({
           generation_id: '999',
           academic_year_id: '1',
         }),
-      ).rejects.toThrow(
-        new NotFoundException(
-          'Student generation not found',
-        ),
-      );
+      ).rejects.toThrow(new NotFoundException('Student generation not found'));
 
-      expect(
-        studentsFindManyMock,
-      ).not.toHaveBeenCalled();
+      expect(studentsFindManyMock).not.toHaveBeenCalled();
     });
 
     it('should throw when the selected major does not exist', async () => {
-      majorFindUniqueMock
-        .mockResolvedValue(null);
+      majorFindUniqueMock.mockResolvedValue(null);
 
       await expect(
         service.selectStudentsForEnrollment({
@@ -1116,15 +864,9 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
           academic_year_id: '1',
           major_id: '999',
         }),
-      ).rejects.toThrow(
-        new NotFoundException(
-          'Major not found',
-        ),
-      );
+      ).rejects.toThrow(new NotFoundException('Major not found'));
 
-      expect(
-        studentsFindManyMock,
-      ).not.toHaveBeenCalled();
+      expect(studentsFindManyMock).not.toHaveBeenCalled();
     });
 
     it('should filter by effective year level and prefer the explicit academic record', async () => {
@@ -1137,31 +879,25 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
        * But the explicit academic record says year 2.
        * The explicit record must win.
        */
-      const matching =
-        await service.selectStudentsForEnrollment({
-          generation_id: '1',
-          academic_year_id: '1',
-          year_level: 2,
-        });
+      const matching = await service.selectStudentsForEnrollment({
+        generation_id: '1',
+        academic_year_id: '1',
+        year_level: 2,
+      });
 
       expect(matching).toHaveLength(1);
 
-      expect(
-        matching[0].academic_context
-          .effective_year_level,
-      ).toBe(2);
+      expect(matching[0].academic_context.effective_year_level).toBe(2);
 
-      expect(
-        matching[0].academic_context
-          .year_level_source,
-      ).toBe('ACADEMIC_RECORD');
+      expect(matching[0].academic_context.year_level_source).toBe(
+        'ACADEMIC_RECORD',
+      );
 
-      const notMatching =
-        await service.selectStudentsForEnrollment({
-          generation_id: '1',
-          academic_year_id: '1',
-          year_level: 1,
-        });
+      const notMatching = await service.selectStudentsForEnrollment({
+        generation_id: '1',
+        academic_year_id: '1',
+        year_level: 1,
+      });
 
       expect(notMatching).toEqual([]);
     });
@@ -1173,44 +909,23 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
         student_academic_records: [],
       };
 
-      studentsFindManyMock
-        .mockResolvedValue([
-          studentWithoutRecord,
-        ]);
+      studentsFindManyMock.mockResolvedValue([studentWithoutRecord]);
 
-      academicYearFindUniqueMock
-        .mockResolvedValue({
-          id: BigInt(2),
-          name: '2026-2027',
-          start_year: 2026,
-          is_active: true,
-        });
+      academicYearFindUniqueMock.mockResolvedValue({
+        id: BigInt(2),
+        name: '2026-2027',
+        start_year: 2026,
+        is_active: true,
+      });
 
-      const result =
-        await service.selectStudentsForEnrollment({
-          generation_id: '1',
-          academic_year_id: '2',
-          year_level: 2,
-        });
+      const result = await service.selectStudentsForEnrollment({
+        generation_id: '1',
+        academic_year_id: '2',
+        year_level: 2,
+      });
 
-      expect(result).toHaveLength(1);
-
-      expect(
-        result[0].academic_context
-          .calculated_year_level,
-      ).toBe(2);
-
-      expect(
-        result[0].academic_context
-          .effective_year_level,
-      ).toBe(2);
-
-      expect(
-        result[0].academic_context
-          .year_level_source,
-      ).toBe(
-        'GENERATION_CALCULATION',
-      );
+      // Calculated placement remains visible in Students; it is not an annual group assignment.
+      expect(result).toEqual([]);
     });
 
     it('should mark automatic progression beyond year 5 as beyond program', async () => {
@@ -1219,9 +934,7 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
         student_academic_records: [],
       };
 
-      studentsFindManyMock.mockResolvedValue([
-        studentWithoutRecord,
-      ]);
+      studentsFindManyMock.mockResolvedValue([studentWithoutRecord]);
 
       /*
        * Generation entry:
@@ -1239,33 +952,13 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
         is_active: false,
       });
 
-      const result =
-        await service.selectStudentsForEnrollment({
-          generation_id: '1',
-          academic_year_id: '6',
-        });
+      const result = await service.selectStudentsForEnrollment({
+        generation_id: '1',
+        academic_year_id: '6',
+      });
 
-      expect(result).toHaveLength(1);
-
-      expect(
-        result[0].academic_context
-          .calculated_year_level,
-      ).toBeNull();
-
-      expect(
-        result[0].academic_context
-          .effective_year_level,
-      ).toBeNull();
-
-      expect(
-        result[0].academic_context
-          .calculation_status,
-      ).toBe('BEYOND_PROGRAM');
-
-      expect(
-        result[0].academic_context
-          .year_level_source,
-      ).toBe('BEYOND_PROGRAM');
+      // Calculated placement remains visible in Students; it is not an annual group assignment.
+      expect(result).toEqual([]);
     });
 
     it('should allow an explicit valid academic record to override beyond-program automatic progression', async () => {
@@ -1274,8 +967,7 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
 
         student_academic_records: [
           {
-            ...createdStudent
-              .student_academic_records[0],
+            ...createdStudent.student_academic_records[0],
 
             academic_year_id: 6n,
             year_level: 5,
@@ -1283,9 +975,7 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
         ],
       };
 
-      studentsFindManyMock.mockResolvedValue([
-        repeatingStudent,
-      ]);
+      studentsFindManyMock.mockResolvedValue([repeatingStudent]);
 
       academicYearFindUniqueMock.mockResolvedValue({
         id: 6n,
@@ -1294,34 +984,25 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
         is_active: false,
       });
 
-      const result =
-        await service.selectStudentsForEnrollment({
-          generation_id: '1',
-          academic_year_id: '6',
-          year_level: 5,
-        });
+      const result = await service.selectStudentsForEnrollment({
+        generation_id: '1',
+        academic_year_id: '6',
+        year_level: 5,
+      });
 
       expect(result).toHaveLength(1);
 
-      expect(
-        result[0].academic_context
-          .calculated_year_level,
-      ).toBeNull();
+      expect(result[0].academic_context.calculated_year_level).toBeNull();
 
-      expect(
-        result[0].academic_context
-          .calculation_status,
-      ).toBe('BEYOND_PROGRAM');
+      expect(result[0].academic_context.calculation_status).toBe(
+        'BEYOND_PROGRAM',
+      );
 
-      expect(
-        result[0].academic_context
-          .effective_year_level,
-      ).toBe(5);
+      expect(result[0].academic_context.effective_year_level).toBe(5);
 
-      expect(
-        result[0].academic_context
-          .year_level_source,
-      ).toBe('ACADEMIC_RECORD');
+      expect(result[0].academic_context.year_level_source).toBe(
+        'ACADEMIC_RECORD',
+      );
     });
 
     it('should mark a student as not started before the generation entry academic year', async () => {
@@ -1330,9 +1011,7 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
         student_academic_records: [],
       };
 
-      studentsFindManyMock.mockResolvedValue([
-        studentWithoutRecord,
-      ]);
+      studentsFindManyMock.mockResolvedValue([studentWithoutRecord]);
 
       academicYearFindUniqueMock.mockResolvedValue({
         id: 7n,
@@ -1341,100 +1020,66 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
         is_active: false,
       });
 
-      const result =
-        await service.selectStudentsForEnrollment({
-          generation_id: '1',
-          academic_year_id: '7',
-        });
+      const result = await service.selectStudentsForEnrollment({
+        generation_id: '1',
+        academic_year_id: '7',
+      });
 
-      expect(result).toHaveLength(1);
-
-      expect(
-        result[0].academic_context
-          .calculated_year_level,
-      ).toBeNull();
-
-      expect(
-        result[0].academic_context
-          .effective_year_level,
-      ).toBeNull();
-
-      expect(
-        result[0].academic_context
-          .calculation_status,
-      ).toBe('NOT_STARTED');
-
-      expect(
-        result[0].academic_context
-          .year_level_source,
-      ).toBe('NOT_STARTED');
+      // Calculated placement remains visible in Students; it is not an annual group assignment.
+      expect(result).toEqual([]);
     });
 
     it('should filter students by major from the explicit academic record', async () => {
-      const matching =
-        await service.selectStudentsForEnrollment({
-          generation_id: '1',
-          academic_year_id: '1',
-          major_id: '1',
-        });
+      const matching = await service.selectStudentsForEnrollment({
+        generation_id: '1',
+        academic_year_id: '1',
+        major_id: '1',
+      });
 
       expect(matching).toHaveLength(1);
 
-      majorFindUniqueMock
-        .mockResolvedValue({
-          id: BigInt(2),
-        });
+      majorFindUniqueMock.mockResolvedValue({
+        id: BigInt(2),
+      });
 
-      const notMatching =
-        await service.selectStudentsForEnrollment({
-          generation_id: '1',
-          academic_year_id: '1',
-          major_id: '2',
-        });
+      const notMatching = await service.selectStudentsForEnrollment({
+        generation_id: '1',
+        academic_year_id: '1',
+        major_id: '2',
+      });
 
       expect(notMatching).toEqual([]);
     });
 
     it('should filter normalized class groups case-insensitively and ignore surrounding spaces', async () => {
-      const matching =
-        await service.selectStudentsForEnrollment({
-          generation_id: '1',
-          academic_year_id: '1',
-          class_groups: [
-            '  ams2-a  ',
-          ],
-        });
+      const matching = await service.selectStudentsForEnrollment({
+        generation_id: '1',
+        academic_year_id: '1',
+        class_groups: ['  ams2-a  '],
+      });
 
       expect(matching).toHaveLength(1);
 
-      const notMatching =
-        await service.selectStudentsForEnrollment({
-          generation_id: '1',
-          academic_year_id: '1',
-          class_groups: [
-            'AMS2-B',
-          ],
-        });
+      const notMatching = await service.selectStudentsForEnrollment({
+        generation_id: '1',
+        academic_year_id: '1',
+        class_groups: ['AMS2-B'],
+      });
 
       expect(notMatching).toEqual([]);
     });
 
     it('should support selection without a generation filter', async () => {
-      const result =
-        await service.selectStudentsForEnrollment({
-          academic_year_id: '1',
-          year_level: 2,
-        });
+      const result = await service.selectStudentsForEnrollment({
+        academic_year_id: '1',
+        year_level: 2,
+      });
 
       expect(result).toHaveLength(1);
 
-      expect(
-        studentGenerationFindUniqueMock,
-      ).not.toHaveBeenCalled();
+      expect(studentGenerationFindUniqueMock).not.toHaveBeenCalled();
 
-      expect(
-        studentsFindManyMock,
-      ).toHaveBeenCalledWith(
+      expect(studentsFindManyMock).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
             users: {
@@ -1450,25 +1095,17 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
   });
 
   it('returns normalized and deduplicated class group options for the exact placement scope', async () => {
-    academicRecordFindManyMock
-      .mockResolvedValue([
-        { class_group: 'A' },
-        { class_group: ' a ' },
-        { class_group: 'B' },
-        { class_group: ' b ' },
-        { class_group: null },
-      ]);
+    academicRecordFindManyMock.mockResolvedValue([
+      { class_group: 'A' },
+      { class_group: ' a ' },
+      { class_group: 'B' },
+      { class_group: ' b ' },
+      { class_group: null },
+    ]);
 
-    const result =
-      await service.getGroupOptions(
-        1n,
-        5n,
-        2n,
-      );
+    const result = await service.getGroupOptions(1n, 5n, 2n);
 
-    expect(
-      academicRecordFindManyMock,
-    ).toHaveBeenCalledWith({
+    expect(academicRecordFindManyMock).toHaveBeenCalledWith({
       where: {
         academic_year_id: 1n,
         major_id: 2n,
@@ -1497,15 +1134,9 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
   });
 
   it('returns an empty group option list when the placement scope has no known groups', async () => {
-    academicRecordFindManyMock
-      .mockResolvedValue([]);
+    academicRecordFindManyMock.mockResolvedValue([]);
 
-    const result =
-      await service.getGroupOptions(
-        1n,
-        5n,
-        2n,
-      );
+    const result = await service.getGroupOptions(1n, 5n, 2n);
 
     expect(result).toEqual({
       academic_year_id: '1',
@@ -1517,41 +1148,32 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
   });
 
   it('atomically updates only class_group for all confirmed existing placements', async () => {
-    transactionAcademicRecordFindManyMock
-      .mockResolvedValue([
-        {
-          id: 101n,
-          student_id: 10n,
-          academic_year_id: 1n,
-          year_level: 4,
-          major_id: 2n,
-          class_group: 'B',
-        },
-        {
-          id: 102n,
-          student_id: 11n,
-          academic_year_id: 1n,
-          year_level: 4,
-          major_id: 2n,
-          class_group: 'B',
-        },
-      ]);
+    transactionAcademicRecordFindManyMock.mockResolvedValue([
+      {
+        id: 101n,
+        student_id: 10n,
+        academic_year_id: 1n,
+        year_level: 4,
+        major_id: 2n,
+        class_group: 'B',
+      },
+      {
+        id: 102n,
+        student_id: 11n,
+        academic_year_id: 1n,
+        year_level: 4,
+        major_id: 2n,
+        class_group: 'B',
+      },
+    ]);
 
-    academicRecordUpdateManyMock
-      .mockResolvedValue({
-        count: 2,
-      });
+    academicRecordUpdateManyMock.mockResolvedValue({
+      count: 2,
+    });
 
-    const result =
-      await service.bulkUpdateClassGroup(
-        1n,
-        [10n, 11n],
-        '  a  ',
-      );
+    const result = await service.bulkUpdateClassGroup(1n, [10n, 11n], '  a  ');
 
-    expect(
-      transactionAcademicRecordFindManyMock,
-    ).toHaveBeenCalledWith({
+    expect(transactionAcademicRecordFindManyMock).toHaveBeenCalledWith({
       where: {
         academic_year_id: 1n,
         student_id: {
@@ -1569,9 +1191,7 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
       },
     });
 
-    expect(
-      academicRecordUpdateManyMock,
-    ).toHaveBeenCalledWith({
+    expect(academicRecordUpdateManyMock).toHaveBeenCalledWith({
       where: {
         academic_year_id: 1n,
         student_id: {
@@ -1594,56 +1214,39 @@ expect(studentsUpdateMock).not.toHaveBeenCalled();
   });
 
   it('fails atomically when any confirmed student has no placement in the selected academic year', async () => {
-    transactionAcademicRecordFindManyMock
-      .mockResolvedValue([
-        {
-          id: 101n,
-          student_id: 10n,
-          academic_year_id: 1n,
-          year_level: 4,
-          major_id: 2n,
-          class_group: 'B',
-        },
-      ]);
+    transactionAcademicRecordFindManyMock.mockResolvedValue([
+      {
+        id: 101n,
+        student_id: 10n,
+        academic_year_id: 1n,
+        year_level: 4,
+        major_id: 2n,
+        class_group: 'B',
+      },
+    ]);
 
     await expect(
-      service.bulkUpdateClassGroup(
-        1n,
-        [10n, 11n],
-        'A',
-      ),
+      service.bulkUpdateClassGroup(1n, [10n, 11n], 'A'),
     ).rejects.toMatchObject({
       response: {
         message:
           'Some students do not have an existing placement for the selected academic year',
 
-        missing_student_ids: [
-          '11',
-        ],
+        missing_student_ids: ['11'],
       },
     });
 
-    expect(
-      academicRecordUpdateManyMock,
-    ).not.toHaveBeenCalled();
+    expect(academicRecordUpdateManyMock).not.toHaveBeenCalled();
   });
 
   it('rejects a blank class group before writing', async () => {
     await expect(
-      service.bulkUpdateClassGroup(
-        1n,
-        [10n],
-        '   ',
-      ),
-    ).rejects.toThrow(
-      new BadRequestException(
-        'class_group must not be empty',
-      ),
-    );
+      service.bulkUpdateClassGroup(1n, [10n], '   '),
+    ).rejects.toThrow(new BadRequestException('class_group must not be empty'));
 
     expect(usersCreateMock).not.toHaveBeenCalled();
-expect(studentsCreateMock).not.toHaveBeenCalled();
-expect(academicRecordCreateMock).not.toHaveBeenCalled();
-expect(studentsUpdateMock).not.toHaveBeenCalled();
+    expect(studentsCreateMock).not.toHaveBeenCalled();
+    expect(academicRecordCreateMock).not.toHaveBeenCalled();
+    expect(studentsUpdateMock).not.toHaveBeenCalled();
   });
 });

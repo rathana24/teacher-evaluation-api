@@ -34,6 +34,25 @@ const offeringExample = {
   section_code: 'A',
   year_level: 4,
   class_type: 'COURSE',
+  group_scopes: [
+    {
+      id: '1',
+      academic_year_id: '1',
+      generation_id: '1',
+      major_id: '1',
+      year_level: 4,
+      class_group: 'A',
+      curriculum_revision_id: '12',
+      curriculum_revision: {
+        id: '12',
+        rule_id: '3',
+        revision_no: 1,
+        effective_academic_year_id: '1',
+        effective_start_year: 2025,
+        enabled: true,
+      },
+    },
+  ],
   created_at: '2026-09-13T06:15:49.001Z',
   updated_at: '2026-09-13T06:15:49.001Z',
 
@@ -51,7 +70,7 @@ const offeringExample = {
 
     academic_years: {
       id: '1',
-      academic_year: '2025-2026',
+      name: '2025-2026',
       start_year: 2025,
       is_active: true,
     },
@@ -110,19 +129,16 @@ export class CourseOfferingsController {
     status: 404,
     description: 'Course offering not found',
   })
-  findOne(
-    @Param('id', ParseBigIntPipe) id: bigint,
-  ) {
+  findOne(@Param('id', ParseBigIntPipe) id: bigint) {
     return this.courseOfferingsService.findOne(id);
   }
 
   @Post()
   @Roles('ADMIN')
   @ApiOperation({
-    summary:
-      'Assign a lecturer to a course in a semester',
+    summary: 'Assign a lecturer to a course in a semester',
     description:
-      'Creates a course offering. The offering may also specify the intended student year level and class type (COURSE, TD, or TP).',
+      'Creates a course offering. For revisioned course/major curricula, each explicit group scope must have an enabled applicable academic-year revision. An optional curriculum_revision_id detects stale selection; omission resolves automatically. Untracked legacy scopes remain unversioned. Class type is COURSE, TD or TP.',
   })
   @ApiResponse({
     status: 201,
@@ -139,11 +155,9 @@ export class CourseOfferingsController {
   @ApiResponse({
     status: 409,
     description:
-      'This course offering already exists',
+      'Duplicate offering, no applicable enabled curriculum revision, or obsolete/mismatched selected revision',
   })
-  create(
-    @Body() dto: CreateCourseOfferingDto,
-  ) {
+  create(@Body() dto: CreateCourseOfferingDto) {
     return this.courseOfferingsService.create(dto);
   }
 
@@ -152,7 +166,7 @@ export class CourseOfferingsController {
   @ApiOperation({
     summary: 'Update a course offering',
     description:
-      'Updates course, lecturer, semester, student year level, class type, or section information for an existing course offering.',
+      'Updates offering metadata. Curriculum-bound offerings retain course, semester, year level, groups and saved revisions; create another offering for changed curriculum context. Resending identical groups keeps saved rows and does not revalidate against a later withdrawal.',
   })
   @ApiParam({
     name: 'id',
@@ -178,16 +192,13 @@ export class CourseOfferingsController {
   @ApiResponse({
     status: 409,
     description:
-      'This course offering already exists',
+      'Duplicate offering, protected curriculum context, or obsolete/inapplicable curriculum revision',
   })
   update(
     @Param('id', ParseBigIntPipe) id: bigint,
     @Body() dto: UpdateCourseOfferingDto,
   ) {
-    return this.courseOfferingsService.update(
-      id,
-      dto,
-    );
+    return this.courseOfferingsService.update(id, dto);
   }
 
   @Delete(':id')
@@ -211,12 +222,9 @@ export class CourseOfferingsController {
   })
   @ApiResponse({
     status: 409,
-    description:
-      'Course offering has enrollments or evaluations',
+    description: 'Course offering has enrollments or evaluations',
   })
-  async remove(
-    @Param('id', ParseBigIntPipe) id: bigint,
-  ) {
+  async remove(@Param('id', ParseBigIntPipe) id: bigint) {
     await this.courseOfferingsService.remove(id);
   }
 }

@@ -24,6 +24,7 @@ import { StudentAcademicRecordsService } from '../src/student-academic-records/s
 import { CommentsService } from '../src/comments/comments.service';
 import { LecturerDashboardService } from '../src/lecturer-dashboard/lecturer-dashboard.service';
 import { ResultsService } from '../src/results/results.service';
+import { ReviewedWorkflowsService } from '../src/reviewed-workflows/reviewed-workflows.service';
 
 const historical = createRequire(`${process.cwd()}/package.json`)(
   './scripts/historical-metadata.cjs',
@@ -124,7 +125,8 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
     courseIds: bigint[] = [],
     surveyIds: bigint[] = [];
   const extraGenerationIds: bigint[] = [],
-    extraMajorIds: bigint[] = [];
+    extraMajorIds: bigint[] = [],
+    extraYearIds: bigint[] = [];
   const students: {
     account: bigint;
     profile: bigint;
@@ -391,6 +393,9 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
       if (prisma)
         await prisma.$transaction(
           async (tx) => {
+            await tx.reviewed_operations.deleteMany({
+              where: { actor_id: { in: userIds } },
+            });
             const evaluations = { course_offering_id: { in: offeringIds } };
             const responseFilter = { evaluations };
             const questionFilter = {
@@ -452,6 +457,9 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
             if (semester)
               await tx.semesters.delete({ where: { id: semester } });
             if (year) await tx.academic_years.delete({ where: { id: year } });
+            await tx.academic_years.deleteMany({
+              where: { id: { in: extraYearIds } },
+            });
             if (department)
               await tx.departments.delete({ where: { id: department } });
           },
@@ -550,12 +558,18 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
     ).toBe(0);
   });
 
-  it('preserves explicit legacy no-scope behavior without inferring a section restriction', async () => {
+  it('requires a yearly group even for legacy unscoped offerings without inferring section restrictions', async () => {
     const legacy = await offering();
     const user = await account('STUDENT', 'legacy-no-placement');
+    await expect(
+      app
+        .get(EnrollmentsService)
+        .create(legacy.id, { student_id: user.toString() }),
+    ).rejects.toThrow('recorded placement');
+    const assigned = await student('LEGACY');
     await app
       .get(EnrollmentsService)
-      .create(legacy.id, { student_id: user.toString() });
+      .create(legacy.id, { student_id: assigned.account.toString() });
     expect(
       await prisma.enrollments.count({
         where: { course_offering_id: legacy.id },
@@ -1361,5 +1375,2085 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
     );
     expect(ambiguous.candidate_version_id).toBeNull();
     expect(ambiguous.issues).toContain('NO_SINGLE_ORIGINAL_VERSION');
+  });
+
+  describe('Approved student progression', () => {
+    let previousYear: bigint,
+      entryYear: bigint,
+      nextYear: bigint,
+      progressionGeneration: bigint;
+    beforeAll(async () => {
+      for (const start of [2024, 2025, 2027]) {
+        const y = await prisma.academic_years.create({
+          data: { name: `P-${stamp}-${start}`, start_year: start },
+        });
+        extraYearIds.push(y.id);
+      }
+      [entryYear, previousYear, nextYear] = extraYearIds.slice(-3);
+      progressionGeneration = (
+        await prisma.student_generations.create({
+          data: { name: `P-${stamp}`, entry_academic_year_id: entryYear },
+        })
+      ).id;
+      extraGenerationIds.push(progressionGeneration);
+    });
+    const recordUrl = (id?: bigint) =>
+      `/api/student-academic-records${id ? `/${id}` : ''}`;
+    const context = async (profile: bigint, y = year) =>
+      (await app.get(StudentsService).findOne(profile, y)).academic_context;
+    async function approve(
+      s: { profile: bigint },
+      y: bigint,
+      level: number,
+      action: 'NORMAL' | 'REPEAT' | 'TRANSFER' | 'PAUSE' | 'RESUME',
+      group: string | null = 'A',
+      m = major,
+    ) {
+      return api().post(recordUrl()).set(authorization()).send({
+        student_id: s.profile.toString(),
+        academic_year_id: y.toString(),
+        year_level: level,
+        major_id: m.toString(),
+        class_group: group,
+        progression_action: action,
+      });
+    }
+    async function own() {
+      const s = await student('A', progressionGeneration);
+      await prisma.student_academic_records.delete({
+        where: { id: s.placement },
+      });
+      return s;
+    }
+    async function assignedEvaluation(
+      s: { account: bigint },
+      assignment: { id: bigint },
+    ) {
+      const { set, v1 } = await survey();
+      const now = new Date();
+      await prisma.enrollments.create({
+        data: {
+          course_offering_id: assignment.id,
+          student_id: s.account,
+          enrolled_at: now,
+        },
+      });
+      const e = await prisma.evaluations.create({
+        data: {
+          course_offering_id: assignment.id,
+          survey_version_id: v1.id,
+          created_by: admin,
+          status: 'OPEN',
+          start_at: new Date(Date.now() - 60000),
+          end_at: new Date(Date.now() + 86400000),
+          created_at: now,
+          updated_at: now,
+          evaluation_participants: {
+            create: {
+              student_id: s.account,
+              survey_version_id: v1.id,
+              created_at: now,
+            },
+          },
+        },
+        include: { evaluation_participants: true },
+      });
+      return { ...e, set, v1 };
+    }
+
+    it('repeat uses the approved placement anchor consistently and requires a new yearly group', async () => {
+      const s = await own();
+      expect((await approve(s, previousYear, 1, 'REPEAT')).status).toBe(201);
+      expect(await context(s.profile)).toMatchObject({
+        calculated_year_level: 3,
+        effective_year_level: 2,
+        year_level_source: 'PROGRESSION_CALCULATION',
+        placement_eligible: false,
+        placement: { class_group: null },
+      });
+      const studentsService = app.get(StudentsService);
+      expect(
+        await studentsService.selectStudentsForEnrollment({
+          academic_year_id: year.toString(),
+          generation_id: progressionGeneration.toString(),
+        }),
+      ).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: s.profile })]),
+      );
+      const current = await approve(s, year, 2, 'NORMAL', 'B');
+      expect(current.status).toBe(201);
+      expect(await context(s.profile)).toMatchObject({
+        effective_year_level: 2,
+        placement_eligible: true,
+        placement: { class_group: 'B' },
+      });
+      expect(await context(s.profile, nextYear)).toMatchObject({
+        effective_year_level: 3,
+        placement_eligible: false,
+        placement: { class_group: null },
+      });
+      const assignment = await offering();
+      await prisma.course_offerings.update({
+        where: { id: assignment.id },
+        data: { year_level: 2 },
+      });
+      expect(
+        (
+          await api()
+            .post(`/api/course-offerings/${assignment.id}/enrollments`)
+            .set(authorization())
+            .send({ student_id: s.account.toString() })
+        ).status,
+      ).toBe(201);
+      const preview = await app
+        .get(EvaluationsService)
+        .previewParticipants({ course_offering_id: assignment.id.toString() });
+      expect(preview.eligible_students).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            student_id: s.profile.toString(),
+            effective_year_level: 2,
+            class_group: 'B',
+          }),
+        ]),
+      );
+    });
+
+    it('transfer uses the new approved level and major across views and export without rewriting earlier placement', async () => {
+      const s = await own();
+      const newMajor = (
+        await prisma.majors.create({
+          data: {
+            code: `PT-${stamp}`,
+            name: 'Transfer destination',
+            department_id: department,
+          },
+        })
+      ).id;
+      extraMajorIds.push(newMajor);
+      expect((await approve(s, entryYear, 1, 'NORMAL')).status).toBe(201);
+      const transferred = await approve(
+        s,
+        previousYear,
+        3,
+        'TRANSFER',
+        'T',
+        newMajor,
+      );
+      expect(transferred.status).toBe(201);
+      expect(await context(s.profile)).toMatchObject({
+        calculated_year_level: 3,
+        effective_year_level: 4,
+        placement: { major_id: newMajor, class_group: null },
+        placement_eligible: false,
+      });
+      expect((await approve(s, year, 4, 'NORMAL', 'X', newMajor)).status).toBe(
+        201,
+      );
+      const assignment = await offering();
+      await prisma.course_offerings.update({
+        where: { id: assignment.id },
+        data: { year_level: 4 },
+      });
+      const e = await assignedEvaluation(s, assignment);
+      const exportResponse = await api()
+        .get(
+          `/api/students/export?academic_year_id=${year}&generation_id=${progressionGeneration}&major_id=${newMajor}`,
+        )
+        .set(authorization());
+      expect(exportResponse.status).toBe(200);
+      expect(
+        exportResponse.body.data.find(
+          (row: any) => row.student_code === `C-${stamp}-${s.account}`,
+        ),
+      ).toMatchObject({
+        placement: {
+          year_level: 4,
+          major_id: newMajor.toString(),
+          class_group: 'X',
+        },
+        academic_context: {
+          effective_year_level: 4,
+          progression_status: 'ACTIVE',
+        },
+      });
+      expect(
+        await prisma.student_academic_records.findUnique({
+          where: {
+            student_id_academic_year_id: {
+              student_id: s.profile,
+              academic_year_id: entryYear,
+            },
+          },
+        }),
+      ).toMatchObject({ year_level: 1, major_id: major, class_group: 'A' });
+      expect(
+        await app
+          .get(StudentAccessService)
+          .getAnswerableEvaluation(e.id, s.account),
+      ).toBeDefined();
+    });
+
+    it('pause persists across ordinary placements and blocks targeting, enrollment, available surveys, drafts and submissions until explicit resume', async () => {
+      const s = await own();
+      expect((await approve(s, previousYear, 1, 'PAUSE')).status).toBe(201);
+      const current = await approve(s, year, 1, 'NORMAL');
+      expect(current.status).toBe(201);
+      expect(await context(s.profile)).toMatchObject({
+        progression_status: 'PAUSED',
+        placement_eligible: false,
+      });
+      const assignment = await offering();
+      const e = await assignedEvaluation(s, assignment);
+      const access = app.get(StudentAccessService);
+      expect(await access.findAvailable(s.account)).toEqual([]);
+      await expect(
+        access.getAnswerableEvaluation(e.id, s.account),
+      ).rejects.toThrow('paused');
+      await expect(
+        app.get(AssessmentDraftsService).save(e.id, s.account, { answers: [] }),
+      ).rejects.toThrow('paused');
+      await expect(
+        app.get(SubmissionsService).submit(e.id, s.account, { answers: [] }),
+      ).rejects.toThrow('paused');
+      const preview = await app
+        .get(EvaluationsService)
+        .previewParticipants({ course_offering_id: assignment.id.toString() });
+      expect(preview.eligible_count).toBe(0);
+      expect(preview.ineligible_reasons.paused_student).toBe(1);
+      const another = await offering();
+      await expect(
+        app
+          .get(EnrollmentsService)
+          .create(another.id, { student_id: s.account.toString() }),
+      ).rejects.toThrow('paused');
+      expect(
+        (
+          await api()
+            .put(recordUrl(BigInt(current.body.id)))
+            .set(authorization())
+            .send({ progression_action: 'RESUME' })
+        ).status,
+      ).toBe(200);
+      expect(await context(s.profile)).toMatchObject({
+        progression_status: 'ACTIVE',
+        placement_eligible: true,
+      });
+      expect(await access.findAvailable(s.account)).toHaveLength(1);
+      await expect(
+        access.getAnswerableEvaluation(e.id, s.account),
+      ).resolves.toBeDefined();
+      expect(
+        (
+          await app.get(EvaluationsService).previewParticipants({
+            course_offering_id: assignment.id.toString(),
+          })
+        ).eligible_count,
+      ).toBe(1);
+      await expect(
+        app.get(AssessmentDraftsService).save(e.id, s.account, { answers: [] }),
+      ).resolves.toBeDefined();
+      expect(
+        await prisma.evaluation_participants.count({
+          where: { evaluation_id: e.id },
+        }),
+      ).toBe(1);
+      expect(
+        await prisma.responses.count({ where: { evaluation_id: e.id } }),
+      ).toBe(0);
+    });
+
+    it('same-year pause requires explicit resume and preserves frozen assignment and saved draft', async () => {
+      const s = await student('A');
+      const assignment = await offering();
+      const e = await assignedEvaluation(s, assignment);
+      await app
+        .get(AssessmentDraftsService)
+        .save(e.id, s.account, { answers: [] });
+      const before = await prisma.assessment_drafts.findUniqueOrThrow({
+        where: { participant_id: e.evaluation_participants[0].id },
+      });
+      expect(
+        (
+          await api()
+            .put(recordUrl(s.placement))
+            .set(authorization())
+            .send({ progression_action: 'PAUSE' })
+        ).status,
+      ).toBe(200);
+      await expect(
+        app.get(StudentAccessService).getAnswerableEvaluation(e.id, s.account),
+      ).rejects.toThrow('paused');
+      expect(
+        (
+          await api()
+            .put(recordUrl(s.placement))
+            .set(authorization())
+            .send({ class_group: 'B' })
+        ).status,
+      ).toBe(200);
+      for (const action of ['NORMAL', 'REPEAT', 'TRANSFER'])
+        expect(
+          (
+            await api()
+              .put(recordUrl(s.placement))
+              .set(authorization())
+              .send({ progression_action: action })
+          ).status,
+        ).toBe(400);
+      expect(
+        (await api().delete(recordUrl(s.placement)).set(authorization()))
+          .status,
+      ).toBe(409);
+      expect(
+        (
+          await api()
+            .put(recordUrl(s.placement))
+            .set(authorization())
+            .send({ progression_action: 'RESUME' })
+        ).status,
+      ).toBe(200);
+      await expect(
+        app.get(StudentAccessService).getAnswerableEvaluation(e.id, s.account),
+      ).resolves.toBeDefined();
+      expect(
+        await prisma.assessment_drafts.findUnique({ where: { id: before.id } }),
+      ).toEqual(before);
+      expect(
+        await prisma.evaluation_participants.findUnique({
+          where: { id: e.evaluation_participants[0].id },
+        }),
+      ).toEqual(e.evaluation_participants[0]);
+    });
+
+    it('a missing or blank yearly group blocks all new eligibility including legacy offering paths', async () => {
+      const s = await own();
+      expect((await approve(s, previousYear, 1, 'REPEAT', 'OLD')).status).toBe(
+        201,
+      );
+      const assignment = await offering();
+      await prisma.course_offerings.update({
+        where: { id: assignment.id },
+        data: { year_level: 2 },
+      });
+      const e = await assignedEvaluation(s, assignment);
+      for (const group of [undefined, null, '  ']) {
+        if (group !== undefined) {
+          const existing = await prisma.student_academic_records.findUnique({
+            where: {
+              student_id_academic_year_id: {
+                student_id: s.profile,
+                academic_year_id: year,
+              },
+            },
+          });
+          if (existing)
+            await api()
+              .put(recordUrl(existing.id))
+              .set(authorization())
+              .send({ class_group: group });
+          else
+            expect((await approve(s, year, 2, 'NORMAL', group)).status).toBe(
+              201,
+            );
+        }
+        expect(await context(s.profile)).toMatchObject({
+          effective_year_level: 2,
+          placement_eligible: false,
+          ineligibility_reason: 'MISSING_YEARLY_GROUP',
+          placement: { class_group: null },
+        });
+        expect(
+          (
+            await app.get(EvaluationsService).previewParticipants({
+              course_offering_id: assignment.id.toString(),
+            })
+          ).ineligible_reasons.missing_yearly_group,
+        ).toBe(1);
+        expect(
+          await app.get(StudentsService).selectStudentsForEnrollment({
+            academic_year_id: year.toString(),
+            generation_id: progressionGeneration.toString(),
+            year_level: 2,
+          }),
+        ).not.toEqual(
+          expect.arrayContaining([expect.objectContaining({ id: s.profile })]),
+        );
+        await expect(
+          app
+            .get(StudentAccessService)
+            .getAnswerableEvaluation(e.id, s.account),
+        ).rejects.toThrow('class group');
+      }
+      const another = await offering();
+      await prisma.course_offerings.update({
+        where: { id: another.id },
+        data: { year_level: 2 },
+      });
+      await expect(
+        app
+          .get(EnrollmentsService)
+          .create(another.id, { student_id: s.account.toString() }),
+      ).rejects.toThrow('class group');
+    });
+
+    it('rejects invalid progression actions, resuming without a pause, missing chronology and moving exception anchors', async () => {
+      const s = await student('A');
+      expect(
+        (
+          await api()
+            .put(recordUrl(s.placement))
+            .set(authorization())
+            .send({ progression_action: 'AUTO_RESUME' })
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await api()
+            .put(recordUrl(s.placement))
+            .set(authorization())
+            .send({ progression_action: null })
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await api()
+            .put(recordUrl(s.placement))
+            .set(authorization())
+            .send({ year_level: null })
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await api()
+            .put(recordUrl(s.placement))
+            .set(authorization())
+            .send({ progression_action: 'RESUME' })
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await api()
+            .put(recordUrl(s.placement))
+            .set(authorization())
+            .send({ progression_action: 'REPEAT' })
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await api()
+            .put(recordUrl(s.placement))
+            .set(authorization())
+            .send({ academic_year_id: nextYear.toString() })
+        ).status,
+      ).toBe(400);
+      expect(
+        (await api().delete(recordUrl(s.placement)).set(authorization()))
+          .status,
+      ).toBe(409);
+      const unknown = await prisma.academic_years.create({
+        data: { name: `PU-${stamp}` },
+      });
+      extraYearIds.push(unknown.id);
+      expect((await approve(s, unknown.id, 2, 'TRANSFER')).status).toBe(400);
+    });
+
+    it('a pause after reviewed preview makes confirmation stale and writes no enrollment', async () => {
+      const s = await student('A');
+      const assignment = await offering(['A']);
+      const dto = {
+        ...selection(['A']),
+        confirmed_student_ids: [s.account.toString()],
+      };
+      const workflow = app.get(ReviewedWorkflowsService);
+      const review = await workflow.previewGroup(assignment.id, dto, admin);
+      expect(
+        (
+          await api()
+            .put(recordUrl(s.placement))
+            .set(authorization())
+            .send({ progression_action: 'PAUSE' })
+        ).status,
+      ).toBe(200);
+      await expect(
+        workflow.confirmGroup(
+          assignment.id,
+          { ...dto, review_id: review.review_id },
+          admin,
+        ),
+      ).rejects.toThrow();
+      expect(
+        await prisma.enrollments.count({
+          where: { course_offering_id: assignment.id },
+        }),
+      ).toBe(0);
+      expect(
+        await prisma.reviewed_operations.findUnique({
+          where: { id: review.review_id },
+        }),
+      ).toMatchObject({ completed_at: null, result_json: null });
+    });
+
+    it('resuming with no yearly group clears the pause but does not restore eligibility', async () => {
+      const s = await own();
+      expect((await approve(s, previousYear, 1, 'PAUSE')).status).toBe(201);
+      expect((await approve(s, year, 1, 'RESUME', null)).status).toBe(201);
+      expect(await context(s.profile)).toMatchObject({
+        progression_status: 'ACTIVE',
+        placement_eligible: false,
+        ineligibility_reason: 'MISSING_YEARLY_GROUP',
+      });
+      const current = await prisma.student_academic_records.findUniqueOrThrow({
+        where: {
+          student_id_academic_year_id: {
+            student_id: s.profile,
+            academic_year_id: year,
+          },
+        },
+      });
+      expect(
+        (
+          await api()
+            .put(recordUrl(current.id))
+            .set(authorization())
+            .send({ class_group: 'NEW' })
+        ).status,
+      ).toBe(200);
+      expect(await context(s.profile)).toMatchObject({
+        progression_status: 'ACTIVE',
+        placement_eligible: true,
+      });
+    });
+
+    it('prior approved anchor changes invalidate a review even if current placement and account selection stay the same', async () => {
+      const s = await student('A', progressionGeneration);
+      const approved = await approve(s, previousYear, 1, 'REPEAT');
+      expect(approved.status).toBe(201);
+      const assignment = await offering();
+      const workflow = app.get(ReviewedWorkflowsService);
+      const dto = {
+        academic_year_id: year.toString(),
+        generation_id: progressionGeneration.toString(),
+        year_level: 1,
+        major_id: major.toString(),
+        class_groups: ['A'],
+      };
+      const review = await workflow.previewGroup(assignment.id, dto, admin);
+      expect(review.confirmed_student_ids).toContain(s.account.toString());
+      expect(
+        (
+          await api()
+            .put(recordUrl(BigInt(approved.body.id)))
+            .set(authorization())
+            .send({ year_level: 2 })
+        ).status,
+      ).toBe(200);
+      expect(
+        (await app.get(EnrollmentsService).previewGroup(assignment.id, dto))
+          .confirmed_student_ids,
+      ).toEqual(review.confirmed_student_ids);
+      await expect(
+        workflow.confirmGroup(
+          assignment.id,
+          {
+            ...dto,
+            confirmed_student_ids: review.confirmed_student_ids,
+            review_id: review.review_id,
+          },
+          admin,
+        ),
+      ).rejects.toThrow('Reviewed context');
+      expect(
+        await prisma.enrollments.count({
+          where: { course_offering_id: assignment.id },
+        }),
+      ).toBe(0);
+    });
+
+    it('paused students cannot bypass eligibility through reassignment preview or confirmation', async () => {
+      const s = await student('A');
+      const source = await offering(['A']);
+      const target = await prisma.course_offerings.create({
+        data: {
+          course_id: source.course_id,
+          lecturer_id: lecturer,
+          semester_id: semester,
+          year_level: 1,
+          class_type: 'TD',
+          created_at: new Date(),
+          updated_at: new Date(),
+          group_scopes: {
+            create: {
+              academic_year_id: year,
+              generation_id: generation,
+              major_id: major,
+              year_level: 1,
+              class_group: 'A',
+            },
+          },
+        },
+      });
+      offeringIds.push(target.id);
+      const service = app.get(EnrollmentsService);
+      const enrollment = await service.create(source.id, {
+        student_id: s.account.toString(),
+      });
+      const dto = {
+        student_id: s.account.toString(),
+        target_offering_id: target.id.toString(),
+      };
+      await service.previewReassignment(source.id, dto);
+      expect(
+        (
+          await api()
+            .put(recordUrl(s.placement))
+            .set(authorization())
+            .send({ progression_action: 'PAUSE' })
+        ).status,
+      ).toBe(200);
+      await expect(service.previewReassignment(source.id, dto)).rejects.toThrow(
+        'paused',
+      );
+      await expect(
+        service.confirmReassignment(source.id, {
+          ...dto,
+          confirmed_enrollment_id: enrollment.id.toString(),
+        }),
+      ).rejects.toThrow();
+      expect(
+        await prisma.enrollments.findUnique({ where: { id: enrollment.id } }),
+      ).toMatchObject({ course_offering_id: source.id });
+      expect(
+        await prisma.enrollments.count({
+          where: { course_offering_id: target.id },
+        }),
+      ).toBe(0);
+    });
+
+    it('missing pause chronology fails closed across student views, targeting and questionnaire access', async () => {
+      const s = await own();
+      const y = await prisma.academic_years.create({
+        data: { name: `PX-${stamp}`, start_year: 2025 },
+      });
+      extraYearIds.push(y.id);
+      expect((await approve(s, y.id, 1, 'PAUSE')).status).toBe(201);
+      expect((await approve(s, year, 1, 'NORMAL')).status).toBe(201);
+      const assignment = await offering();
+      const e = await assignedEvaluation(s, assignment);
+      await prisma.academic_years.update({
+        where: { id: y.id },
+        data: { start_year: null },
+      });
+      expect(await context(s.profile)).toMatchObject({
+        progression_status: 'UNRESOLVED',
+        placement_eligible: false,
+      });
+      expect(
+        (
+          await app.get(EvaluationsService).previewParticipants({
+            course_offering_id: assignment.id.toString(),
+          })
+        ).ineligible_reasons.progression_unresolved,
+      ).toBe(1);
+      await expect(
+        app.get(StudentAccessService).getAnswerableEvaluation(e.id, s.account),
+      ).rejects.toThrow('chronology');
+      expect(
+        await prisma.evaluation_participants.count({
+          where: { evaluation_id: e.id },
+        }),
+      ).toBe(1);
+    });
+
+    it('a concurrent pause and draft save serialize consistently and preserve frozen history', async () => {
+      const s = await student('RACE-P');
+      const assignment = await offering();
+      const e = await assignedEvaluation(s, assignment);
+      const gate = gateTransaction(prisma, 'assessment_drafts', 'upsert');
+      const saving = new AssessmentDraftsService(
+        gate.db,
+        app.get(StudentAccessService),
+      ).save(e.id, s.account, { answers: [] });
+      const outcome = saving.then(
+        () => null,
+        (error) => error,
+      );
+      try {
+        await gate.wait(saving);
+        await app
+          .get(StudentAcademicRecordsService)
+          .update(s.placement, { progression_action: 'PAUSE' });
+      } finally {
+        gate.release();
+      }
+      const error = await outcome;
+      expect(error === null || error instanceof ConflictException).toBe(true);
+      expect(
+        await prisma.assessment_drafts.count({
+          where: { participant_id: e.evaluation_participants[0].id },
+        }),
+      ).toBe(error ? 0 : 1);
+      await expect(
+        app.get(StudentAccessService).getAnswerableEvaluation(e.id, s.account),
+      ).rejects.toThrow('paused');
+      expect(
+        await prisma.evaluation_participants.findUnique({
+          where: { id: e.evaluation_participants[0].id },
+        }),
+      ).toEqual(e.evaluation_participants[0]);
+    });
+  });
+
+  describe('Immutable historical target labels', () => {
+    const post = (url: string, body: unknown = {}) =>
+      api().post(url).set(authorization()).send(body);
+    async function prepared(groups = ['A']) {
+      const target = await offering(groups);
+      const own = [await student(groups[0]), await student(groups.at(-1)!)];
+      await prisma.enrollments.createMany({
+        data: own.map((s) => ({
+          student_id: s.account,
+          course_offering_id: target.id,
+          enrolled_at: new Date(),
+        })),
+      });
+      const { set, v1 } = await survey();
+      const input = {
+        course_offering_id: String(target.id),
+        survey_version_id: String(v1.id),
+        participant_scope: 'SELECTED_GENERATIONS' as const,
+        generation_ids: [String(generation)],
+        group_scope: selection(groups),
+        start_at: new Date(Date.now() - 60000).toISOString(),
+        end_at: new Date(Date.now() + 86400000).toISOString(),
+      };
+      const preview = await post('/api/evaluations/create-preview', input);
+      expect(preview.status).toBe(200);
+      const body = {
+        ...input,
+        confirmed_student_ids: preview.body.confirmed_student_ids,
+        review_id: preview.body.review_id,
+      };
+      return { target, own, set, v1, input, preview, body };
+    }
+    async function confirmed(groups = ['A']) {
+      const fixture = await prepared(groups);
+      const created = await post('/api/evaluations', fixture.body);
+      expect(created.status).toBe(201);
+      return { ...fixture, created, id: BigInt(created.body.id) };
+    }
+    async function token(accountId: bigint) {
+      const user = await prisma.users.findUniqueOrThrow({
+        where: { id: accountId },
+      });
+      const login = await api()
+        .post('/api/auth/login')
+        .send({ identifier: user.email, password: 'Consistency123' });
+      expect(login.status).toBe(200);
+      return login.body.access_token as string;
+    }
+    const frozen = (id: bigint) =>
+      prisma.evaluations.findUniqueOrThrow({
+        where: { id },
+        include: {
+          generation_targets: true,
+          group_targets: true,
+          evaluation_participants: {
+            orderBy: { id: 'asc' },
+            include: { assessment_drafts: true },
+          },
+          responses: { include: { answers: true } },
+        },
+      });
+    async function rename(kind: string) {
+      const name = `L-${stamp}`;
+      if (kind === 'generation') {
+        const previous = await prisma.student_generations.findUniqueOrThrow({
+          where: { id: generation },
+        });
+        await api()
+          .put(`/api/student-generations/${generation}`)
+          .set(authorization())
+          .send({ name })
+          .expect(200);
+        return () =>
+          prisma.student_generations.update({
+            where: { id: generation },
+            data: { name: previous.name },
+          });
+      }
+      if (kind === 'major') {
+        const previous = await prisma.majors.findUniqueOrThrow({
+          where: { id: major },
+        });
+        await api()
+          .put(`/api/majors/${major}`)
+          .set(authorization())
+          .send({ name, code: name })
+          .expect(200);
+        return () =>
+          prisma.majors.update({
+            where: { id: major },
+            data: { name: previous.name, code: previous.code },
+          });
+      }
+      const previous = await prisma.academic_years.findUniqueOrThrow({
+        where: { id: year },
+      });
+      await api()
+        .put(`/api/academic-years/${year}`)
+        .set(authorization())
+        .send({ name })
+        .expect(200);
+      return () =>
+        prisma.academic_years.update({
+          where: { id: year },
+          data: { name: previous.name },
+        });
+    }
+
+    it('previews exact labels and captures them only in the committed targeting transaction', async () => {
+      const e = await prepared();
+      expect(e.preview.body.target_labels.generations).toHaveLength(1);
+      expect(e.preview.body.target_labels.groups).toHaveLength(1);
+      expect(
+        await prisma.evaluations.count({
+          where: { course_offering_id: e.target.id },
+        }),
+      ).toBe(0);
+      const created = await post('/api/evaluations', e.body).expect(201);
+      const rows = await frozen(BigInt(created.body.id));
+      expect(rows.generation_targets[0].historical_labels).toEqual(
+        e.preview.body.target_labels.generations[0].historical_labels,
+      );
+      expect(rows.group_targets[0].historical_labels).toEqual(
+        e.preview.body.target_labels.groups[0].historical_labels,
+      );
+      expect(rows.group_targets[0].labels_captured_at).toEqual(rows.created_at);
+      expect(rows.generation_targets[0].labels_captured_at).toEqual(
+        rows.created_at,
+      );
+      expect(created.body.group_targets[0].historical_labels_status).toBe(
+        'CAPTURED',
+      );
+    });
+
+    it.each(['generation', 'major', 'academic_year'])(
+      'rejects a %s rename after review atomically and captures fresh labels after re-review',
+      async (kind) => {
+        const e = await prepared();
+        const restore = await rename(kind);
+        try {
+          const stale = await post('/api/evaluations', e.body);
+          expect(stale.status).toBe(409);
+          expect(stale.body.code).toBe('REVIEW_STALE');
+          expect(
+            await prisma.evaluations.count({
+              where: { course_offering_id: e.target.id },
+            }),
+          ).toBe(0);
+          expect(
+            (
+              await prisma.reviewed_operations.findUniqueOrThrow({
+                where: { id: e.body.review_id },
+              })
+            ).completed_at,
+          ).toBeNull();
+          const fresh = await post(
+            '/api/evaluations/create-preview',
+            e.input,
+          ).expect(200);
+          expect(fresh.body.target_labels).not.toEqual(
+            e.preview.body.target_labels,
+          );
+          const saved = await post('/api/evaluations', {
+            ...e.input,
+            confirmed_student_ids: fresh.body.confirmed_student_ids,
+            review_id: fresh.body.review_id,
+          }).expect(201);
+          expect(saved.body.group_targets[0].historical_labels).toEqual(
+            fresh.body.target_labels.groups[0].historical_labels,
+          );
+        } finally {
+          await restore();
+        }
+      },
+    );
+
+    it('keeps captured labels and exact drafts/completions/answers across renames and version application', async () => {
+      const e = await confirmed();
+      await post(`/api/evaluations/${e.id}/open`).expect(200);
+      await api()
+        .put(`/api/student/evaluations/${e.id}/draft`)
+        .set('Authorization', `Bearer ${await token(e.own[0].account)}`)
+        .send(answers(e.v1))
+        .expect(200);
+      await api()
+        .post(`/api/student/evaluations/${e.id}/responses`)
+        .set('Authorization', `Bearer ${await token(e.own[1].account)}`)
+        .send(answers(e.v1))
+        .expect(201);
+      const before = await frozen(e.id);
+      const restore = [];
+      try {
+        for (const kind of ['generation', 'major', 'academic_year'])
+          restore.push(await rename(kind));
+        const v2 = await version(e.set.id, 2);
+        await app.get(SurveyVersionsService).applyToUnfinished(e.set.id, v2.id);
+        await post(`/api/evaluations/${e.id}/close`).expect(200);
+        const after = await frozen(e.id);
+        expect(after.generation_targets).toEqual(before.generation_targets);
+        expect(after.group_targets).toEqual(before.group_targets);
+        expect(after.evaluation_participants).toEqual(
+          before.evaluation_participants,
+        );
+        expect(after.responses).toEqual(before.responses);
+        const adminReport = await api()
+          .get('/api/admin/results')
+          .set(authorization())
+          .expect(200);
+        const report = adminReport.body.find(
+          (item: any) => item.evaluation.id === String(e.id),
+        );
+        expect(report.submission_count).toBe(1);
+        const saved = report.target_scope.groups[0];
+        expect(saved.historical_labels).toEqual(
+          e.preview.body.target_labels.groups[0].historical_labels,
+        );
+        expect(saved.current_labels.major.name).toBe(`L-${stamp}`);
+        expect(saved.historical_labels.major.name).not.toBe(
+          saved.current_labels.major.name,
+        );
+        const lecturerToken = await token(lecturer);
+        const lecturerReport = await api()
+          .get('/api/lecturer/results')
+          .set('Authorization', `Bearer ${lecturerToken}`)
+          .expect(200);
+        expect(
+          lecturerReport.body.evaluations.find(
+            (item: any) => item.evaluation.id === String(e.id),
+          ).target_scope,
+        ).toEqual(report.target_scope);
+        const dashboard = await api()
+          .get(`/api/lecturer/evaluations/${e.id}/dashboard`)
+          .set('Authorization', `Bearer ${lecturerToken}`)
+          .expect(200);
+        expect(dashboard.body.group_scope.groups[0].historical_labels).toEqual(
+          saved.historical_labels,
+        );
+        const detail = await api()
+          .get(`/api/evaluations/${e.id}`)
+          .set(authorization())
+          .expect(200);
+        expect(detail.body.group_targets[0].historical_labels).toEqual(
+          saved.historical_labels,
+        );
+        const retry = await post('/api/evaluations', e.body).expect(201);
+        expect(retry.body.already_applied).toBe(true);
+        expect(retry.body.group_targets[0].historical_labels).toEqual(
+          saved.historical_labels,
+        );
+        expect(retry.body.group_targets[0].current_labels.major.name).toBe(
+          before.group_targets[0].historical_labels &&
+            (e.preview.body.target_labels.groups[0].historical_labels as any)
+              .major.name,
+        );
+        expect(JSON.stringify(report)).not.toMatch(
+          /student_id|student_code|participant_id|response_id|password_hash/,
+        );
+      } finally {
+        for (const undo of restore.reverse()) await undo();
+      }
+    });
+
+    it('keeps legacy target labels unknown through reads and lifecycle actions', async () => {
+      const e = await evaluation();
+      await prisma.evaluation_generation_targets.create({
+        data: { evaluation_id: e.id, generation_id: generation },
+      });
+      await prisma.evaluation_group_targets.create({
+        data: {
+          evaluation_id: e.id,
+          academic_year_id: year,
+          generation_id: generation,
+          major_id: major,
+          year_level: 1,
+          class_group: 'A',
+        },
+      });
+      await post(`/api/evaluations/${e.id}/close`).expect(200);
+      const report = (
+        await api().get('/api/admin/results').set(authorization()).expect(200)
+      ).body.find((item: any) => item.evaluation.id === String(e.id));
+      for (const target of [
+        ...report.target_scope.groups,
+        ...report.target_scope.generations,
+      ]) {
+        expect(target.historical_labels).toBeNull();
+        expect(target.labels_captured_at).toBeNull();
+        expect(target.historical_labels_status).toBe('UNKNOWN');
+        expect(target.historical_labels_unavailable_reason).toBe(
+          'LEGACY_LABELS_NOT_CAPTURED',
+        );
+        expect(target.current_labels.generation.name).toBeTruthy();
+      }
+      const row = (await frozen(e.id)).group_targets[0];
+      await expect(
+        prisma.evaluation_group_targets.update({
+          where: { id: row.id },
+          data: {
+            historical_labels: { schema_version: 1 },
+            labels_captured_at: new Date(),
+          },
+        }),
+      ).rejects.toThrow();
+      expect(
+        (await frozen(e.id)).group_targets[0].historical_labels,
+      ).toBeNull();
+    });
+
+    it('rejects SQL rewrites of captured labels and frozen target identity', async () => {
+      const e = await confirmed();
+      const before = await frozen(e.id);
+      await expect(
+        prisma.evaluation_group_targets.update({
+          where: { id: before.group_targets[0].id },
+          data: {
+            historical_labels: { schema_version: 1 },
+            labels_captured_at: new Date(),
+          },
+        }),
+      ).rejects.toThrow();
+      await expect(
+        prisma.evaluation_generation_targets.update({
+          where: {
+            evaluation_id_generation_id: {
+              evaluation_id: e.id,
+              generation_id: generation,
+            },
+          },
+          data: { historical_labels: Prisma.DbNull, labels_captured_at: null },
+        }),
+      ).rejects.toThrow();
+      await expect(
+        prisma.evaluation_group_targets.update({
+          where: { id: before.group_targets[0].id },
+          data: { class_group: 'B' },
+        }),
+      ).rejects.toThrow();
+      expect(await frozen(e.id)).toEqual(before);
+    });
+
+    it('does not accept forged labels through compatibility creation DTOs', async () => {
+      const e = await prepared();
+      // HTTP whitelist may strip this field; it must never override server labels.
+      const result = await post('/api/evaluations', {
+        ...e.input,
+        confirmed_student_ids: e.body.confirmed_student_ids,
+        historical_labels: { generation: { name: 'Forged' } },
+      });
+      expect([201, 400]).toContain(result.status);
+      if (result.status === 201)
+        expect(result.body.group_targets[0].historical_labels).toEqual(
+          e.preview.body.target_labels.groups[0].historical_labels,
+        );
+      else
+        expect(
+          await prisma.evaluations.count({
+            where: { course_offering_id: e.target.id },
+          }),
+        ).toBe(0);
+    });
+
+    it('keeps whole anonymous aggregates and rejects mixed or unknown generation/group query slices', async () => {
+      const e = await confirmed(['A', 'B']);
+      await post(`/api/evaluations/${e.id}/open`).expect(200);
+      await app
+        .get(SubmissionsService)
+        .submit(e.id, e.own[0].account, answers(e.v1));
+      await post(`/api/evaluations/${e.id}/close`).expect(200);
+      const lecturerToken = await token(lecturer);
+      const routes = [
+        { path: '/api/admin/results', bearer: adminToken },
+        { path: `/api/admin/results/${lecturer}`, bearer: adminToken },
+        { path: '/api/lecturer/results', bearer: lecturerToken },
+        {
+          path: `/api/lecturer/evaluations/${e.id}/dashboard`,
+          bearer: lecturerToken,
+        },
+        {
+          path: `/api/lecturer/evaluations/${e.id}/comments`,
+          bearer: lecturerToken,
+        },
+      ];
+      for (const route of routes) {
+        await api()
+          .get(route.path)
+          .set('Authorization', `Bearer ${route.bearer}`)
+          .expect(200);
+        for (const query of [
+          `generation_id=${generation}`,
+          'generation_id=999999999',
+          'class_group=A',
+          'group_scope=unknown',
+        ]) {
+          const rejected = await api()
+            .get(`${route.path}?${query}`)
+            .set('Authorization', `Bearer ${route.bearer}`);
+          expect(rejected.status).toBe(400);
+          expect(rejected.body.code).toBe('UNSUPPORTED_ANONYMOUS_SCOPE');
+        }
+      }
+      expect((await frozen(e.id)).responses).toHaveLength(1);
+    });
+
+    it('a real concurrent rename and confirmation retain one coherent snapshot or roll back atomically', async () => {
+      const e = await prepared();
+      const gate = gateTransaction(
+        prisma,
+        'evaluation_generation_targets',
+        'createMany',
+      );
+      const operation = new ReviewedWorkflowsService(gate.db).confirmCreate(
+        e.body,
+        admin,
+      );
+      const outcome = operation.then(
+        (value) => ({ value, error: null }),
+        (error) => ({ value: null, error }),
+      );
+      await gate.wait(outcome);
+      const restore = await rename('generation');
+      gate.release();
+      try {
+        const result = await outcome;
+        if (result.error) {
+          expect(result.error).toBeInstanceOf(ConflictException);
+          expect(
+            await prisma.evaluations.count({
+              where: { course_offering_id: e.target.id },
+            }),
+          ).toBe(0);
+          expect(
+            (
+              await prisma.reviewed_operations.findUniqueOrThrow({
+                where: { id: e.body.review_id },
+              })
+            ).completed_at,
+          ).toBeNull();
+        } else {
+          const rows = await frozen(BigInt(result.value!.id));
+          expect(rows.generation_targets[0].historical_labels).toEqual(
+            e.preview.body.target_labels.generations[0].historical_labels,
+          );
+          expect(rows.group_targets[0].historical_labels).toEqual(
+            e.preview.body.target_labels.groups[0].historical_labels,
+          );
+        }
+      } finally {
+        gate.release();
+        await restore();
+      }
+    });
+  });
+
+  describe('Reviewed frontend operations', () => {
+    const groupUrl = (o: bigint) => `/api/course-offerings/${o}/enrollments`;
+    const applyUrl = (s: bigint, v: bigint) =>
+      `/api/surveys/${s}/versions/${v}/apply-to-unfinished`;
+    const post = (url: string, body: unknown = {}) =>
+      api().post(url).set(authorization()).send(body);
+    async function fixture(status: 'DRAFT' | 'OPEN' = 'OPEN', count = 3) {
+      const assignment = await offering(['A', 'B']);
+      const { set, v1 } = await survey();
+      const ownStudents = [];
+      for (let index = 0; index < count; index++)
+        ownStudents.push(await student(index % 2 ? 'B' : 'A'));
+      const now = new Date();
+      await prisma.enrollments.createMany({
+        data: ownStudents.map((s) => ({
+          student_id: s.account,
+          course_offering_id: assignment.id,
+          enrolled_at: now,
+        })),
+      });
+      const result = await prisma.evaluations.create({
+        data: {
+          course_offering_id: assignment.id,
+          survey_version_id: v1.id,
+          created_by: admin,
+          status,
+          start_at: new Date(Date.now() - 60_000),
+          end_at: new Date(Date.now() + 86_400_000),
+          created_at: now,
+          updated_at: now,
+          evaluation_participants: {
+            create: ownStudents.map((s) => ({
+              student_id: s.account,
+              survey_version_id: v1.id,
+              has_submitted: false,
+              created_at: now,
+            })),
+          },
+        },
+        include: { evaluation_participants: true },
+      });
+      return { ...result, set, v1, assignment, ownStudents };
+    }
+
+    it('review rejects a placement change even when exact selected account IDs stay unchanged', async () => {
+      const own = await student('A');
+      const target = await offering(['A', 'B']);
+      const input = selection(['A', 'B']);
+      const preview = await post(`${groupUrl(target.id)}/preview`, input);
+      expect(preview.status).toBe(200);
+      await app
+        .get(StudentAcademicRecordsService)
+        .update(own.placement, { class_group: 'B' });
+      const updatedPreview = await post(
+        `${groupUrl(target.id)}/preview`,
+        input,
+      );
+      expect(updatedPreview.body.confirmed_student_ids.sort()).toEqual(
+        preview.body.confirmed_student_ids.sort(),
+      );
+      const confirm = await post(`${groupUrl(target.id)}/bulk`, {
+        ...input,
+        confirmed_student_ids: preview.body.confirmed_student_ids,
+        review_id: preview.body.review_id,
+      });
+      expect(confirm.status).toBe(409);
+      expect(confirm.body.code).toBe('REVIEW_STALE');
+      expect(
+        await prisma.enrollments.count({
+          where: { course_offering_id: target.id },
+        }),
+      ).toBe(0);
+      expect(
+        (
+          await prisma.reviewed_operations.findUniqueOrThrow({
+            where: { id: preview.body.review_id },
+          })
+        ).completed_at,
+      ).toBeNull();
+    });
+
+    it('review ignores unrelated names/notes and retry cannot enroll newly eligible accounts', async () => {
+      const own = await student('A');
+      const target = await offering(['A']);
+      const input = selection(['A']);
+      const preview = await post(`${groupUrl(target.id)}/preview`, input);
+      expect(preview.status).toBe(200);
+      await prisma.users.update({
+        where: { id: own.account },
+        data: { full_name: 'Display name correction' },
+      });
+      await prisma.students.update({
+        where: { id: own.profile },
+        data: { notes: 'Unrelated administrative note' },
+      });
+      const body = {
+        ...input,
+        confirmed_student_ids: preview.body.confirmed_student_ids,
+        review_id: preview.body.review_id,
+      };
+      const first = await post(`${groupUrl(target.id)}/bulk`, body);
+      expect(first.status).toBe(201);
+      expect(first.body.already_applied).toBe(false);
+      const added = await student('A');
+      await prisma.reviewed_operations.update({
+        where: { id: preview.body.review_id },
+        data: { expires_at: new Date(0) },
+      });
+      const retry = await post(`${groupUrl(target.id)}/bulk`, body);
+      expect(retry.status).toBe(201);
+      expect(retry.body.already_applied).toBe(true);
+      expect(retry.body.enrolled_count).toBe(first.body.enrolled_count);
+      expect(
+        await prisma.enrollments.count({
+          where: { course_offering_id: target.id, student_id: added.account },
+        }),
+      ).toBe(0);
+      const fresh = await post(`${groupUrl(target.id)}/preview`, input);
+      const next = await post(`${groupUrl(target.id)}/bulk`, {
+        ...input,
+        confirmed_student_ids: fresh.body.confirmed_student_ids,
+        review_id: fresh.body.review_id,
+      });
+      expect(next.status).toBe(201);
+      expect(next.body.enrolled_count).toBe(1);
+    });
+
+    it('review checks expiry, caller, input and resource without partial enrollment writes', async () => {
+      const target = await offering(['A']);
+      const input = selection(['A']);
+      const preview = await post(`${groupUrl(target.id)}/preview`, input);
+      const body = {
+        ...input,
+        confirmed_student_ids: preview.body.confirmed_student_ids,
+        review_id: preview.body.review_id,
+      };
+      const changed = await post(`${groupUrl(target.id)}/bulk`, {
+        ...body,
+        class_groups: ['B'],
+      });
+      expect(changed.status).toBe(409);
+      expect(changed.body.code).toBe('REVIEW_INPUT_MISMATCH');
+      const otherOffering = await offering(['A']);
+      const wrongResource = await post(
+        `${groupUrl(otherOffering.id)}/bulk`,
+        body,
+      );
+      expect(wrongResource.status).toBe(409);
+      expect(wrongResource.body.code).toBe('REVIEW_OPERATION_MISMATCH');
+      const other = await account('ADMIN', 'other-review-admin');
+      const login = await api()
+        .post('/api/auth/login')
+        .send({
+          identifier: `other-review-admin-${stamp}@consistency.test`,
+          password: 'Consistency123',
+        });
+      const wrongActor = await api()
+        .post(`${groupUrl(target.id)}/bulk`)
+        .set('Authorization', `Bearer ${login.body.access_token}`)
+        .send(body);
+      expect(wrongActor.status).toBe(404);
+      expect(other).not.toBe(admin);
+      await prisma.reviewed_operations.update({
+        where: { id: preview.body.review_id },
+        data: { expires_at: new Date(0) },
+      });
+      const expired = await post(`${groupUrl(target.id)}/bulk`, body);
+      expect(expired.status).toBe(409);
+      expect(expired.body.code).toBe('REVIEW_EXPIRED');
+      expect(
+        await prisma.enrollments.count({
+          where: { course_offering_id: { in: [target.id, otherOffering.id] } },
+        }),
+      ).toBe(0);
+    });
+
+    it('reviewed creation binds questionnaire and scope, freezes all reviewed IDs and retries exactly once', async () => {
+      const own = await student('A');
+      const target = await offering(['A']);
+      await prisma.enrollments.create({
+        data: {
+          student_id: own.account,
+          course_offering_id: target.id,
+          enrolled_at: new Date(),
+        },
+      });
+      const { v1 } = await survey();
+      const input = {
+        course_offering_id: target.id.toString(),
+        survey_version_id: v1.id.toString(),
+        start_at: new Date().toISOString(),
+        end_at: new Date(Date.now() + 86_400_000).toISOString(),
+      };
+      const preview = await post('/api/evaluations/create-preview', input);
+      expect(preview.status).toBe(200);
+      await app.get(QuestionsService).update(v1.questions[0].id, {
+        question_text: 'Reviewed questionnaire changed',
+      });
+      const stale = await post('/api/evaluations', {
+        ...input,
+        confirmed_student_ids: preview.body.confirmed_student_ids,
+        review_id: preview.body.review_id,
+      });
+      expect(stale.status).toBe(409);
+      expect(stale.body.code).toBe('REVIEW_STALE');
+      expect(
+        await prisma.evaluations.count({
+          where: { course_offering_id: target.id },
+        }),
+      ).toBe(0);
+      const fresh = await post('/api/evaluations/create-preview', input);
+      const body = {
+        ...input,
+        confirmed_student_ids: fresh.body.confirmed_student_ids,
+        review_id: fresh.body.review_id,
+      };
+      const first = await post('/api/evaluations', body);
+      expect(first.status).toBe(201);
+      expect(
+        await prisma.evaluation_participants.count({
+          where: { evaluation_id: BigInt(first.body.id) },
+        }),
+      ).toBe(1);
+      const retry = await post('/api/evaluations', body);
+      expect(retry.status).toBe(201);
+      expect(retry.body.id).toBe(first.body.id);
+      expect(retry.body.already_applied).toBe(true);
+      expect(
+        await prisma.evaluations.count({
+          where: { course_offering_id: target.id },
+        }),
+      ).toBe(1);
+    });
+
+    it('reviewed creation rejects a newer version and direct set-only review without changing assignments', async () => {
+      const e = await fixture('DRAFT');
+      const v2 = await version(e.set.id, 2);
+      const own = await student('A');
+      const target = await offering(['A']);
+      await prisma.enrollments.create({
+        data: {
+          student_id: own.account,
+          course_offering_id: target.id,
+          enrolled_at: new Date(),
+        },
+      });
+      const input = {
+        course_offering_id: target.id.toString(),
+        survey_version_id: v2.id.toString(),
+      };
+      const preview = await post('/api/evaluations/create-preview', input);
+      expect(preview.status).toBe(200);
+      await version(e.set.id, 3);
+      const stale = await post('/api/evaluations', {
+        ...input,
+        confirmed_student_ids: preview.body.confirmed_student_ids,
+        review_id: preview.body.review_id,
+      });
+      expect(stale.status).toBe(409);
+      expect(stale.body.code).toBe('REVIEW_STALE');
+      const setOnly = await post('/api/evaluations/create-preview', {
+        course_offering_id: target.id.toString(),
+        survey_id: e.set.id.toString(),
+      });
+      expect(setOnly.status).toBe(400);
+      expect(
+        await prisma.evaluations.count({
+          where: { course_offering_id: target.id },
+        }),
+      ).toBe(0);
+    });
+
+    it('reviewed creation rejects malformed optional context and invalid schedules without 500 errors', async () => {
+      const e = await fixture();
+      const v2 = await version(e.set.id, 2);
+      const input = {
+        course_offering_id: e.assignment.id.toString(),
+        survey_version_id: v2.id.toString(),
+      };
+      expect(
+        (
+          await post('/api/evaluations/create-preview', {
+            ...input,
+            survey_id: { invalid: true },
+          })
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await post('/api/evaluations/create-preview', {
+            ...input,
+            generation_ids: { invalid: true },
+          })
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await post('/api/evaluations/create-preview', {
+            ...input,
+            start_at: new Date(Date.now() + 172_800_000).toISOString(),
+            end_at: new Date(Date.now() + 86_400_000).toISOString(),
+          })
+        ).status,
+      ).toBe(400);
+      expect(
+        await prisma.evaluations.count({
+          where: {
+            course_offering_id: e.assignment.id,
+            survey_version_id: v2.id,
+          },
+        }),
+      ).toBe(0);
+    });
+
+    it('reviewed placement rejects drift and completed retry does not overwrite a later correction', async () => {
+      const own = await student('A');
+      const input = {
+        academic_year_id: year.toString(),
+        student_ids: [own.profile.toString()],
+        class_group: 'B',
+      };
+      const url = '/api/students/bulk/class-group';
+      const preview = await post(`${url}/preview`, input);
+      expect(preview.status).toBe(200);
+      await app
+        .get(StudentAcademicRecordsService)
+        .update(own.placement, { class_group: 'C' });
+      const stale = await post(`${url}/confirm`, {
+        ...input,
+        review_id: preview.body.review_id,
+      });
+      expect(stale.status).toBe(409);
+      expect(stale.body.code).toBe('REVIEW_STALE');
+      const fresh = await post(`${url}/preview`, input);
+      const body = { ...input, review_id: fresh.body.review_id };
+      const first = await post(`${url}/confirm`, body);
+      expect(first.status).toBe(200);
+      expect(first.body.updated_count).toBe(1);
+      await app
+        .get(StudentAcademicRecordsService)
+        .update(own.placement, { class_group: 'C' });
+      const retry = await post(`${url}/confirm`, body);
+      expect(retry.status).toBe(200);
+      expect(retry.body.already_applied).toBe(true);
+      expect(
+        (
+          await prisma.student_academic_records.findUniqueOrThrow({
+            where: { id: own.placement },
+          })
+        ).class_group,
+      ).toBe('C');
+      const missingReview = await post(`${url}/confirm`, input);
+      expect(missingReview.status).toBe(400);
+    });
+
+    it('reviewed reassignment binds same-ID placement impact and retains frozen participants on successful retry', async () => {
+      const e = await fixture('DRAFT', 1);
+      const own = e.ownStudents[0];
+      const target = await prisma.course_offerings.create({
+        data: {
+          course_id: e.assignment.course_id,
+          lecturer_id: lecturer,
+          semester_id: semester,
+          year_level: 1,
+          class_type: 'TD',
+          section_code: 'reviewed target',
+          created_at: new Date(),
+          updated_at: new Date(),
+          group_scopes: {
+            create: ['A', 'B'].map((class_group) => ({
+              academic_year_id: year,
+              generation_id: generation,
+              major_id: major,
+              year_level: 1,
+              class_group,
+            })),
+          },
+        },
+      });
+      offeringIds.push(target.id);
+      const url = `${groupUrl(e.assignment.id)}/reassignment`;
+      const input = {
+        student_id: own.account.toString(),
+        target_offering_id: target.id.toString(),
+      };
+      const preview = await post(`${url}/preview`, input);
+      expect(preview.status).toBe(200);
+      await app
+        .get(StudentAcademicRecordsService)
+        .update(own.placement, { class_group: 'B' });
+      const stale = await post(`${url}/confirm`, {
+        ...input,
+        confirmed_enrollment_id: preview.body.confirmed_enrollment_id,
+        review_id: preview.body.review_id,
+      });
+      expect(stale.status).toBe(409);
+      expect(stale.body.code).toBe('REVIEW_STALE');
+      const fresh = await post(`${url}/preview`, input);
+      const body = {
+        ...input,
+        confirmed_enrollment_id: fresh.body.confirmed_enrollment_id,
+        review_id: fresh.body.review_id,
+      };
+      const first = await post(`${url}/confirm`, body);
+      expect(first.status).toBe(201);
+      const retry = await post(`${url}/confirm`, body);
+      expect(retry.status).toBe(201);
+      expect(retry.body.already_applied).toBe(true);
+      expect(
+        await prisma.enrollments.count({
+          where: { student_id: own.account, course_offering_id: target.id },
+        }),
+      ).toBe(1);
+      expect(
+        (
+          await prisma.evaluation_participants.findUniqueOrThrow({
+            where: { id: e.evaluation_participants[0].id },
+          })
+        ).evaluation_id,
+      ).toBe(e.id);
+    });
+
+    it('reviewed older-version opening is explicit and cannot reopen an evaluation on retry', async () => {
+      const e = await fixture('DRAFT');
+      await version(e.set.id, 2);
+      const url = `/api/evaluations/${e.id}/open`;
+      expect((await post(url, { force: true })).status).toBe(409);
+      const preview = await post(`${url}/preview`);
+      expect(preview.status).toBe(200);
+      expect(preview.body.assigned_survey_version_id).toBe(e.v1.id.toString());
+      const body = {
+        review_id: preview.body.review_id,
+        decision: 'RETAIN_ASSIGNED_VERSION',
+        retain_assigned_version_id: e.v1.id.toString(),
+      };
+      const first = await post(`${url}/confirm`, body);
+      expect(first.status).toBe(200);
+      expect(first.body.survey_version_id).toBe(e.v1.id.toString());
+      const participants = await prisma.evaluation_participants.findMany({
+        where: { evaluation_id: e.id },
+        orderBy: { id: 'asc' },
+      });
+      expect(participants.map((p) => p.id)).toEqual(
+        e.evaluation_participants.map((p) => p.id),
+      );
+      expect(participants.every((p) => p.survey_version_id === e.v1.id)).toBe(
+        true,
+      );
+      await app.get(EvaluationsService).close(e.id);
+      const retry = await post(`${url}/confirm`, body);
+      expect(retry.status).toBe(200);
+      expect(retry.body.already_applied).toBe(true);
+      expect(
+        (await prisma.evaluations.findUniqueOrThrow({ where: { id: e.id } }))
+          .status,
+      ).toBe('CLOSED');
+    });
+
+    it('opening review rejects latest-version drift and preserves archived-set continuity without new assignments', async () => {
+      const e = await fixture('DRAFT');
+      await version(e.set.id, 2);
+      const url = `/api/evaluations/${e.id}/open`;
+      const preview = await post(`${url}/preview`);
+      expect(preview.status).toBe(200);
+      await version(e.set.id, 3);
+      const stale = await post(`${url}/confirm`, {
+        review_id: preview.body.review_id,
+        decision: 'RETAIN_ASSIGNED_VERSION',
+        retain_assigned_version_id: e.v1.id.toString(),
+      });
+      expect(stale.status).toBe(409);
+      expect(stale.body.code).toBe('REVIEW_STALE');
+      expect(
+        (await prisma.evaluations.findUniqueOrThrow({ where: { id: e.id } }))
+          .status,
+      ).toBe('DRAFT');
+      await prisma.surveys.update({
+        where: { id: e.set.id },
+        data: { archived_at: new Date() },
+      });
+      const fresh = await post(`${url}/preview`);
+      expect(fresh.status).toBe(200);
+      const opened = await post(`${url}/confirm`, {
+        review_id: fresh.body.review_id,
+        decision: 'RETAIN_ASSIGNED_VERSION',
+        retain_assigned_version_id: e.v1.id.toString(),
+      });
+      expect(opened.status).toBe(200);
+      const target = await offering(['A']);
+      const denied = await post('/api/evaluations/create-preview', {
+        course_offering_id: target.id.toString(),
+        survey_version_id: e.v1.id.toString(),
+      });
+      expect(denied.status).toBe(400);
+    });
+
+    it('reviewed version impact protects drafts/completions, returns stable retry and truthful mixed-version results', async () => {
+      const e = await fixture();
+      const v2 = await version(e.set.id, 2);
+      const [draftOwner, submitter, safe] = e.ownStudents;
+      await app
+        .get(AssessmentDraftsService)
+        .save(e.id, draftOwner.account, answers(e.v1));
+      await app
+        .get(SubmissionsService)
+        .submit(e.id, submitter.account, answers(e.v1));
+      const url = applyUrl(e.set.id, v2.id);
+      const preview = await post(`${url}/preview`);
+      expect(preview.status).toBe(200);
+      expect(preview.body.proposed_moved_participants).toBe(1);
+      expect(preview.body.skipped_reasons).toEqual({
+        submitted: 1,
+        protected_draft: 1,
+        already_on_target: 0,
+      });
+      expect(JSON.stringify(preview.body)).not.toMatch(
+        /student_id|participant_id|response_id|answers|rating_value|password_hash/,
+      );
+      const body = { review_id: preview.body.review_id };
+      const first = await post(`${url}/confirm`, body);
+      expect(first.status).toBe(200);
+      expect(first.body.moved_participants).toBe(1);
+      await app.get(AssessmentDraftsService).remove(e.id, draftOwner.account);
+      const retry = await post(`${url}/confirm`, body);
+      expect(retry.status).toBe(200);
+      expect(retry.body.already_applied).toBe(true);
+      expect(retry.body.moved_participants).toBe(1);
+      const protectedParticipant =
+        await prisma.evaluation_participants.findUniqueOrThrow({
+          where: {
+            evaluation_id_student_id: {
+              evaluation_id: e.id,
+              student_id: draftOwner.account,
+            },
+          },
+        });
+      expect(protectedParticipant.survey_version_id).toBe(e.v1.id);
+      expect(
+        (await prisma.evaluations.findUniqueOrThrow({ where: { id: e.id } }))
+          .survey_version_id,
+      ).toBe(e.v1.id);
+      await app.get(SubmissionsService).submit(e.id, safe.account, answers(v2));
+      await app.get(EvaluationsService).close(e.id);
+      const report = (
+        await app.get(ResultsService).getLecturerResults(lecturer)
+      ).evaluations.find((item) => item.evaluation.id === e.id)!;
+      expect(report.submission_count).toBe(2);
+      expect(report.version_results).toHaveLength(2);
+      expect(JSON.stringify(report)).not.toMatch(
+        /student_id|participant_id|response_id|password_hash/,
+      );
+    });
+
+    it('reviewed application rejects new draft impact atomically and never falls back from empty latest', async () => {
+      const e = await fixture();
+      const v2 = await version(e.set.id, 2);
+      const url = applyUrl(e.set.id, v2.id);
+      const preview = await post(`${url}/preview`);
+      expect(preview.status).toBe(200);
+      await app
+        .get(AssessmentDraftsService)
+        .save(e.id, e.ownStudents[0].account, answers(e.v1));
+      const stale = await post(`${url}/confirm`, {
+        review_id: preview.body.review_id,
+      });
+      expect(stale.status).toBe(409);
+      expect(stale.body.code).toBe('REVIEW_STALE');
+      expect(
+        await prisma.evaluation_participants.count({
+          where: { evaluation_id: e.id, survey_version_id: v2.id },
+        }),
+      ).toBe(0);
+      expect(
+        (
+          await prisma.survey_versions.findUniqueOrThrow({
+            where: { id: v2.id },
+          })
+        ).status,
+      ).toBe('DRAFT');
+      const empty = await version(e.set.id, 3, false);
+      expect(
+        (await post(`${applyUrl(e.set.id, empty.id)}/preview`)).status,
+      ).toBe(400);
+      expect((await post(`${url}/preview`)).status).toBe(409);
+    });
+
+    it('reviewed opening cannot bypass expired dates, empty questions, archived versions or missing frozen participants', async () => {
+      const e = await fixture('DRAFT');
+      const url = `/api/evaluations/${e.id}/open`;
+      const originalEnd = e.end_at;
+      const originalStart = e.start_at;
+      await prisma.evaluations.update({
+        where: { id: e.id },
+        data: { start_at: new Date(Date.now() + 172_800_000) },
+      });
+      expect((await post(`${url}/preview`)).status).toBe(400);
+      await prisma.evaluations.update({
+        where: { id: e.id },
+        data: { start_at: originalStart },
+      });
+      await prisma.evaluations.update({
+        where: { id: e.id },
+        data: { end_at: new Date(0) },
+      });
+      expect((await post(`${url}/preview`)).status).toBe(400);
+      await prisma.evaluations.update({
+        where: { id: e.id },
+        data: { end_at: originalEnd },
+      });
+      await prisma.survey_versions.update({
+        where: { id: e.v1.id },
+        data: { status: 'ARCHIVED' },
+      });
+      expect((await post(`${url}/preview`)).status).toBe(400);
+      await prisma.survey_versions.update({
+        where: { id: e.v1.id },
+        data: { status: 'DRAFT' },
+      });
+      await prisma.questions.deleteMany({
+        where: { survey_version_id: e.v1.id },
+      });
+      expect((await post(`${url}/preview`)).status).toBe(400);
+      const other = await fixture('DRAFT');
+      await prisma.evaluation_participants.deleteMany({
+        where: { evaluation_id: other.id },
+      });
+      expect(
+        (await post(`/api/evaluations/${other.id}/open/preview`)).status,
+      ).toBe(400);
+      expect(
+        (await prisma.evaluations.findUniqueOrThrow({ where: { id: e.id } }))
+          .status,
+      ).toBe('DRAFT');
+      expect(
+        (
+          await prisma.evaluations.findUniqueOrThrow({
+            where: { id: other.id },
+          })
+        ).status,
+      ).toBe('DRAFT');
+    });
+
+    it('reviewed impact preserves legacy skipped reasons for a draft already on the target version', async () => {
+      const e = await fixture();
+      const v2 = await version(e.set.id, 2);
+      const participant = e.evaluation_participants[0];
+      await prisma.evaluation_participants.update({
+        where: { id: participant.id },
+        data: { survey_version_id: v2.id },
+      });
+      await app
+        .get(AssessmentDraftsService)
+        .save(e.id, e.ownStudents[0].account, answers(v2));
+      const url = applyUrl(e.set.id, v2.id);
+      const preview = await post(`${url}/preview`);
+      expect(preview.status).toBe(200);
+      expect(preview.body.skipped_reasons).toEqual({
+        submitted: 0,
+        protected_draft: 0,
+        already_on_target: 1,
+      });
+      const confirm = await post(`${url}/confirm`, {
+        review_id: preview.body.review_id,
+      });
+      expect(confirm.status).toBe(200);
+      expect(confirm.body.skipped_reasons).toEqual(
+        preview.body.skipped_reasons,
+      );
+      expect(confirm.body.moved_participants).toBe(
+        preview.body.proposed_moved_participants,
+      );
+    });
+
+    it('cutover rejects all five unreviewed mutation routes and reviewed-only confirms cannot be bypassed', async () => {
+      const e = await fixture('DRAFT');
+      const v2 = await version(e.set.id, 2);
+      const before = process.env.REQUIRE_REVIEWED_CONFIRMATION;
+      process.env.REQUIRE_REVIEWED_CONFIRMATION = 'true';
+      try {
+        const requests = [
+          post(`${groupUrl(e.assignment.id)}/bulk`, {
+            ...selection(['A', 'B']),
+            confirmed_student_ids: e.ownStudents.map((s) =>
+              s.account.toString(),
+            ),
+          }),
+          post('/api/evaluations', {
+            course_offering_id: e.assignment.id.toString(),
+            survey_version_id: v2.id.toString(),
+          }),
+          post(`${groupUrl(e.assignment.id)}/reassignment/confirm`, {
+            student_id: e.ownStudents[0].account.toString(),
+            target_offering_id: '1',
+            confirmed_enrollment_id: '1',
+          }),
+          api()
+            .put('/api/students/bulk/class-group')
+            .set(authorization())
+            .send({
+              academic_year_id: year.toString(),
+              student_ids: [e.ownStudents[0].profile.toString()],
+              class_group: 'C',
+            }),
+          post(applyUrl(e.set.id, v2.id)),
+        ];
+        for (const response of await Promise.all(requests)) {
+          expect(response.status).toBe(400);
+          expect(response.body.code).toBe('REVIEW_REQUIRED');
+        }
+        expect(
+          (await post(`${applyUrl(e.set.id, v2.id)}/confirm`)).status,
+        ).toBe(400);
+        expect(
+          (
+            await post(`/api/evaluations/${e.id}/open/confirm`, {
+              decision: 'RETAIN_ASSIGNED_VERSION',
+              retain_assigned_version_id: e.v1.id.toString(),
+            })
+          ).status,
+        ).toBe(400);
+        expect(
+          await prisma.evaluation_participants.count({
+            where: { evaluation_id: e.id, survey_version_id: v2.id },
+          }),
+        ).toBe(0);
+      } finally {
+        if (before === undefined)
+          delete process.env.REQUIRE_REVIEWED_CONFIRMATION;
+        else process.env.REQUIRE_REVIEWED_CONFIRMATION = before;
+      }
+    });
+
+    it('reviewed endpoints enforce authentication and ADMIN authorization', async () => {
+      const e = await fixture('DRAFT');
+      const v2 = await version(e.set.id, 2);
+      const studentLogin = await api()
+        .post('/api/auth/login')
+        .send({
+          identifier: `student-${userIds.indexOf(e.ownStudents[0].account)}-${stamp}@consistency.test`,
+          password: 'Consistency123',
+        });
+      // account() uses the array length before insertion, so the index is the fixture account name.
+      expect(studentLogin.status).toBe(200);
+      const routes = [
+        '/api/evaluations/create-preview',
+        '/api/students/bulk/class-group/preview',
+        '/api/students/bulk/class-group/confirm',
+        `/api/evaluations/${e.id}/open/preview`,
+        `/api/evaluations/${e.id}/open/confirm`,
+        `${applyUrl(e.set.id, v2.id)}/preview`,
+        `${applyUrl(e.set.id, v2.id)}/confirm`,
+      ];
+      for (const route of routes) {
+        expect((await api().post(route).send({})).status).toBe(401);
+        expect(
+          (
+            await api()
+              .post(route)
+              .set('Authorization', `Bearer ${studentLogin.body.access_token}`)
+              .send({})
+          ).status,
+        ).toBe(403);
+      }
+    });
+
+    it('simultaneous confirmation of one review commits only once and remains retryable', async () => {
+      const target = await offering(['A']);
+      const input = selection(['A']);
+      const preview = await post(`${groupUrl(target.id)}/preview`, input);
+      expect(preview.status).toBe(200);
+      const body = {
+        ...input,
+        confirmed_student_ids: preview.body.confirmed_student_ids,
+        review_id: preview.body.review_id,
+      };
+      const results = await Promise.all([
+        post(`${groupUrl(target.id)}/bulk`, body),
+        post(`${groupUrl(target.id)}/bulk`, body),
+      ]);
+      expect(results.some((r) => r.status === 201)).toBe(true);
+      expect(results.every((r) => [201, 409].includes(r.status))).toBe(true);
+      expect(
+        await prisma.enrollments.count({
+          where: { course_offering_id: target.id },
+        }),
+      ).toBe(preview.body.new_enrollment_count);
+      const retry = await post(`${groupUrl(target.id)}/bulk`, body);
+      expect(retry.status).toBe(201);
+      expect(retry.body.already_applied).toBe(true);
+    });
+
+    it('reviewed enrollment overlapping placement yields a consistent snapshot or atomic conflict', async () => {
+      const own = await student('A');
+      const target = await offering(['A', 'B']);
+      const input = selection(['A', 'B']);
+      const workflows = app.get(ReviewedWorkflowsService);
+      const preview = await workflows.previewGroup(target.id, input, admin);
+      const gate = gateTransaction(prisma, 'enrollments', 'createMany');
+      const confirm = new ReviewedWorkflowsService(gate.db).confirmGroup(
+        target.id,
+        {
+          ...input,
+          confirmed_student_ids: preview.confirmed_student_ids as string[],
+          review_id: preview.review_id,
+        },
+        admin,
+      );
+      await gate.wait(confirm);
+      try {
+        await app
+          .get(StudentAcademicRecordsService)
+          .update(own.placement, { class_group: 'B' });
+      } finally {
+        gate.release();
+      }
+      const result = await Promise.allSettled([confirm]);
+      if (result[0].status === 'rejected') {
+        expect(result[0].reason).toBeInstanceOf(ConflictException);
+        expect(
+          await prisma.enrollments.count({
+            where: { course_offering_id: target.id },
+          }),
+        ).toBe(0);
+        expect(
+          (
+            await prisma.reviewed_operations.findUniqueOrThrow({
+              where: { id: preview.review_id },
+            })
+          ).completed_at,
+        ).toBeNull();
+      } else {
+        expect(
+          await prisma.enrollments.count({
+            where: { course_offering_id: target.id },
+          }),
+        ).toBe(preview.new_enrollment_count);
+        expect(
+          (
+            await prisma.reviewed_operations.findUniqueOrThrow({
+              where: { id: preview.review_id },
+            })
+          ).completed_at,
+        ).not.toBeNull();
+      }
+    });
+
+    it('reviewed version confirmation overlapping draft save rolls back impact and receipt together', async () => {
+      const e = await fixture();
+      const v2 = await version(e.set.id, 2);
+      const workflows = app.get(ReviewedWorkflowsService);
+      const preview = await workflows.previewApplication(
+        e.set.id,
+        v2.id,
+        admin,
+      );
+      const gate = gateTransaction(
+        prisma,
+        'evaluation_participants',
+        'updateMany',
+      );
+      const confirm = new ReviewedWorkflowsService(gate.db).confirmApplication(
+        e.set.id,
+        v2.id,
+        preview.review_id,
+        admin,
+      );
+      await gate.wait(confirm);
+      try {
+        await app
+          .get(AssessmentDraftsService)
+          .save(e.id, e.ownStudents[0].account, answers(e.v1));
+      } finally {
+        gate.release();
+      }
+      const outcome = await Promise.allSettled([confirm]);
+      expect(outcome[0].status).toBe('rejected');
+      if (outcome[0].status === 'rejected')
+        expect(outcome[0].reason).toBeInstanceOf(ConflictException);
+      expect(
+        await prisma.evaluation_participants.count({
+          where: { evaluation_id: e.id, survey_version_id: v2.id },
+        }),
+      ).toBe(0);
+      expect(
+        (
+          await prisma.reviewed_operations.findUniqueOrThrow({
+            where: { id: preview.review_id },
+          })
+        ).completed_at,
+      ).toBeNull();
+      expect(
+        (
+          await prisma.survey_versions.findUniqueOrThrow({
+            where: { id: v2.id },
+          })
+        ).status,
+      ).toBe('DRAFT');
+    });
   });
 });

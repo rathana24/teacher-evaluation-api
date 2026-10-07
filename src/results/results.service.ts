@@ -1,61 +1,55 @@
-import {
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { targetLabelView } from '../common/utils/target-labels.util';
 
-type EvaluationGenerationTarget =
-  Prisma.evaluationsGetPayload<{
-    include: {
-      generation_targets: {
-        include: {
-          student_generations: {
-            select: {
-              id: true;
-              name: true;
-              entry_academic_year_id: true;
-              starting_year_level: true;
-              entry_academic_year: {
-                select: {
-                  id: true;
-                  name: true;
-                  start_year: true;
-                };
+type EvaluationGenerationTarget = Prisma.evaluationsGetPayload<{
+  include: {
+    generation_targets: {
+      include: {
+        student_generations: {
+          select: {
+            id: true;
+            name: true;
+            entry_academic_year_id: true;
+            starting_year_level: true;
+            entry_academic_year: {
+              select: {
+                id: true;
+                name: true;
+                start_year: true;
               };
             };
           };
         };
       };
     };
-  }>['generation_targets'][number];
+  };
+}>['generation_targets'][number];
 
 @Injectable()
 export class ResultsService {
-  constructor(
-    private readonly prisma: PrismaService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   // =========================================================
   // ADMIN - ALL RESULTS
   // =========================================================
 
   async getAdminResults() {
-    const evaluations =
-      await this.prisma.evaluations.findMany({
-        where: {
-          status: {
-            not: 'DRAFT',
-          },
+    const evaluations = await this.prisma.evaluations.findMany({
+      where: {
+        status: {
+          not: 'DRAFT',
         },
+      },
 
-        include: this.evaluationInclude(),
+      include: this.evaluationInclude(),
 
-        orderBy: {
-          created_at: 'desc',
-        },
-      });
+      orderBy: {
+        created_at: 'desc',
+      },
+    });
 
     return evaluations.map((evaluation) =>
       this.buildEvaluationResult(evaluation),
@@ -66,47 +60,41 @@ export class ResultsService {
   // ADMIN - RESULTS FOR ONE LECTURER
   // =========================================================
 
-  async getAdminResultsByLecturer(
-    lecturerId: bigint,
-  ) {
-    const lecturer =
-      await this.prisma.users.findFirst({
-        where: {
-          id: lecturerId,
-          role: 'LECTURER',
-        },
+  async getAdminResultsByLecturer(lecturerId: bigint) {
+    const lecturer = await this.prisma.users.findFirst({
+      where: {
+        id: lecturerId,
+        role: 'LECTURER',
+      },
 
-        select: {
-          id: true,
-          full_name: true,
-          email: true,
-        },
-      });
+      select: {
+        id: true,
+        full_name: true,
+        email: true,
+      },
+    });
 
     if (!lecturer) {
-      throw new NotFoundException(
-        'Lecturer not found',
-      );
+      throw new NotFoundException('Lecturer not found');
     }
 
-    const evaluations =
-      await this.prisma.evaluations.findMany({
-        where: {
-          status: {
-            not: 'DRAFT',
-          },
-
-          course_offerings: {
-            lecturer_id: lecturerId,
-          },
+    const evaluations = await this.prisma.evaluations.findMany({
+      where: {
+        status: {
+          not: 'DRAFT',
         },
 
-        include: this.evaluationInclude(),
-
-        orderBy: {
-          created_at: 'desc',
+        course_offerings: {
+          lecturer_id: lecturerId,
         },
-      });
+      },
+
+      include: this.evaluationInclude(),
+
+      orderBy: {
+        created_at: 'desc',
+      },
+    });
 
     return {
       lecturer: {
@@ -115,11 +103,8 @@ export class ResultsService {
         email: lecturer.email,
       },
 
-      evaluations: evaluations.map(
-        (evaluation) =>
-          this.buildEvaluationResult(
-            evaluation,
-          ),
+      evaluations: evaluations.map((evaluation) =>
+        this.buildEvaluationResult(evaluation),
       ),
     };
   }
@@ -128,47 +113,41 @@ export class ResultsService {
   // LECTURER - OWN RESULTS
   // =========================================================
 
-  async getLecturerResults(
-    lecturerId: bigint,
-  ) {
-    const lecturer =
-      await this.prisma.users.findFirst({
-        where: {
-          id: lecturerId,
-          role: 'LECTURER',
-        },
+  async getLecturerResults(lecturerId: bigint) {
+    const lecturer = await this.prisma.users.findFirst({
+      where: {
+        id: lecturerId,
+        role: 'LECTURER',
+      },
 
-        select: {
-          id: true,
-          full_name: true,
-          email: true,
-        },
-      });
+      select: {
+        id: true,
+        full_name: true,
+        email: true,
+      },
+    });
 
     if (!lecturer) {
-      throw new NotFoundException(
-        'Lecturer not found',
-      );
+      throw new NotFoundException('Lecturer not found');
     }
 
-    const evaluations =
-      await this.prisma.evaluations.findMany({
-        where: {
-          status: {
-            not: 'DRAFT',
-          },
-
-          course_offerings: {
-            lecturer_id: lecturerId,
-          },
+    const evaluations = await this.prisma.evaluations.findMany({
+      where: {
+        status: {
+          not: 'DRAFT',
         },
 
-        include: this.evaluationInclude(),
-
-        orderBy: {
-          created_at: 'desc',
+        course_offerings: {
+          lecturer_id: lecturerId,
         },
-      });
+      },
+
+      include: this.evaluationInclude(),
+
+      orderBy: {
+        created_at: 'desc',
+      },
+    });
 
     return {
       lecturer: {
@@ -177,11 +156,8 @@ export class ResultsService {
         email: lecturer.email,
       },
 
-      evaluations: evaluations.map(
-        (evaluation) =>
-          this.buildEvaluationResult(
-            evaluation,
-          ),
+      evaluations: evaluations.map((evaluation) =>
+        this.buildEvaluationResult(evaluation),
       ),
     };
   }
@@ -294,15 +270,13 @@ export class ResultsService {
                 include: {
                   question_options: {
                     orderBy: {
-                      display_order:
-                        'asc' as const,
+                      display_order: 'asc' as const,
                     },
                   },
                 },
 
                 orderBy: {
-                  display_order:
-                    'asc' as const,
+                  display_order: 'asc' as const,
                 },
               },
             },
@@ -312,8 +286,7 @@ export class ResultsService {
             include: {
               answer_options: {
                 include: {
-                  question_options:
-                    true,
+                  question_options: true,
                 },
               },
             },
@@ -323,8 +296,7 @@ export class ResultsService {
 
       _count: {
         select: {
-          evaluation_participants:
-            true,
+          evaluation_participants: true,
           responses: true,
         },
       },
@@ -335,17 +307,12 @@ export class ResultsService {
   // BUILD ONE EVALUATION RESULT
   // =========================================================
 
-  private buildEvaluationResult(
-    evaluation: any,
-  ) {
-    const offering =
-      evaluation.course_offerings;
+  private buildEvaluationResult(evaluation: any) {
+    const offering = evaluation.course_offerings;
 
-    const semester =
-      offering.semesters;
+    const semester = offering.semesters;
 
-    const responses =
-      evaluation.responses;
+    const responses = evaluation.responses;
 
     /*
      * Group submitted responses by their ACTUAL saved
@@ -356,84 +323,57 @@ export class ResultsService {
      * is NULL. Doing so would guess historical data and
      * could produce incorrect aggregates.
      */
-    const versionGroups =
-      new Map<
-        string,
-        {
-          surveyVersion: any;
-          responses: any[];
-        }
-      >();
+    const versionGroups = new Map<
+      string,
+      {
+        surveyVersion: any;
+        responses: any[];
+      }
+    >();
 
-    const unversionedResponses: any[] =
-      [];
+    const unversionedResponses: any[] = [];
 
     for (const response of responses) {
       if (
-        response.survey_version_id ===
-          null ||
+        response.survey_version_id === null ||
         response.survey_versions === null
       ) {
-        unversionedResponses.push(
-          response,
-        );
+        unversionedResponses.push(response);
         continue;
       }
 
-      const key =
-        response.survey_version_id.toString();
+      const key = response.survey_version_id.toString();
 
-      const existing =
-        versionGroups.get(key);
+      const existing = versionGroups.get(key);
 
       if (existing) {
-        existing.responses.push(
-          response,
-        );
+        existing.responses.push(response);
       } else {
         versionGroups.set(key, {
-          surveyVersion:
-            response.survey_versions,
+          surveyVersion: response.survey_versions,
 
           responses: [response],
         });
       }
     }
 
-    const versionResults =
-      Array.from(
-        versionGroups.values(),
-      )
-        .sort(
-          (
-            a,
-            b,
-          ) =>
-            a.surveyVersion.version_no -
-            b.surveyVersion.version_no,
-        )
-        .map((group) =>
-          this.buildVersionResult(
-            group.surveyVersion,
-            group.responses,
-          ),
-        );
+    const versionResults = Array.from(versionGroups.values())
+      .sort((a, b) => a.surveyVersion.version_no - b.surveyVersion.version_no)
+      .map((group) =>
+        this.buildVersionResult(group.surveyVersion, group.responses),
+      );
 
     return {
       evaluation: {
         id: evaluation.id,
 
-        status:
-          evaluation.status,
+        status: evaluation.status,
 
-        start_at:
-          evaluation.start_at,
+        start_at: evaluation.start_at,
 
-        end_at:
-          evaluation.end_at,
+        end_at: evaluation.end_at,
 
-        participant_scope:
-          evaluation.participant_scope,
+        participant_scope: evaluation.participant_scope,
       },
 
       offering: {
@@ -443,71 +383,46 @@ export class ResultsService {
       },
 
       lecturer: {
-        id:
-          offering.users.id,
+        id: offering.users.id,
 
-        full_name:
-          offering.users.full_name,
+        full_name: offering.users.full_name,
 
-        email:
-          offering.users.email,
+        email: offering.users.email,
       },
 
       course: {
-        id:
-          offering.courses.id,
+        id: offering.courses.id,
 
-        code:
-          offering.courses
-            .course_code,
+        code: offering.courses.course_code,
 
-        name:
-          offering.courses
-            .course_name,
+        name: offering.courses.course_name,
 
-        section_code:
-          offering.section_code,
+        section_code: offering.section_code,
       },
 
       department: {
-        id:
-          offering.courses
-            .departments.id,
+        id: offering.courses.departments.id,
 
-        code:
-          offering.courses
-            .departments.code,
+        code: offering.courses.departments.code,
 
-        name:
-          offering.courses
-            .departments.name,
+        name: offering.courses.departments.name,
       },
 
       semester: {
-        id:
-          semester.id,
+        id: semester.id,
 
-        name:
-          semester.semester_name,
+        name: semester.semester_name,
 
-        semester_number:
-          semester.semester_number,
+        semester_number: semester.semester_number,
 
         academic_year: {
-          id:
-            semester.academic_years.id,
+          id: semester.academic_years.id,
 
-          name:
-            semester.academic_years
-              .name,
+          name: semester.academic_years.name,
 
-          start_year:
-            semester.academic_years
-              .start_year,
+          start_year: semester.academic_years.start_year,
 
-          is_active:
-            semester.academic_years
-              .is_active,
+          is_active: semester.academic_years.is_active,
         },
       },
 
@@ -518,149 +433,118 @@ export class ResultsService {
        * version of the same named set.
        */
       survey: {
-        id:
-          evaluation.survey_versions
-            .survey_id,
+        id: evaluation.survey_versions.survey_id,
 
-        title:
-          evaluation.survey_versions
-            .surveys.title,
+        title: evaluation.survey_versions.surveys.title,
 
-        base_version_id:
-          evaluation.survey_versions
-            .id,
+        base_version_id: evaluation.survey_versions.id,
 
-        base_version_no:
-          evaluation.survey_versions
-            .version_no,
+        base_version_no: evaluation.survey_versions.version_no,
       },
 
       target_scope: {
-        participant_scope:
-          evaluation.participant_scope,
+        participant_scope: evaluation.participant_scope,
 
         generations_complete:
-          evaluation.participant_scope ===
-            'SELECTED_GENERATIONS' &&
+          evaluation.participant_scope === 'SELECTED_GENERATIONS' &&
           evaluation.generation_targets.length > 0,
 
         generations_unavailable_reason:
-          evaluation.participant_scope ===
-          'ALL_ENROLLED'
+          evaluation.participant_scope === 'ALL_ENROLLED'
             ? 'SCOPE_NOT_GENERATION_ONLY'
-            : evaluation.generation_targets.length ===
-                0
+            : evaluation.generation_targets.length === 0
               ? 'NO_FROZEN_GENERATION_TARGETS'
               : null,
 
-        generations:
-          evaluation.generation_targets.map(
-            (target: EvaluationGenerationTarget) => ({
-              id:
-                target.student_generations
-                  .id,
-
-              name:
-                target.student_generations
-                  .name,
-
-              entry_academic_year_id:
-                target.student_generations
-                  .entry_academic_year_id,
-
-              starting_year_level:
-                target.student_generations
-                  .starting_year_level,
-
-              entry_academic_year: {
-                id:
-                  target.student_generations
-                    .entry_academic_year.id,
-
-                name:
-                  target.student_generations
-                    .entry_academic_year.name,
-
-                start_year:
-                  target.student_generations
-                    .entry_academic_year
-                    .start_year,
+        generations: evaluation.generation_targets.map(
+          (target: EvaluationGenerationTarget) => ({
+            ...targetLabelView(target, {
+              generation: {
+                id: target.student_generations.id,
+                name: target.student_generations.name,
               },
+              entry_academic_year:
+                target.student_generations.entry_academic_year,
+              starting_year_level:
+                target.student_generations.starting_year_level,
             }),
-          ),
+            id: target.student_generations.id,
 
-        groups_complete:
-          evaluation.group_targets.length > 0,
+            name: target.student_generations.name,
+
+            entry_academic_year_id:
+              target.student_generations.entry_academic_year_id,
+
+            starting_year_level: target.student_generations.starting_year_level,
+
+            entry_academic_year: {
+              id: target.student_generations.entry_academic_year.id,
+
+              name: target.student_generations.entry_academic_year.name,
+
+              start_year:
+                target.student_generations.entry_academic_year.start_year,
+            },
+          }),
+        ),
+
+        groups_complete: evaluation.group_targets.length > 0,
 
         groups_unavailable_reason:
           evaluation.group_targets.length === 0
             ? 'NO_FROZEN_GROUP_TARGETS'
             : null,
 
-        groups:
-          evaluation.group_targets.map(
-            (target: any) => ({
-              academic_year: {
-                id:
-                  target.academic_years.id,
+        groups: evaluation.group_targets.map((target: any) => ({
+          ...targetLabelView(target, {
+            academic_year: target.academic_years,
+            generation: target.student_generations,
+            major: target.majors,
+            year_level: target.year_level,
+            class_group: target.class_group,
+          }),
+          academic_year: {
+            id: target.academic_years.id,
 
-                name:
-                  target.academic_years.name,
+            name: target.academic_years.name,
 
-                start_year:
-                  target.academic_years
-                    .start_year,
-              },
+            start_year: target.academic_years.start_year,
+          },
 
-              generation: {
-                id:
-                  target.student_generations.id,
+          generation: {
+            id: target.student_generations.id,
 
-                name:
-                  target.student_generations
-                    .name,
-              },
+            name: target.student_generations.name,
+          },
 
-              major: {
-                id:
-                  target.majors.id,
+          major: {
+            id: target.majors.id,
 
-                code:
-                  target.majors.code,
+            code: target.majors.code,
 
-                name:
-                  target.majors.name,
-              },
+            name: target.majors.name,
+          },
 
-              year_level:
-                target.year_level,
+          year_level: target.year_level,
 
-              class_group:
-                target.class_group,
-            }),
-          ),
+          class_group: target.class_group,
+        })),
       },
 
-      participant_count:
-        evaluation._count
-          .evaluation_participants,
+      participant_count: evaluation._count.evaluation_participants,
 
-      submission_count:
+      submission_count: evaluation._count.responses,
+
+      response_rate: this.calculateResponseRate(
+        evaluation._count.evaluation_participants,
         evaluation._count.responses,
-
-      response_rate:
-        this.calculateResponseRate(
-          evaluation._count
-            .evaluation_participants,
-          evaluation._count.responses,
-        ),
+      ),
 
       /*
        * Results are now separated by the exact version
        * actually used for each submitted response.
        */
-      version_results:
-        versionResults,
+      version_results: versionResults,
 
       /*
        * Historical responses with no saved version are
@@ -669,8 +553,7 @@ export class ResultsService {
        *
        * No response/student identity is exposed.
        */
-      unversioned_submission_count:
-        unversionedResponses.length,
+      unversioned_submission_count: unversionedResponses.length,
     };
   }
 
@@ -678,34 +561,21 @@ export class ResultsService {
   // BUILD ONE VERSION RESULT
   // =========================================================
 
-  private buildVersionResult(
-    surveyVersion: any,
-    responses: any[],
-  ) {
+  private buildVersionResult(surveyVersion: any, responses: any[]) {
     return {
-      survey_id:
-        surveyVersion.survey_id,
+      survey_id: surveyVersion.survey_id,
 
-      survey_title:
-        surveyVersion.surveys.title,
+      survey_title: surveyVersion.surveys.title,
 
-      survey_version_id:
-        surveyVersion.id,
+      survey_version_id: surveyVersion.id,
 
-      version_no:
-        surveyVersion.version_no,
+      version_no: surveyVersion.version_no,
 
-      submission_count:
-        responses.length,
+      submission_count: responses.length,
 
-      questions:
-        surveyVersion.questions.map(
-          (question: any) =>
-            this.buildQuestionResult(
-              question,
-              responses,
-            ),
-        ),
+      questions: surveyVersion.questions.map((question: any) =>
+        this.buildQuestionResult(question, responses),
+      ),
     };
   }
 
@@ -713,10 +583,7 @@ export class ResultsService {
   // BUILD QUESTION RESULT
   // =========================================================
 
-  private buildQuestionResult(
-    question: any,
-    responses: any[],
-  ) {
+  private buildQuestionResult(question: any, responses: any[]) {
     /*
      * Only responses belonging to this exact survey
      * version reach this method.
@@ -731,46 +598,32 @@ export class ResultsService {
      * - student name
      * - student email
      */
-    const answers =
-      responses.flatMap(
-        (response: any) =>
-          response.answers.filter(
-            (answer: any) =>
-              answer.question_id ===
-              question.id,
-          ),
-      );
+    const answers = responses.flatMap((response: any) =>
+      response.answers.filter(
+        (answer: any) => answer.question_id === question.id,
+      ),
+    );
 
     const base = {
-      question_id:
-        question.id,
+      question_id: question.id,
 
-      question_text:
-        question.question_text,
+      question_text: question.question_text,
 
-      question_text_km:
-        question.question_text_km,
+      question_text_km: question.question_text_km,
 
-      question_type:
-        question.question_type,
+      question_type: question.question_type,
 
-      category:
-        question.category,
+      category: question.category,
 
-      is_required:
-        question.is_required,
+      is_required: question.is_required,
 
-      min_rating:
-        question.min_rating,
+      min_rating: question.min_rating,
 
-      max_rating:
-        question.max_rating,
+      max_rating: question.max_rating,
 
-      display_order:
-        question.display_order,
+      display_order: question.display_order,
 
-      answer_count:
-        answers.length,
+      answer_count: answers.length,
     };
 
     // =====================================================
@@ -778,77 +631,42 @@ export class ResultsService {
     // =====================================================
 
     if (
-      question.question_type ===
-        'RATING' ||
-      question.question_type ===
-        'AGREEMENT' ||
-      question.question_type ===
-        'FREQUENCY'
+      question.question_type === 'RATING' ||
+      question.question_type === 'AGREEMENT' ||
+      question.question_type === 'FREQUENCY'
     ) {
-      const ratings: number[] =
-        answers
-          .map(
-            (answer: any) =>
-              answer.rating_value,
-          )
-          .filter(
-            (
-              value: number | null,
-            ): value is number =>
-              value !== null,
-          );
+      const ratings: number[] = answers
+        .map((answer: any) => answer.rating_value)
+        .filter((value: number | null): value is number => value !== null);
 
       const average =
         ratings.length > 0
-          ? ratings.reduce(
-              (
-                sum: number,
-                value: number,
-              ) => sum + value,
-              0,
-            ) / ratings.length
+          ? ratings.reduce((sum: number, value: number) => sum + value, 0) /
+            ratings.length
           : null;
 
-      const distribution:
-        Record<string, number> = {};
+      const distribution: Record<string, number> = {};
 
-      if (
-        question.min_rating !==
-          null &&
-        question.max_rating !==
-          null
-      ) {
+      if (question.min_rating !== null && question.max_rating !== null) {
         for (
-          let value =
-            question.min_rating;
-          value <=
-          question.max_rating;
+          let value = question.min_rating;
+          value <= question.max_rating;
           value++
         ) {
-          distribution[
-            value.toString()
-          ] = 0;
+          distribution[value.toString()] = 0;
         }
       }
 
       for (const rating of ratings) {
-        const key =
-          rating.toString();
+        const key = rating.toString();
 
-        distribution[key] =
-          (distribution[key] ??
-            0) + 1;
+        distribution[key] = (distribution[key] ?? 0) + 1;
       }
 
       return {
         ...base,
 
-        average:
-          average === null
-            ? null
-            : Number(
-                average.toFixed(2),
-              ),
+        average: average === null ? null : Number(average.toFixed(2)),
 
         distribution,
       };
@@ -858,24 +676,13 @@ export class ResultsService {
     // TEXT
     // =====================================================
 
-    if (
-      question.question_type ===
-      'TEXT'
-    ) {
-      const feedback: string[] =
-        answers
-          .map(
-            (answer: any) =>
-              answer.text_value,
-          )
-          .filter(
-            (
-              value: string | null,
-            ): value is string =>
-              value !== null &&
-              value.trim().length >
-                0,
-          );
+    if (question.question_type === 'TEXT') {
+      const feedback: string[] = answers
+        .map((answer: any) => answer.text_value)
+        .filter(
+          (value: string | null): value is string =>
+            value !== null && value.trim().length > 0,
+        );
 
       return {
         ...base,
@@ -889,48 +696,32 @@ export class ResultsService {
     // =====================================================
 
     if (
-      question.question_type ===
-        'MULTIPLE_CHOICE' ||
-      question.question_type ===
-        'CHECKBOX'
+      question.question_type === 'MULTIPLE_CHOICE' ||
+      question.question_type === 'CHECKBOX'
     ) {
-      const options =
-        question.question_options.map(
-          (option: any) => {
-            let count = 0;
+      const options = question.question_options.map((option: any) => {
+        let count = 0;
 
-            for (
-              const answer of answers
-            ) {
-              const selected =
-                answer.answer_options.some(
-                  (
-                    answerOption: any,
-                  ) =>
-                    answerOption
-                      .option_id ===
-                    option.id,
-                );
+        for (const answer of answers) {
+          const selected = answer.answer_options.some(
+            (answerOption: any) => answerOption.option_id === option.id,
+          );
 
-              if (selected) {
-                count++;
-              }
-            }
+          if (selected) {
+            count++;
+          }
+        }
 
-            return {
-              option_id:
-                option.id,
+        return {
+          option_id: option.id,
 
-              option_text:
-                option.option_text,
+          option_text: option.option_text,
 
-              display_order:
-                option.display_order,
+          display_order: option.display_order,
 
-              count,
-            };
-          },
-        );
+          count,
+        };
+      });
 
       return {
         ...base,
@@ -962,12 +753,7 @@ export class ResultsService {
     }
 
     return {
-      value: Number(
-        (
-          (submissionCount / participantCount) *
-          100
-        ).toFixed(2),
-      ),
+      value: Number(((submissionCount / participantCount) * 100).toFixed(2)),
       unavailable_reason: null,
     };
   }

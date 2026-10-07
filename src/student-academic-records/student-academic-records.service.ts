@@ -1,10 +1,15 @@
 import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import {
+  progressionStudentSelect,
+  resolveStudentPlacement,
+} from '../common/utils/student-placement.util';
 
 import { normalizeClassGroup } from '../common/utils/class-group.util';
 import { PrismaService } from '../prisma/prisma.service';
@@ -18,6 +23,7 @@ const academicRecordSelect = {
   year_level: true,
   major_id: true,
   class_group: true,
+  progression_action: true,
   created_at: true,
   updated_at: true,
 
@@ -96,18 +102,15 @@ export class StudentAcademicRecordsService {
   }
 
   async findOne(id: bigint) {
-    const record =
-      await this.prisma.student_academic_records.findUnique({
-        where: {
-          id,
-        },
-        select: academicRecordSelect,
-      });
+    const record = await this.prisma.student_academic_records.findUnique({
+      where: {
+        id,
+      },
+      select: academicRecordSelect,
+    });
 
     if (!record) {
-      throw new NotFoundException(
-        'Student academic record not found',
-      );
+      throw new NotFoundException('Student academic record not found');
     }
 
     return record;
@@ -128,23 +131,18 @@ export class StudentAcademicRecordsService {
     }
   }
 
-  private async ensureAcademicYearExists(
-    academicYearId: bigint,
-  ) {
-    const academicYear =
-      await this.prisma.academic_years.findUnique({
-        where: {
-          id: academicYearId,
-        },
-        select: {
-          id: true,
-        },
-      });
+  private async ensureAcademicYearExists(academicYearId: bigint) {
+    const academicYear = await this.prisma.academic_years.findUnique({
+      where: {
+        id: academicYearId,
+      },
+      select: {
+        id: true,
+      },
+    });
 
     if (!academicYear) {
-      throw new NotFoundException(
-        'Academic year not found',
-      );
+      throw new NotFoundException('Academic year not found');
     }
   }
 
@@ -190,10 +188,12 @@ export class StudentAcademicRecordsService {
     const academicYearId = BigInt(dto.academic_year_id);
     const majorId = BigInt(dto.major_id);
 
-    await this.ensureReferencesExist(
+    await this.ensureReferencesExist(studentId, academicYearId, majorId);
+
+    await this.validateProgression(
       studentId,
       academicYearId,
-      majorId,
+      dto.progression_action,
     );
 
     try {
@@ -203,9 +203,10 @@ export class StudentAcademicRecordsService {
           academic_year_id: academicYearId,
           year_level: dto.year_level,
           major_id: majorId,
-          class_group: normalizeClassGroup(
-            dto.class_group,
-          ),
+          class_group: normalizeClassGroup(dto.class_group),
+          ...(dto.progression_action !== undefined && {
+            progression_action: dto.progression_action,
+          }),
         },
         select: academicRecordSelect,
       });
@@ -239,13 +240,12 @@ export class StudentAcademicRecordsService {
           student_id: true,
           academic_year_id: true,
           major_id: true,
+          progression_action: true,
         },
       });
 
     if (!existingRecord) {
-      throw new NotFoundException(
-        'Student academic record not found',
-      );
+      throw new NotFoundException('Student academic record not found');
     }
 
     const studentId =
@@ -263,11 +263,38 @@ export class StudentAcademicRecordsService {
         ? BigInt(dto.major_id)
         : existingRecord.major_id;
 
-    await this.ensureReferencesExist(
+    if (
+      existingRecord.progression_action &&
+      existingRecord.progression_action !== 'NORMAL'
+    ) {
+      if (
+        studentId !== existingRecord.student_id ||
+        academicYearId !== existingRecord.academic_year_id
+      ) {
+        throw new BadRequestException(
+          'Progression records cannot be moved to another student or year',
+        );
+      }
+      if (
+        dto.progression_action === 'NORMAL' ||
+        (existingRecord.progression_action === 'PAUSE' &&
+          dto.progression_action !== undefined &&
+          !['PAUSE', 'RESUME'].includes(dto.progression_action))
+      ) {
+        throw new BadRequestException(
+          'A pause can only be cleared with explicit RESUME; progression records cannot be reset to NORMAL',
+        );
+      }
+    }
+
+    await this.validateProgression(
       studentId,
       academicYearId,
-      majorId,
+      dto.progression_action ?? existingRecord.progression_action,
+      id,
     );
+
+    await this.ensureReferencesExist(studentId, academicYearId, majorId);
 
     try {
       return await this.prisma.student_academic_records.update({
@@ -292,9 +319,10 @@ export class StudentAcademicRecordsService {
           }),
 
           ...(dto.class_group !== undefined && {
-            class_group: normalizeClassGroup(
-              dto.class_group,
-            ),
+            class_group: normalizeClassGroup(dto.class_group),
+          }),
+          ...(dto.progression_action !== undefined && {
+            progression_action: dto.progression_action,
           }),
         },
         select: academicRecordSelect,
@@ -322,12 +350,20 @@ export class StudentAcademicRecordsService {
         },
         select: {
           id: true,
+          progression_action: true,
         },
       });
 
     if (!existingRecord) {
-      throw new NotFoundException(
-        'Student academic record not found',
+      throw new NotFoundException('Student academic record not found');
+    }
+
+    if (
+      existingRecord.progression_action &&
+      existingRecord.progression_action !== 'NORMAL'
+    ) {
+      throw new ConflictException(
+        'Progression records must be retained; explicitly resume paused students instead of deleting their pause',
       );
     }
 
@@ -346,10 +382,61 @@ export class StudentAcademicRecordsService {
     }
   }
 
+  private async validateProgression(
+    studentId: bigint,
+    yearId: bigint,
+    action: string | undefined,
+    recordId?: bigint,
+  ) {
+    if (!action || action === 'NORMAL') return;
+    const [year, student] = await Promise.all([
+      this.prisma.academic_years.findUnique({
+        where: { id: yearId },
+        select: { id: true, start_year: true },
+      }),
+      this.prisma.students.findUnique({
+        where: { id: studentId },
+        select: progressionStudentSelect,
+      }),
+    ]);
+    if (!year || !student)
+      throw new NotFoundException('Student or academic year not found');
+    if (year.start_year === null)
+      throw new BadRequestException(
+        'Progression actions require a structured academic year start_year',
+      );
+    const sameStart = student.student_academic_records.some(
+      (r) =>
+        r.academic_year_id !== yearId &&
+        r.academic_years.start_year === year.start_year,
+    );
+    if (sameStart)
+      throw new ConflictException(
+        'Student placements have ambiguous academic year chronology; correct start_year before approving progression',
+      );
+    if (action === 'RESUME') {
+      const current = student.student_academic_records.find(
+        (r) => r.id === recordId,
+      );
+      const context = resolveStudentPlacement(
+        student.student_generations,
+        student.student_academic_records.filter((r) => r.id !== recordId),
+        year,
+      );
+      if (
+        current?.progression_action !== 'PAUSE' &&
+        current?.progression_action !== 'RESUME' &&
+        context.progression_status !== 'PAUSED'
+      ) {
+        throw new BadRequestException(
+          'RESUME requires an existing pause for this student',
+        );
+      }
+    }
+  }
+
   private handlePrismaError(error: unknown): never {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError
-    ) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === 'P2002') {
         throw new ConflictException(
           'An academic record already exists for this student and academic year',

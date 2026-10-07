@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   HttpCode,
+  Optional,
   Param,
   Post,
   Put,
@@ -31,75 +32,70 @@ import { ParseBigIntPipe } from '../common/pipes/parse-bigint.pipe';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ReviewedWorkflowsService } from '../reviewed-workflows/reviewed-workflows.service';
+import { requireReviewAtCutover } from '../reviewed-workflows/reviewed-operation.store';
+import {
+  capturedTargetLabelExample,
+  legacyTargetLabelExample,
+  targetLabelDescription,
+} from '../common/swagger/target-label.example';
 
 @ApiTags('evaluations')
 @ApiBearerAuth()
-@UseGuards(
-  AuthGuard('jwt'),
-  RolesGuard,
-)
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 @Roles('ADMIN')
 @Controller('evaluations')
 export class EvaluationsController {
   constructor(
     private readonly evaluationsService: EvaluationsService,
+    @Optional() private readonly reviewedWorkflows?: ReviewedWorkflowsService,
   ) {}
 
   @Get()
   @ApiOperation({
-    summary:
-      'List evaluations, optionally filtered by status',
+    summary: 'List evaluations, optionally filtered by status',
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Evaluations returned successfully',
+    description: 'Evaluations returned successfully',
   })
   findAll(
     @Query()
     query: ListEvaluationsQueryDto,
   ) {
-    return this.evaluationsService.findAll(
-      query,
-    );
+    return this.evaluationsService.findAll(query);
   }
 
   @Post('participants/preview')
   @HttpCode(200)
   @ApiOperation({
-    summary:
-      'Preview eligible students for an evaluation',
+    summary: 'Preview eligible students for an evaluation',
     description:
       'Resolves eligible students from the actual course-offering enrollments. SELECTED_GENERATIONS is intersected with those enrollments and never falls back to all enrolled students.',
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Eligible students previewed successfully',
+    description: 'Eligible students previewed successfully',
   })
   @ApiResponse({
     status: 400,
-    description:
-      'Invalid participant scope or generation selection',
+    description: 'Invalid participant scope or generation selection',
   })
   @ApiResponse({
     status: 404,
-    description:
-      'Course offering or selected generation not found',
+    description: 'Course offering or selected generation not found',
   })
   previewParticipants(
     @Body()
     dto: PreviewEvaluationParticipantsDto,
   ) {
-    return this.evaluationsService.previewParticipants(
-      dto,
-    );
+    return this.evaluationsService.previewParticipants(dto);
   }
 
   @Get(':id')
   @ApiOperation({
-    summary:
-      'Get one evaluation with its context, targeting, and counts',
+    summary: 'Get one evaluation with its context, targeting, and counts',
+    description: targetLabelDescription,
   })
   @ApiParam({
     name: 'id',
@@ -108,37 +104,35 @@ export class EvaluationsController {
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Evaluation returned successfully',
+    description: 'Evaluation returned successfully',
+    schema: {
+      example: {
+        id: '10',
+        generation_targets: [],
+        group_targets: [capturedTargetLabelExample, legacyTargetLabelExample],
+      },
+    },
   })
   @ApiResponse({
     status: 404,
-    description:
-      'Evaluation not found',
+    description: 'Evaluation not found',
   })
   findOne(
-    @Param(
-      'id',
-      ParseBigIntPipe,
-    )
+    @Param('id', ParseBigIntPipe)
     id: bigint,
   ) {
-    return this.evaluationsService.findOne(
-      id,
-    );
+    return this.evaluationsService.findOne(id);
   }
 
   @Post()
   @ApiOperation({
-    summary:
-      'Create a DRAFT evaluation and confirm its participant group',
+    summary: 'Create a DRAFT evaluation and confirm its participant group',
     description:
-      'Send the reviewed survey_version_id to detect a stale question selection (409). Set-only selection validates the actual latest version and rejects an empty/archived latest version without fallback. participant_scope defaults to ALL_ENROLLED. For reviewed targeting, send the unchanged context and exact confirmed_student_ids returned by preview. Validation and writes share a serializable transaction; a concurrent conflict requires review and retry.',
+      'For full review, call /evaluations/create-preview with an explicit latest survey_version_id and complete creation input; send unchanged fields, confirmed_student_ids and review_id here. Binds questionnaire, schedule, exact placement/membership context and target labels. A selected label rename before confirmation requires re-review. Snapshots are server-authored at confirmation; do not submit historical_labels. Retry returns the original evaluation, labels and already_applied=true. Participant-only preview and set-only creation remain legacy compatibility until REQUIRE_REVIEWED_CONFIRMATION=true. Actual latest has no empty-version fallback.',
   })
   @ApiResponse({
     status: 201,
-    description:
-      'Evaluation created successfully',
+    description: 'Evaluation created successfully',
   })
   @ApiResponse({
     status: 400,
@@ -159,16 +153,15 @@ export class EvaluationsController {
       id: bigint;
     },
   ) {
-    return this.evaluationsService.create(
-      dto,
-      currentUser.id,
-    );
+    if (dto.review_id && this.reviewedWorkflows)
+      return this.reviewedWorkflows.confirmCreate(dto, currentUser.id);
+    requireReviewAtCutover();
+    return this.evaluationsService.create(dto, currentUser.id);
   }
 
   @Put(':id/schedule')
   @ApiOperation({
-    summary:
-      'Set the start/end time of a DRAFT evaluation',
+    summary: 'Set the start/end time of a DRAFT evaluation',
   })
   @ApiParam({
     name: 'id',
@@ -177,40 +170,30 @@ export class EvaluationsController {
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Evaluation schedule updated successfully',
+    description: 'Evaluation schedule updated successfully',
   })
   @ApiResponse({
     status: 400,
-    description:
-      'end_at is not after start_at',
+    description: 'end_at is not after start_at',
   })
   @ApiResponse({
     status: 409,
-    description:
-      'Evaluation is not a DRAFT',
+    description: 'Evaluation is not a DRAFT',
   })
   updateSchedule(
-    @Param(
-      'id',
-      ParseBigIntPipe,
-    )
+    @Param('id', ParseBigIntPipe)
     id: bigint,
 
     @Body()
     dto: UpdateScheduleDto,
   ) {
-    return this.evaluationsService.updateSchedule(
-      id,
-      dto,
-    );
+    return this.evaluationsService.updateSchedule(id, dto);
   }
 
   @Post(':id/open')
   @HttpCode(200)
   @ApiOperation({
-    summary:
-      'Open a DRAFT evaluation and lock its question-set version',
+    summary: 'Open a DRAFT evaluation and lock its question-set version',
     description:
       'Uses the frozen participant list. A newer question version returns 409 and preserves the draft assignment for re-review. Existing assignments may continue after their named set is archived. Opening never silently substitutes versions or adds later enrollments.',
   })
@@ -221,8 +204,7 @@ export class EvaluationsController {
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Evaluation opened successfully',
+    description: 'Evaluation opened successfully',
   })
   @ApiResponse({
     status: 400,
@@ -231,8 +213,7 @@ export class EvaluationsController {
   })
   @ApiResponse({
     status: 404,
-    description:
-      'Evaluation not found',
+    description: 'Evaluation not found',
   })
   @ApiResponse({
     status: 409,
@@ -240,22 +221,16 @@ export class EvaluationsController {
       'Evaluation is not a DRAFT, a newer question version requires re-review, or a concurrent operation conflicted',
   })
   open(
-    @Param(
-      'id',
-      ParseBigIntPipe,
-    )
+    @Param('id', ParseBigIntPipe)
     id: bigint,
   ) {
-    return this.evaluationsService.open(
-      id,
-    );
+    return this.evaluationsService.open(id);
   }
 
   @Post(':id/close')
   @HttpCode(200)
   @ApiOperation({
-    summary:
-      'Close an OPEN evaluation',
+    summary: 'Close an OPEN evaluation',
   })
   @ApiParam({
     name: 'id',
@@ -264,36 +239,27 @@ export class EvaluationsController {
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Evaluation closed successfully',
+    description: 'Evaluation closed successfully',
   })
   @ApiResponse({
     status: 404,
-    description:
-      'Evaluation not found',
+    description: 'Evaluation not found',
   })
   @ApiResponse({
     status: 409,
-    description:
-      'Evaluation is not OPEN',
+    description: 'Evaluation is not OPEN',
   })
   close(
-    @Param(
-      'id',
-      ParseBigIntPipe,
-    )
+    @Param('id', ParseBigIntPipe)
     id: bigint,
   ) {
-    return this.evaluationsService.close(
-      id,
-    );
+    return this.evaluationsService.close(id);
   }
 
   @Delete(':id')
   @HttpCode(204)
   @ApiOperation({
-    summary:
-      'Delete a DRAFT evaluation',
+    summary: 'Delete a DRAFT evaluation',
     description:
       'Deletes the DRAFT together with its frozen participant assignments and generation targets.',
   })
@@ -304,28 +270,20 @@ export class EvaluationsController {
   })
   @ApiResponse({
     status: 204,
-    description:
-      'Evaluation deleted successfully',
+    description: 'Evaluation deleted successfully',
   })
   @ApiResponse({
     status: 404,
-    description:
-      'Evaluation not found',
+    description: 'Evaluation not found',
   })
   @ApiResponse({
     status: 409,
-    description:
-      'Evaluation is not a DRAFT',
+    description: 'Evaluation is not a DRAFT',
   })
   async remove(
-    @Param(
-      'id',
-      ParseBigIntPipe,
-    )
+    @Param('id', ParseBigIntPipe)
     id: bigint,
   ) {
-    await this.evaluationsService.remove(
-      id,
-    );
+    await this.evaluationsService.remove(id);
   }
 }

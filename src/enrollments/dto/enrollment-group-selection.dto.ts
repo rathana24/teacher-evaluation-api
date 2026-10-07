@@ -1,7 +1,4 @@
-import {
-  ApiProperty,
-  ApiPropertyOptional,
-} from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
   IsInt,
@@ -15,8 +12,9 @@ import {
 import { Type } from 'class-transformer';
 
 import { CLASS_GROUP_MAX_LENGTH } from '../../common/utils/class-group.util';
+import { OptionalReviewDto } from '../../common/dto/optional-review.dto';
 
-export class EnrollmentGroupSelectionDto {
+export class EnrollmentGroupSelectionDto extends OptionalReviewDto {
   @ApiProperty({
     example: '1',
     type: String,
@@ -93,8 +91,7 @@ export class EnrollmentGroupSelectionDto {
   @IsString({ each: true })
   @Matches(/^[1-9]\d*$/, {
     each: true,
-    message:
-      'confirmed_student_ids must contain positive integers',
+    message: 'confirmed_student_ids must contain positive integers',
   })
   confirmed_student_ids?: string[];
 }

@@ -1,9 +1,5 @@
-import {
-  ApiPropertyOptional,
-} from '@nestjs/swagger';
-import {
-  evaluation_participant_scope,
-} from '@prisma/client';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { evaluation_participant_scope } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   ArrayNotEmpty,
@@ -17,17 +13,14 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-import {
-  EvaluationGroupScopeDto,
-} from './evaluation-group-scope.dto';
+import { EvaluationGroupScopeDto } from './evaluation-group-scope.dto';
+import { OptionalReviewDto } from '../../common/dto/optional-review.dto';
 
-export class EvaluationTargetingDto {
+export class EvaluationTargetingDto extends OptionalReviewDto {
   @ApiPropertyOptional({
     enum: evaluation_participant_scope,
-    example:
-      evaluation_participant_scope.ALL_ENROLLED,
-    default:
-      evaluation_participant_scope.ALL_ENROLLED,
+    example: evaluation_participant_scope.ALL_ENROLLED,
+    default: evaluation_participant_scope.ALL_ENROLLED,
     description:
       'Controls the base enrolled-student scope. Group scope, when supplied, further restricts this enrolled population.',
   })
@@ -54,8 +47,7 @@ export class EvaluationTargetingDto {
   })
   @Matches(/^[1-9]\d*$/, {
     each: true,
-    message:
-      'Each generation_id must be a positive integer',
+    message: 'Each generation_id must be a positive integer',
   })
   generation_ids?: string[];
 
@@ -90,8 +82,7 @@ export class EvaluationTargetingDto {
   })
   @Matches(/^[1-9]\d*$/, {
     each: true,
-    message:
-      'Each confirmed_student_id must be a positive integer',
+    message: 'Each confirmed_student_id must be a positive integer',
   })
   confirmed_student_ids?: string[];
 }

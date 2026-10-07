@@ -1,9 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 
 import { AuthGuard } from '@nestjs/passport';
 
@@ -20,6 +15,7 @@ import { ParseBigIntPipe } from '../common/pipes/parse-bigint.pipe';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { assertWholeAnonymousAggregate } from '../common/utils/anonymous-report-scope.util';
 
 @ApiTags('lecturer')
 @ApiBearerAuth()
@@ -31,8 +27,9 @@ export class CommentsController {
 
   @Get(':id/comments')
   @ApiOperation({
-    summary:
-      'Anonymous written comments from one of my closed evaluations',
+    summary: 'Anonymous written comments from one of my closed evaluations',
+    description:
+      'Whole evaluation comments only. Generation/group query slicing returns 400/UNSUPPORTED_ANONYMOUS_SCOPE; answers are never attributed to students.',
   })
   @ApiParam({
     name: 'id',
@@ -58,10 +55,9 @@ export class CommentsController {
   getComments(
     @Param('id', ParseBigIntPipe) id: bigint,
     @CurrentUser() currentUser: { id: bigint },
+    @Query() query: Record<string, unknown> = {},
   ) {
-    return this.commentsService.getComments(
-      id,
-      currentUser.id,
-    );
+    assertWholeAnonymousAggregate(query);
+    return this.commentsService.getComments(id, currentUser.id);
   }
 }
