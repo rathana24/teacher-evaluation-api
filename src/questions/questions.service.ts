@@ -1,3 +1,4 @@
+import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
   BadRequestException,
   ConflictException,
@@ -72,12 +73,33 @@ export class QuestionsService {
   // CREATE QUESTION
   // =========================================================
 
-  async create(
+  async create(versionId: bigint, dto: CreateQuestionDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) =>
+        new QuestionsService(db, this.surveyVersions).createInTransaction(
+          versionId,
+          dto,
+        ),
+      (e: any) => {
+        if (e.code === 'P2002') {
+          throw new ConflictException(
+            'display_order is already used for this question or its options',
+          );
+        }
+
+        throw e;
+      },
+    );
+  }
+
+  private async createInTransaction(
     versionId: bigint,
     dto: CreateQuestionDto,
   ) {
     await this.surveyVersions.assertEditable(
       versionId,
+      this.prisma,
     );
 
     const range = this.resolveRatingRange(
@@ -317,12 +339,33 @@ export class QuestionsService {
    *
    * Two-phase update avoids unique-order conflicts.
    */
-  async reorder(
+  async reorder(versionId: bigint, dto: ReorderQuestionsDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) =>
+        new QuestionsService(db, this.surveyVersions).reorderInTransaction(
+          versionId,
+          dto,
+        ),
+      (e: any) => {
+        if (e.code === 'P2002') {
+          throw new ConflictException(
+            'Unable to reorder questions because a display_order conflict occurred',
+          );
+        }
+
+        throw e;
+      },
+    );
+  }
+
+  private async reorderInTransaction(
     versionId: bigint,
     dto: ReorderQuestionsDto,
   ) {
     await this.surveyVersions.assertEditable(
       versionId,
+      this.prisma,
     );
 
     const existingQuestions =
@@ -522,7 +565,33 @@ export class QuestionsService {
   // UPDATE QUESTION
   // =========================================================
 
-  async update(
+  async update(questionId: bigint, dto: UpdateQuestionDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) =>
+        new QuestionsService(db, this.surveyVersions).updateInTransaction(
+          questionId,
+          dto,
+        ),
+      (e: any) => {
+        if (e.code === 'P2002') {
+          throw new ConflictException(
+            'display_order is already used for this question or its options',
+          );
+        }
+
+        if (e.code === 'P2003') {
+          throw new ConflictException(
+            'Question options are already referenced by submitted answers',
+          );
+        }
+
+        throw e;
+      },
+    );
+  }
+
+  private async updateInTransaction(
     questionId: bigint,
     dto: UpdateQuestionDto,
   ) {
@@ -533,6 +602,7 @@ export class QuestionsService {
 
     await this.surveyVersions.assertEditable(
       question.survey_version_id,
+      this.prisma,
     );
 
     const type =
@@ -687,6 +757,31 @@ export class QuestionsService {
   // =========================================================
 
   async remove(questionId: bigint) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) =>
+        new QuestionsService(db, this.surveyVersions).removeInTransaction(
+          questionId,
+        ),
+      (e: any) => {
+        if (e.code === 'P2003') {
+          throw new ConflictException(
+            'Question already has answers and cannot be deleted',
+          );
+        }
+
+        if (e.code === 'P2002') {
+          throw new ConflictException(
+            'Unable to compact question ordering because a display_order conflict occurred',
+          );
+        }
+
+        throw e;
+      },
+    );
+  }
+
+  private async removeInTransaction(questionId: bigint) {
     const question =
       await this.findQuestion(
         questionId,
@@ -694,6 +789,7 @@ export class QuestionsService {
 
     await this.surveyVersions.assertEditable(
       question.survey_version_id,
+      this.prisma,
     );
 
     const now = new Date();

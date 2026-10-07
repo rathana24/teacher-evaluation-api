@@ -1,6 +1,7 @@
 {
   "moduleFileExtensions": ["js", "json", "ts"],
   "rootDir": "..",
+  "setupFiles": ["<rootDir>/test/run-e2e.cjs"],
   "testEnvironment": "node",
   "testRegex": ".*\\.e2e-spec\\.ts$",
   "preset": "ts-jest/presets/default-esm",

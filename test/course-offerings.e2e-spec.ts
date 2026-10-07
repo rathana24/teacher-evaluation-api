@@ -3,6 +3,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { class_type } from '@prisma/client';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { PrismaService } from '../src/prisma/prisma.service';
 
 // Same fix as main.ts — BigInt IDs can't be JSON-serialised by default
 (BigInt.prototype as any).toJSON = function () {
@@ -11,20 +12,27 @@ import { AppModule } from '../src/app.module';
 
 describe('Course Offerings (e2e)', () => {
   let app: INestApplication;
+  let prisma: PrismaService;
   let adminToken: string;
   let studentToken: string;
   let lecturerToken: string;
   let createdOfferingId: string;
+  let studentId: string;
+  let protectedOfferingId: bigint;
 
-  // Seeded data: course 2 = CS402, lecturer 2 = Sok Dara, semester 1, student 4 = student1
-  // Unique section per run, so re-running never collides with a leftover row
+  let courseId: bigint | undefined;
+  let semesterId: bigint | undefined;
+  let academicYearId: bigint | undefined;
+
   const testSection = `E2E-${Date.now()}`;
-  const validBody = {
-    course_id: '2',
-    lecturer_id: '2',
-    semester_id: '1',
-    class_type: class_type.COURSE,
-    section_code: testSection,
+  const testCourseCode = `E2E-CO-${Date.now()}`;
+
+  let validBody: {
+    course_id: string;
+    lecturer_id: string;
+    semester_id: string;
+    class_type: class_type;
+    section_code: string;
   };
 
   beforeAll(async () => {
@@ -34,22 +42,148 @@ describe('Course Offerings (e2e)', () => {
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api');
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     await app.init();
 
-    const login = (email: string) =>
-      request(app.getHttpServer())
+    prisma = app.get(PrismaService);
+
+    const login = async (identifier: string): Promise<string> => {
+      const res = await request(app.getHttpServer())
         .post('/api/auth/login')
-        .send({ identifier: email, password: 'Password123' })
-        .then((res) => res.body.access_token);
+        .send({ identifier, password: 'Password123' });
+
+      expect(res.status).toBe(200);
+      expect(typeof res.body.access_token).toBe('string');
+      expect(res.body.access_token.length).toBeGreaterThan(0);
+
+      return res.body.access_token;
+    };
 
     adminToken = await login('admin@itc.edu.kh');
     studentToken = await login('student1@itc.edu.kh');
     lecturerToken = await login('sokdara@itc.edu.kh');
+
+    const student = await prisma.users.findUniqueOrThrow({
+      where: { email: 'student1@itc.edu.kh' },
+    });
+    const lecturer = await prisma.users.findUniqueOrThrow({
+      where: { email: 'sokdara@itc.edu.kh' },
+    });
+    const department = await prisma.departments.findUniqueOrThrow({
+      where: { code: 'AMS' },
+    });
+
+    studentId = student.id.toString();
+
+    const fixtures = await prisma.$transaction(async (tx) => {
+      const now = new Date();
+
+      const academicYear = await tx.academic_years.create({
+        data: {
+          name: `CO-${Date.now()}`,
+          start_year: 2026,
+          is_active: false,
+        },
+      });
+
+      const semester = await tx.semesters.create({
+        data: {
+          academic_year_id: academicYear.id,
+          semester_name: 'Course Offerings E2E',
+          created_at: now,
+          updated_at: now,
+        },
+      });
+
+      const course = await tx.courses.create({
+        data: {
+          course_code: testCourseCode,
+          course_name: 'Course Offerings E2E Course',
+          department_id: department.id,
+          created_at: now,
+          updated_at: now,
+        },
+      });
+
+      const protectedOffering = await tx.course_offerings.create({
+        data: {
+          course_id: course.id,
+          lecturer_id: lecturer.id,
+          semester_id: semester.id,
+          class_type: class_type.COURSE,
+          section_code: `${testSection}-PROTECTED`,
+          created_at: now,
+          updated_at: now,
+        },
+      });
+
+      await tx.enrollments.create({
+        data: {
+          course_offering_id: protectedOffering.id,
+          student_id: student.id,
+          enrolled_at: now,
+        },
+      });
+
+      return {
+        academicYearId: academicYear.id,
+        semesterId: semester.id,
+        courseId: course.id,
+        protectedOfferingId: protectedOffering.id,
+      };
+    });
+
+    academicYearId = fixtures.academicYearId;
+    semesterId = fixtures.semesterId;
+    courseId = fixtures.courseId;
+    protectedOfferingId = fixtures.protectedOfferingId;
+
+    validBody = {
+      course_id: courseId.toString(),
+      lecturer_id: lecturer.id.toString(),
+      semester_id: semesterId.toString(),
+      class_type: class_type.COURSE,
+      section_code: testSection,
+    };
   }, 30000);
 
   afterAll(async () => {
-    await app.close();
+    try {
+      if (prisma && courseId !== undefined) {
+        await prisma.$transaction(async (tx) => {
+          const offerings = await tx.course_offerings.findMany({
+            where: { course_id: courseId! },
+            select: { id: true },
+          });
+          const offeringIds = offerings.map((offering) => offering.id);
+
+          await tx.enrollments.deleteMany({
+            where: { course_offering_id: { in: offeringIds } },
+          });
+          await tx.course_offering_group_scopes.deleteMany({
+            where: { course_offering_id: { in: offeringIds } },
+          });
+          await tx.course_offerings.deleteMany({
+            where: { id: { in: offeringIds } },
+          });
+          await tx.courses.delete({
+            where: { id: courseId! },
+          });
+          await tx.semesters.delete({
+            where: { id: semesterId! },
+          });
+          await tx.academic_years.delete({
+            where: { id: academicYearId! },
+          });
+        });
+      }
+    } finally {
+      if (app) {
+        await app.close();
+      }
+    }
   });
 
   describe('POST /api/course-offerings', () => {
@@ -58,9 +192,9 @@ describe('Course Offerings (e2e)', () => {
         .post('/api/course-offerings')
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
-          course_id: '2',
-          lecturer_id: '2',
-          semester_id: '1',
+          course_id: validBody.course_id,
+          lecturer_id: validBody.lecturer_id,
+          semester_id: validBody.semester_id,
           section_code: `${testSection}-NO-TYPE`,
         });
 
@@ -75,7 +209,9 @@ describe('Course Offerings (e2e)', () => {
 
       expect(res.status).toBe(201);
       expect(res.body.section_code).toBe(testSection);
-      expect(res.body.courses.course_code).toBe('CS402');
+      expect(res.body.courses.course_code).toBe(testCourseCode);
+      expect(res.body.class_type).toBe(class_type.COURSE);
+      expect(res.body.users.password_hash).toBeUndefined();
       createdOfferingId = res.body.id;
     });
 
@@ -110,7 +246,7 @@ describe('Course Offerings (e2e)', () => {
       const res = await request(app.getHttpServer())
         .post('/api/course-offerings')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ ...validBody, lecturer_id: '4', section_code: 'X' });
+        .send({ ...validBody, lecturer_id: studentId, section_code: 'X' });
 
       expect(res.status).toBe(400);
     });
@@ -145,18 +281,18 @@ describe('Course Offerings (e2e)', () => {
 
   describe('Duplicate check when section_code is empty', () => {
     let noSectionId: string;
-    const noSectionBody = {
-      course_id: '1',
-      lecturer_id: '3',
-      semester_id: '1',
+    const noSectionBody = () => ({
+      course_id: validBody.course_id,
+      lecturer_id: validBody.lecturer_id,
+      semester_id: validBody.semester_id,
       class_type: class_type.COURSE,
-    };
+    });
 
     it('first offering without a section -> 201', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/course-offerings')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send(noSectionBody);
+        .send(noSectionBody());
 
       expect(res.status).toBe(201);
       expect(res.body.section_code).toBeNull();
@@ -167,7 +303,7 @@ describe('Course Offerings (e2e)', () => {
       const res = await request(app.getHttpServer())
         .post('/api/course-offerings')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send(noSectionBody);
+        .send(noSectionBody());
 
       expect(res.status).toBe(409);
     });
@@ -217,7 +353,7 @@ describe('Course Offerings (e2e)', () => {
       const res = await request(app.getHttpServer())
         .put(`/api/course-offerings/${createdOfferingId}`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ lecturer_id: '4' });
+        .send({ lecturer_id: studentId });
 
       expect(res.status).toBe(400);
     });
@@ -235,12 +371,24 @@ describe('Course Offerings (e2e)', () => {
   });
 
   describe('DELETE /api/course-offerings/:id', () => {
-    it('cannot delete an offering that has enrollments or evaluations -> 409', async () => {
+    it('cannot delete an offering that has enrollments -> 409', async () => {
       const res = await request(app.getHttpServer())
-        .delete('/api/course-offerings/1')
+        .delete(`/api/course-offerings/${protectedOfferingId}`)
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(res.status).toBe(409);
+
+      expect(
+        await prisma.course_offerings.findUnique({
+          where: { id: protectedOfferingId },
+        }),
+      ).not.toBeNull();
+
+      expect(
+        await prisma.enrollments.count({
+          where: { course_offering_id: protectedOfferingId },
+        }),
+      ).toBe(1);
     });
 
     it('STUDENT is blocked from deleting -> 403', async () => {

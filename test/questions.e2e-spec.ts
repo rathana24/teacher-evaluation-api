@@ -1,3 +1,4 @@
+import { baseFixtures } from './utils/base-fixtures';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   INestApplication,
@@ -14,6 +15,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 
 describe('Questions (e2e)', () => {
   let app: INestApplication;
+ let baseline: Awaited<ReturnType<typeof baseFixtures>>;
   let prisma: PrismaService;
 
   let adminToken: string;
@@ -54,6 +56,7 @@ describe('Questions (e2e)', () => {
     );
 
     await app.init();
+ baseline = await baseFixtures(app.get(PrismaService));
 
     prisma = app.get(PrismaService);
 
@@ -61,7 +64,7 @@ describe('Questions (e2e)', () => {
       request(app.getHttpServer())
         .post('/api/auth/login')
         .send({
-          email,
+          identifier: email,
           password: 'Password123',
         })
         .then((res) => res.body.access_token);
@@ -1101,7 +1104,7 @@ describe('Questions (e2e)', () => {
         app.getHttpServer(),
       )
         .post(
-          '/api/survey-versions/1/questions',
+          `/api/survey-versions/${baseline.version}/questions`,
         )
         .set(auth())
         .send({
@@ -1116,7 +1119,7 @@ describe('Questions (e2e)', () => {
       const res = await request(
         app.getHttpServer(),
       )
-        .put('/api/questions/1')
+        .put(`/api/questions/${baseline.question}`)
         .set(auth())
         .send({
           question_text:
@@ -1130,7 +1133,7 @@ describe('Questions (e2e)', () => {
       const res = await request(
         app.getHttpServer(),
       )
-        .delete('/api/questions/1')
+        .delete(`/api/questions/${baseline.question}`)
         .set(auth());
 
       expect(res.status).toBe(409);
@@ -1173,7 +1176,12 @@ describe('Questions (e2e)', () => {
   describe(
     'DELETE /api/questions/:questionId',
     () => {
-      it('ADMIN can delete a question in a DRAFT version -> 204', async () => {
+      it('ADMIN can delete a question in the latest unused DRAFT version -> 204', async () => {
+        const version = await request(app.getHttpServer()).post(`/api/surveys/${tempSurveyId}/versions`).set(auth()).send({});
+        expect(version.status).toBe(201);
+        const question = await request(app.getHttpServer()).post(`/api/survey-versions/${version.body.id}/questions`).set(auth()).send({question_text:'Disposable question',question_type:'TEXT'});
+        expect(question.status).toBe(201); textQuestionId = question.body.id;
+
         const res = await request(
           app.getHttpServer(),
         )

@@ -738,6 +738,7 @@ export class StudentImportService {
 
         return student;
       },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
   }
 

@@ -77,6 +77,9 @@ describe('UsersService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    Object.assign(prismaMock, {
+      $transaction: jest.fn(async (callback: (tx: any) => Promise<any>) => callback(prismaMock)),
+    });
 
     const module: TestingModule =
       await Test.createTestingModule({

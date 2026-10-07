@@ -14,7 +14,13 @@ export class CommentsService {
     const evaluation = await this.dashboard.getOwnClosedEvaluation(evaluationId, lecturerId);
 
     const textQuestions = await this.prisma.questions.findMany({
-      where: { survey_version_id: evaluation.survey_version_id, question_type: 'TEXT' },
+      where: {
+        question_type: 'TEXT',
+        OR: [
+          { survey_version_id: evaluation.survey_version_id },
+          { survey_versions: { responses: { some: { evaluation_id: evaluationId } } } },
+        ],
+      },
       select: { id: true, question_text: true, display_order: true },
       orderBy: { display_order: 'asc' },
     });
@@ -24,7 +30,7 @@ export class CommentsService {
       where: {
         text_value: { not: null },
         question_id: { in: textQuestions.map((q) => q.id) },
-        responses: { evaluation_id: evaluationId },
+        responses: { evaluation_id: evaluationId, survey_version_id: { not: null } },
       },
       select: { question_id: true, text_value: true },
     });

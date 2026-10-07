@@ -29,7 +29,7 @@ export class CreateEvaluationDto extends EvaluationTargetingDto {
   @ApiPropertyOptional({
     example: '1',
     description:
-      'Named question set. When survey_version_id is not provided, the backend selects the latest usable version from this survey only.',
+      'Named question set. Set-only selection validates its actual latest version; an empty or archived latest version is rejected. Send survey_version_id from review to detect stale selection.',
   })
   @ValidateIf(
     (dto: CreateEvaluationDto) =>
@@ -47,7 +47,7 @@ export class CreateEvaluationDto extends EvaluationTargetingDto {
   @ApiPropertyOptional({
     example: '3',
     description:
-      'Optional explicit survey version. If survey_id is also provided, this version must belong to that survey.',
+      'Reviewed latest version ID. A newer version returns 409 without creating an evaluation. If survey_id is also provided, the version must belong to that set.',
   })
   @ValidateIf(
     (dto: CreateEvaluationDto) =>

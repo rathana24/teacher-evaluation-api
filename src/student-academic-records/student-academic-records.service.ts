@@ -1,3 +1,4 @@
+import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
   ConflictException,
   Injectable,
@@ -175,6 +176,16 @@ export class StudentAcademicRecordsService {
   }
 
   async create(dto: CreateStudentAcademicRecordDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new StudentAcademicRecordsService(db).createInTransaction(dto),
+      (error: any) => {
+        this.handlePrismaError(error);
+      },
+    );
+  }
+
+  private async createInTransaction(dto: CreateStudentAcademicRecordDto) {
     const studentId = BigInt(dto.student_id);
     const academicYearId = BigInt(dto.academic_year_id);
     const majorId = BigInt(dto.major_id);
@@ -203,7 +214,18 @@ export class StudentAcademicRecordsService {
     }
   }
 
-  async update(
+  async update(id: bigint, dto: UpdateStudentAcademicRecordDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) =>
+        new StudentAcademicRecordsService(db).updateInTransaction(id, dto),
+      (error: any) => {
+        this.handlePrismaError(error);
+      },
+    );
+  }
+
+  private async updateInTransaction(
     id: bigint,
     dto: UpdateStudentAcademicRecordDto,
   ) {
@@ -283,6 +305,16 @@ export class StudentAcademicRecordsService {
   }
 
   async remove(id: bigint) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new StudentAcademicRecordsService(db).removeInTransaction(id),
+      (error: any) => {
+        this.handlePrismaError(error);
+      },
+    );
+  }
+
+  private async removeInTransaction(id: bigint) {
     const existingRecord =
       await this.prisma.student_academic_records.findUnique({
         where: {

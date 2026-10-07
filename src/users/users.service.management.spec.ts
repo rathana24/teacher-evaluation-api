@@ -1,3 +1,4 @@
+import { completeTransactionMock } from '../../test/utils/complete-transaction-mock';
 import { jest } from '@jest/globals';
 
 import {
@@ -113,7 +114,7 @@ describe('UsersService - staff management and deletion', () => {
             typeof argument === 'function'
           ) {
             return argument(
-              transactionClientMock,
+              completeTransactionMock(prismaMock, transactionClientMock),
             );
           }
 

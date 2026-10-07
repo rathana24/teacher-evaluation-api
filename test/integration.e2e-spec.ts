@@ -52,7 +52,7 @@ describe(
       api()
         .post('/api/auth/login')
         .send({
-          email,
+          identifier: email,
           password,
         });
 
@@ -102,12 +102,7 @@ describe(
       // Get the current seeded academic year.
       // Semester creation now requires academic_year_id.
       // -------------------------------------------------
-      const academicYear =
-        await prisma.academic_years.findFirst({
-          orderBy: {
-            id: 'asc',
-          },
-        });
+      const academicYear = await prisma.academic_years.create({data:{name:`I-${stamp}`,start_year:2026}});
 
       if (!academicYear) {
         throw new Error(
@@ -117,6 +112,9 @@ describe(
 
       ids.academicYear =
         academicYear.id.toString();
+      const generation = await prisma.student_generations.create({data:{name:`Integration-${stamp}`,entry_academic_year_id:academicYear.id}});
+      ids.generation = generation.id.toString();
+ ids.major = (await prisma.majors.findFirstOrThrow()).id.toString();
     });
 
     afterAll(async () => {
@@ -187,6 +185,7 @@ describe(
       }
 
       if (big('survey')) {
+        await prisma.survey_versions.deleteMany({where:{survey_id:big('survey')}});
         await prisma.surveys.deleteMany({
           where: {
             id: big('survey'),
@@ -225,6 +224,11 @@ describe(
         });
       }
 
+      const ownUsers = {email:{in:Object.values(emails)}};
+      await prisma.student_academic_records.deleteMany({where:{students:{users:ownUsers}}});
+      await prisma.students.deleteMany({where:{users:ownUsers}});
+      if (big('generation')) await prisma.student_generations.delete({where:{id:big('generation')!}});
+ if(big('academicYear')) await prisma.academic_years.delete({where:{id:big('academicYear')!}});
       await prisma.users.deleteMany({
         where: {
           email: {
@@ -256,9 +260,7 @@ describe(
         email: string,
         full_name: string,
         role: string,
-      ) =>
-        api()
-          .post('/api/users')
+      ) => role === 'STUDENT' ? api().post('/api/students').set(as('admin')).send({email,password,full_name,student_code:email.split('@')[0],generation_id:ids.generation,academic_year_id:ids.academicYear,major_id:ids.major,year_level:1,class_group:'A'}) : api().post('/api/users')
           .set(as('admin'))
           .send({
             email,
@@ -299,10 +301,10 @@ describe(
         lecturer.body.id;
 
       ids.studentA =
-        studentA.body.id;
+        studentA.body.user_id;
 
       ids.studentB =
-        studentB.body.id;
+        studentB.body.user_id;
     });
 
     it('3. Admin creates a course and a semester', async () => {
@@ -334,6 +336,7 @@ describe(
           academic_year_id: Number(
             ids.academicYear,
           ),
+          semester_number: 2,
 
           start_date: '2026-10-01',
           end_date: '2027-02-28',
@@ -365,6 +368,7 @@ describe(
           semester_id:
             ids.semester,
           section_code: 'A',
+          class_type: 'COURSE',
         });
 
       expect(

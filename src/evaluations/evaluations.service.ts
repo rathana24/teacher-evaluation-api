@@ -1,3 +1,4 @@
+import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
 
   BadRequestException,
@@ -332,7 +333,13 @@ export class EvaluationsService {
 
   }
 
-  async previewParticipants(
+  async previewParticipants(dto: PreviewEvaluationParticipantsDto) {
+    return inSerializableTransaction(this.prisma, (db) =>
+      new EvaluationsService(db).previewParticipantsInTransaction(dto),
+    );
+  }
+
+  private async previewParticipantsInTransaction(
 
     dto: PreviewEvaluationParticipantsDto,
 
@@ -509,7 +516,26 @@ export class EvaluationsService {
 
   }
 
-  async create(
+  async create(dto: CreateEvaluationDto, createdBy: bigint) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new EvaluationsService(db).createInTransaction(dto, createdBy),
+      (e: any) => {
+        if (
+          e instanceof Prisma.PrismaClientKnownRequestError &&
+          e.code === 'P2002'
+        ) {
+          throw new ConflictException(
+            'This course offering already has an evaluation using this survey version',
+          );
+        }
+
+        throw e;
+      },
+    );
+  }
+
+  private async createInTransaction(
 
     dto: CreateEvaluationDto,
 
@@ -907,7 +933,13 @@ export class EvaluationsService {
 
   }
 
-  async updateSchedule(
+  async updateSchedule(id: bigint, dto: UpdateScheduleDto) {
+    return inSerializableTransaction(this.prisma, (db) =>
+      new EvaluationsService(db).updateScheduleInTransaction(id, dto),
+    );
+  }
+
+  private async updateScheduleInTransaction(
 
     id: bigint,
 
@@ -990,6 +1022,12 @@ export class EvaluationsService {
   }
 
   async open(id: bigint) {
+    return inSerializableTransaction(this.prisma, (db) =>
+      new EvaluationsService(db).openInTransaction(id),
+    );
+  }
+
+  private async openInTransaction(id: bigint) {
 
     const evaluation =
 
@@ -1143,6 +1181,17 @@ export class EvaluationsService {
 
       );
 
+    }
+
+    const latestVersion = await this.prisma.survey_versions.findFirst({
+      where: { survey_id: evaluation.survey_versions.survey_id },
+      orderBy: { version_no: 'desc' },
+      select: { id: true },
+    });
+    if (!latestVersion || latestVersion.id !== evaluation.survey_version_id) {
+      throw new ConflictException(
+        'A newer question version exists. Review this draft before opening; its assigned version has been preserved.',
+      );
     }
 
     const hasFrozenGroupTargets =
@@ -1348,6 +1397,12 @@ export class EvaluationsService {
   }
 
   async close(id: bigint) {
+    return inSerializableTransaction(this.prisma, (db) =>
+      new EvaluationsService(db).closeInTransaction(id),
+    );
+  }
+
+  private async closeInTransaction(id: bigint) {
 
     await this.findOne(id);
 
@@ -1392,6 +1447,12 @@ export class EvaluationsService {
   }
 
   async remove(id: bigint) {
+    return inSerializableTransaction(this.prisma, (db) =>
+      new EvaluationsService(db).removeInTransaction(id),
+    );
+  }
+
+  private async removeInTransaction(id: bigint) {
 
     const evaluation =
 
@@ -2529,6 +2590,17 @@ export class EvaluationsService {
         );
       }
 
+      const latest = await this.prisma.survey_versions.findFirst({
+        where: { survey_id: version.survey_id },
+        orderBy: { version_no: 'desc' },
+        select: { id: true },
+      });
+      if (!latest || latest.id !== explicitVersionId) {
+        throw new ConflictException(
+          'The question set has a newer version. Reload and review its latest version before creating this evaluation.',
+        );
+      }
+
       this.assertVersionUsable(
         version.status,
         version._count.questions,
@@ -2567,18 +2639,10 @@ export class EvaluationsService {
       );
     }
 
-    const latestUsableVersion =
+    const latestVersion =
       await this.prisma.survey_versions.findFirst({
         where: {
           survey_id: surveyId,
-
-          status: {
-            not: 'ARCHIVED',
-          },
-
-          questions: {
-            some: {},
-          },
         },
 
         orderBy: {
@@ -2587,16 +2651,19 @@ export class EvaluationsService {
 
         select: {
           id: true,
+          status: true,
+          _count: { select: { questions: true } },
         },
       });
 
-    if (!latestUsableVersion) {
+    if (!latestVersion) {
       throw new BadRequestException(
-        'The selected question set has no usable survey version with questions',
+        'The selected question set has no survey version',
       );
     }
 
-    return latestUsableVersion.id;
+    this.assertVersionUsable(latestVersion.status, latestVersion._count.questions);
+    return latestVersion.id;
   }
 
   private assertVersionUsable(

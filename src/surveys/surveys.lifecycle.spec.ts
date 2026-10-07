@@ -1,3 +1,4 @@
+import { completeTransactionMock } from '../../test/utils/complete-transaction-mock';
 import { jest } from '@jest/globals';
 import {
   BadRequestException,
@@ -146,7 +147,7 @@ describe('SurveysService lifecycle safeguards', () => {
 
     transactionMock.mockImplementation(
       async (callback) =>
-        callback(prismaMock),
+        callback(completeTransactionMock(prismaMock, prismaMock)),
     );
 
     surveyFindFirstMock
@@ -269,8 +270,10 @@ describe('SurveysService lifecycle safeguards', () => {
       ),
     );
 
-    expect(transactionMock)
-      .not.toHaveBeenCalled();
+    expect(surveyCreateMock).not.toHaveBeenCalled();
+expect(surveyVersionCreateMock).not.toHaveBeenCalled();
+expect(surveyUpdateMock).not.toHaveBeenCalled();
+expect(surveyDeleteMock).not.toHaveBeenCalled();
   });
 
   it('rejects a title longer than 200 characters', async () => {
@@ -287,8 +290,10 @@ describe('SurveysService lifecycle safeguards', () => {
       ),
     );
 
-    expect(transactionMock)
-      .not.toHaveBeenCalled();
+    expect(surveyCreateMock).not.toHaveBeenCalled();
+expect(surveyVersionCreateMock).not.toHaveBeenCalled();
+expect(surveyUpdateMock).not.toHaveBeenCalled();
+expect(surveyDeleteMock).not.toHaveBeenCalled();
   });
 
   it('archives the whole question set without deleting history', async () => {
@@ -375,8 +380,10 @@ describe('SurveysService lifecycle safeguards', () => {
       ),
     );
 
-    expect(transactionMock)
-      .not.toHaveBeenCalled();
+    expect(surveyCreateMock).not.toHaveBeenCalled();
+expect(surveyVersionCreateMock).not.toHaveBeenCalled();
+expect(surveyUpdateMock).not.toHaveBeenCalled();
+expect(surveyDeleteMock).not.toHaveBeenCalled();
   });
 
   it('returns authoritative usage totals across all versions', async () => {

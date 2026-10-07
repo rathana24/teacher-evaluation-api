@@ -1,3 +1,4 @@
+import { completeTransactionMock } from '../../test/utils/complete-transaction-mock';
 import { jest } from '@jest/globals';
 
 import {
@@ -561,7 +562,7 @@ describe('StudentsService', () => {
     transactionMock.mockImplementation(
       async (
         callback: TransactionCallback,
-      ) => callback(txMock),
+      ) => callback(completeTransactionMock(prismaMock, txMock)),
     );
   });
 
@@ -789,9 +790,10 @@ describe('StudentsService', () => {
         ),
       );
 
-      expect(
-        transactionMock,
-      ).not.toHaveBeenCalled();
+      expect(usersCreateMock).not.toHaveBeenCalled();
+expect(studentsCreateMock).not.toHaveBeenCalled();
+expect(academicRecordCreateMock).not.toHaveBeenCalled();
+expect(studentsUpdateMock).not.toHaveBeenCalled();
 
       expect(
         usersCreateMock,
@@ -810,9 +812,10 @@ describe('StudentsService', () => {
         ),
       );
 
-      expect(
-        transactionMock,
-      ).not.toHaveBeenCalled();
+      expect(usersCreateMock).not.toHaveBeenCalled();
+expect(studentsCreateMock).not.toHaveBeenCalled();
+expect(academicRecordCreateMock).not.toHaveBeenCalled();
+expect(studentsUpdateMock).not.toHaveBeenCalled();
 
       expect(
         usersCreateMock,
@@ -831,9 +834,10 @@ describe('StudentsService', () => {
         ),
       );
 
-      expect(
-        transactionMock,
-      ).not.toHaveBeenCalled();
+      expect(usersCreateMock).not.toHaveBeenCalled();
+expect(studentsCreateMock).not.toHaveBeenCalled();
+expect(academicRecordCreateMock).not.toHaveBeenCalled();
+expect(studentsUpdateMock).not.toHaveBeenCalled();
 
       expect(
         usersCreateMock,
@@ -1624,7 +1628,7 @@ describe('StudentsService', () => {
     ).not.toHaveBeenCalled();
   });
 
-  it('rejects a blank class group before starting a transaction', async () => {
+  it('rejects a blank class group before writing', async () => {
     await expect(
       service.bulkUpdateClassGroup(
         1n,
@@ -1637,8 +1641,9 @@ describe('StudentsService', () => {
       ),
     );
 
-    expect(
-      transactionMock,
-    ).not.toHaveBeenCalled();
+    expect(usersCreateMock).not.toHaveBeenCalled();
+expect(studentsCreateMock).not.toHaveBeenCalled();
+expect(academicRecordCreateMock).not.toHaveBeenCalled();
+expect(studentsUpdateMock).not.toHaveBeenCalled();
   });
 });

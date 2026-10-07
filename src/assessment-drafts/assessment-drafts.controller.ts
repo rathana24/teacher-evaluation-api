@@ -62,7 +62,7 @@ export class AssessmentDraftsController {
   })
   @ApiResponse({
     status: 409,
-    description: 'Evaluation is not open or has already been submitted',
+    description: 'Evaluation is not open, already submitted, saved draft/version requires review, or a concurrent change requires reload and retry',
   })
   save(
     @Param('id', ParseBigIntPipe) id: bigint,

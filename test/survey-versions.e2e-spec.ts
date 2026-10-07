@@ -1,3 +1,5 @@
+import { PrismaService } from '../src/prisma/prisma.service';
+import { baseFixtures } from './utils/base-fixtures';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
@@ -10,6 +12,7 @@ import { AppModule } from '../src/app.module';
 
 describe('Survey Versions (e2e)', () => {
   let app: INestApplication;
+ let baseline: Awaited<ReturnType<typeof baseFixtures>>;
   let adminToken: string;
   let studentToken: string;
   let lecturerToken: string;
@@ -29,11 +32,12 @@ describe('Survey Versions (e2e)', () => {
     app.setGlobalPrefix('api');
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
     await app.init();
+ baseline = await baseFixtures(app.get(PrismaService));
 
     const login = (email: string) =>
       request(app.getHttpServer())
         .post('/api/auth/login')
-        .send({ email, password: 'Password123' })
+        .send({ identifier: email, password: 'Password123' })
         .then((res) => res.body.access_token);
 
     adminToken = await login('admin@itc.edu.kh');
@@ -84,20 +88,7 @@ describe('Survey Versions (e2e)', () => {
   });
 
   describe('POST /api/surveys/:surveyId/versions', () => {
-    it('first version is numbered 1 and is a DRAFT -> 201', async () => {
-      const res = await request(app.getHttpServer())
-        .post(base())
-        .set('Authorization', `Bearer ${adminToken}`)
-        .send({});
-
-      expect(res.status).toBe(201);
-      expect(res.body.version_no).toBe(1);
-      expect(res.body.status).toBe('DRAFT');
-      expect(res.body.created_by).toBe(adminId);
-      v1Id = res.body.id;
-    });
-
-    it('next version is numbered 2 automatically -> 201', async () => {
+    it('next version after atomic V1 is numbered 2 and is a DRAFT -> 201', async () => {
       const res = await request(app.getHttpServer())
         .post(base())
         .set('Authorization', `Bearer ${adminToken}`)
@@ -105,6 +96,19 @@ describe('Survey Versions (e2e)', () => {
 
       expect(res.status).toBe(201);
       expect(res.body.version_no).toBe(2);
+      expect(res.body.status).toBe('DRAFT');
+      expect(res.body.created_by).toBe(adminId);
+      v1Id = res.body.id;
+    });
+
+    it('following version is numbered 3 automatically -> 201', async () => {
+      const res = await request(app.getHttpServer())
+        .post(base())
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({});
+
+      expect(res.status).toBe(201);
+      expect(res.body.version_no).toBe(3);
       v2Id = res.body.id;
     });
 
@@ -126,7 +130,7 @@ describe('Survey Versions (e2e)', () => {
 
     it('copy_questions copies the latest version\'s questions (seeded survey 1) -> 201', async () => {
       const res = await request(app.getHttpServer())
-        .post('/api/surveys/1/versions')
+        .post(`/api/surveys/${baseline.survey}/versions`)
         .set('Authorization', `Bearer ${adminToken}`)
         .send({ copy_questions: true });
 
@@ -137,7 +141,7 @@ describe('Survey Versions (e2e)', () => {
 
       // Clean up the copied version straight away (removes its questions too)
       const cleanup = await request(app.getHttpServer())
-        .delete(`/api/surveys/1/versions/${res.body.id}`)
+        .delete(`/api/surveys/${baseline.survey}/versions/${res.body.id}`)
         .set('Authorization', `Bearer ${adminToken}`);
       expect(cleanup.status).toBe(204);
     });
@@ -150,7 +154,7 @@ describe('Survey Versions (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(res.status).toBe(200);
-      expect(res.body.map((v: any) => v.version_no)).toEqual([1, 2]);
+      expect(res.body.map((v: any) => v.version_no)).toEqual([1, 2, 3]);
     });
 
     it('gets one version with its questions -> 200', async () => {
@@ -164,7 +168,7 @@ describe('Survey Versions (e2e)', () => {
 
     it('version requested under the wrong survey -> 404', async () => {
       const res = await request(app.getHttpServer())
-        .get(`/api/surveys/1/versions/${v1Id}`)
+        .get(`/api/surveys/${baseline.survey}/versions/${v1Id}`)
         .set('Authorization', `Bearer ${adminToken}`);
       expect(res.status).toBe(404);
     });
@@ -191,7 +195,7 @@ describe('Survey Versions (e2e)', () => {
   describe('DELETE .../:versionId', () => {
     it('cannot delete a version used by evaluations (seeded version 1) -> 409', async () => {
       const res = await request(app.getHttpServer())
-        .delete('/api/surveys/1/versions/1')
+        .delete(`/api/surveys/${baseline.survey}/versions/${baseline.version}`)
         .set('Authorization', `Bearer ${adminToken}`);
       expect(res.status).toBe(409);
     });

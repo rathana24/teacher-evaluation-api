@@ -395,17 +395,19 @@ export class StudentAccessService {
   async getAnswerableEvaluation(
     evaluationId: bigint,
     studentId: bigint,
+    database: PrismaService = this.prisma,
   ) {
     const evaluation =
       await this.findEvaluation(
         evaluationId,
+        database,
       );
 
     const [
       participant,
       enrollment,
     ] = await Promise.all([
-      this.prisma.evaluation_participants.findFirst({
+      database.evaluation_participants.findFirst({
         where: {
           evaluation_id:
             evaluationId,
@@ -425,7 +427,7 @@ export class StudentAccessService {
         },
       }),
 
-      this.prisma.enrollments.findFirst({
+      database.enrollments.findFirst({
         where: {
           student_id:
             studentId,
@@ -486,9 +488,10 @@ export class StudentAccessService {
 
   private async findEvaluation(
     evaluationId: bigint,
+    database: PrismaService = this.prisma,
   ) {
     const evaluation =
-      await this.prisma.evaluations.findUnique({
+      await database.evaluations.findUnique({
         where: {
           id: evaluationId,
         },

@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSurveyVersionDto } from './dto/create-survey-version.dto';
+import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 
 @Injectable()
 export class SurveyVersionsService {
@@ -117,6 +118,37 @@ export class SurveyVersionsService {
    *   creating an unexpected version
    */
   async create(
+    surveyId: bigint,
+    dto: CreateSurveyVersionDto,
+    createdBy: bigint,
+  ) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) =>
+        new SurveyVersionsService(db).createInTransaction(
+          surveyId,
+          dto,
+          createdBy,
+        ),
+      (error: any) => {
+        if (error?.code === 'P2002') {
+          throw new ConflictException(
+            'Another survey version was created at the same time. Please review the latest version and try again.',
+          );
+        }
+
+        if (error?.code === 'P2034') {
+          throw new ConflictException(
+            'The question set changed while the new version was being created. Please review the latest version and try again.',
+          );
+        }
+
+        throw error;
+      },
+    );
+  }
+
+  private async createInTransaction(
     surveyId: bigint,
     dto: CreateSurveyVersionDto,
     createdBy: bigint,
@@ -355,7 +387,16 @@ export class SurveyVersionsService {
    * retry:
    *   LOCKED -> reconcile safely -> no duplicate move
    */
-  async applyToUnfinished(
+  async applyToUnfinished(surveyId: bigint, versionId: bigint) {
+    return inSerializableTransaction(this.prisma, (db) =>
+      new SurveyVersionsService(db).applyToUnfinishedInTransaction(
+        surveyId,
+        versionId,
+      ),
+    );
+  }
+
+  private async applyToUnfinishedInTransaction(
     surveyId: bigint,
     versionId: bigint,
   ) {
@@ -496,6 +537,18 @@ export class SurveyVersionsService {
           currentTarget.status ===
           'LOCKED';
 
+        const [latest] = await tx.survey_versions.findMany({
+          where: { survey_id: surveyId },
+          orderBy: { version_no: 'desc' },
+          take: 1,
+          select: { id: true },
+        });
+        if (!latest || latest.id !== versionId) {
+          throw new ConflictException(
+            'A newer question version exists. Review the latest version before applying updates; no participants were moved.',
+          );
+        }
+
         /*
          * Only evaluations whose ORIGINAL/base version
          * belongs to the same named set are considered.
@@ -575,10 +628,10 @@ export class SurveyVersionsService {
                   isNot: null,
                 },
 
-                NOT: {
-                  survey_version_id:
-                    versionId,
-                },
+                OR: [
+                  { survey_version_id: null },
+                  { survey_version_id: { not: versionId } },
+                ],
               },
             });
 
@@ -632,10 +685,10 @@ export class SurveyVersionsService {
                   is: null,
                 },
 
-                NOT: {
-                  survey_version_id:
-                    versionId,
-                },
+                OR: [
+                  { survey_version_id: null },
+                  { survey_version_id: { not: versionId } },
+                ],
               },
 
               data: {
@@ -775,7 +828,24 @@ export class SurveyVersionsService {
    * The parent question set itself must still be active.
    * Once the whole set is archived it becomes read-only.
    */
-  async archive(
+  async archive(surveyId: bigint, versionId: bigint) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) =>
+        new SurveyVersionsService(db).archiveInTransaction(surveyId, versionId),
+      (error: any) => {
+        if (error?.code === 'P2034') {
+          throw new ConflictException(
+            'The survey version changed while it was being archived. Please review the latest data and try again.',
+          );
+        }
+
+        throw error;
+      },
+    );
+  }
+
+  private async archiveInTransaction(
     surveyId: bigint,
     versionId: bigint,
   ) {
@@ -890,7 +960,30 @@ export class SurveyVersionsService {
    * Historical evaluation, participant, draft, or response
    * references always prevent deletion.
    */
-  async remove(
+  async remove(surveyId: bigint, versionId: bigint) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) =>
+        new SurveyVersionsService(db).removeInTransaction(surveyId, versionId),
+      (error: any) => {
+        if (error?.code === 'P2034') {
+          throw new ConflictException(
+            'The survey version changed while deletion was being processed. Please review the latest data and try again.',
+          );
+        }
+
+        if (error?.code === 'P2003') {
+          throw new ConflictException(
+            'Survey version is referenced by historical data and cannot be deleted',
+          );
+        }
+
+        throw error;
+      },
+    );
+  }
+
+  private async removeInTransaction(
     surveyId: bigint,
     versionId: bigint,
   ) {
@@ -1108,9 +1201,10 @@ export class SurveyVersionsService {
    */
   async assertEditable(
     versionId: bigint,
+    database: PrismaService = this.prisma,
   ) {
     const version =
-      await this.prisma.survey_versions.findUnique({
+      await database.survey_versions.findUnique({
         where: {
           id: versionId,
         },
@@ -1124,12 +1218,6 @@ export class SurveyVersionsService {
           },
 
           evaluations: {
-            where: {
-              status: {
-                not: 'DRAFT',
-              },
-            },
-
             select: {
               id: true,
             },
@@ -1169,7 +1257,7 @@ export class SurveyVersionsService {
      * the edit request is processed.
      */
     const latest =
-      await this.prisma.survey_versions.findFirst({
+      await database.survey_versions.findFirst({
         where: {
           survey_id:
             version.survey_id,

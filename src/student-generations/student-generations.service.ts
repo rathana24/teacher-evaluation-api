@@ -1,3 +1,4 @@
+import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
   ConflictException,
   Injectable,
@@ -79,6 +80,24 @@ export class StudentGenerationsService {
   }
 
   async create(dto: CreateStudentGenerationDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new StudentGenerationsService(db).createInTransaction(dto),
+      (e: any) => {
+        if (e.code === 'P2002') {
+          throw new ConflictException('Student generation already exists');
+        }
+
+        if (e.code === 'P2003') {
+          throw new NotFoundException('Academic year not found');
+        }
+
+        throw e;
+      },
+    );
+  }
+
+  private async createInTransaction(dto: CreateStudentGenerationDto) {
     const academicYearId = BigInt(
       dto.entry_academic_year_id,
     );
@@ -128,7 +147,25 @@ export class StudentGenerationsService {
     }
   }
 
-  async update(
+  async update(id: bigint, dto: UpdateStudentGenerationDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new StudentGenerationsService(db).updateInTransaction(id, dto),
+      (e: any) => {
+        if (e.code === 'P2002') {
+          throw new ConflictException('Student generation already exists');
+        }
+
+        if (e.code === 'P2003') {
+          throw new ConflictException('Student generation is currently in use');
+        }
+
+        throw e;
+      },
+    );
+  }
+
+  private async updateInTransaction(
     id: bigint,
     dto: UpdateStudentGenerationDto,
   ) {
@@ -192,6 +229,22 @@ export class StudentGenerationsService {
   }
 
   async remove(id: bigint) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new StudentGenerationsService(db).removeInTransaction(id),
+      (e: any) => {
+        if (e.code === 'P2003') {
+          throw new ConflictException(
+            'Student generation is currently in use and cannot be deleted',
+          );
+        }
+
+        throw e;
+      },
+    );
+  }
+
+  private async removeInTransaction(id: bigint) {
     const generation = await this.findOne(id);
 
     if (generation._count.students > 0) {

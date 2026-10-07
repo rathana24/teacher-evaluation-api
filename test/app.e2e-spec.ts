@@ -64,7 +64,7 @@ describe('Courses (e2e)', () => {
       request(app.getHttpServer())
         .post('/api/auth/login')
         .send({
-          email,
+          identifier: email,
           password: 'Password123',
         })
         .then((res) => res.body.access_token);
@@ -237,7 +237,7 @@ describe('Courses (e2e)', () => {
       const res = await request(app.getHttpServer())
         .post('/api/auth/login')
         .send({
-          email: 'admin@itc.edu.kh',
+          identifier: 'admin@itc.edu.kh',
           password: 'wrongpassword',
         });
 

@@ -329,11 +329,12 @@ export class LecturerDashboardService {
       // Rating questions for this survey version
       this.prisma.questions.findMany({
         where: {
-          survey_version_id:
-            evaluation.survey_version_id,
-
           question_type:
             'RATING',
+          OR: [
+            { survey_version_id: evaluation.survey_version_id },
+            { survey_versions: { responses: { some: { evaluation_id: evaluationId } } } },
+          ],
         },
 
         orderBy: {
@@ -357,6 +358,7 @@ export class LecturerDashboardService {
           responses: {
             evaluation_id:
               evaluationId,
+            survey_version_id: { not: null },
           },
         },
 

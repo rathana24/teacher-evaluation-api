@@ -12,6 +12,7 @@ import {
 
 import { PrismaService } from '../prisma/prisma.service';
 import { StudentAccessService } from '../student-access/student-access.service';
+import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
   DraftAnswerDto,
   SaveAssessmentDraftDto,
@@ -58,6 +59,20 @@ export class AssessmentDraftsService {
     studentId: bigint,
     dto: SaveAssessmentDraftDto,
   ) {
+    return inSerializableTransaction(this.prisma, (db) =>
+      new AssessmentDraftsService(db, this.studentAccess).saveInTransaction(
+        evaluationId,
+        studentId,
+        dto,
+      ),
+    );
+  }
+
+  private async saveInTransaction(
+    evaluationId: bigint,
+    studentId: bigint,
+    dto: SaveAssessmentDraftDto,
+  ) {
     const {
       participant,
       effectiveSurveyVersionId,
@@ -65,6 +80,7 @@ export class AssessmentDraftsService {
       await this.studentAccess.getAnswerableEvaluation(
         evaluationId,
         studentId,
+        this.prisma,
       );
 
     if (participant.has_submitted) {
@@ -283,7 +299,16 @@ export class AssessmentDraftsService {
    * Access is rechecked before deletion. Deleting the draft is
    * explicit; no version-update process silently removes it.
    */
-  async remove(
+  async remove(evaluationId: bigint, studentId: bigint) {
+    return inSerializableTransaction(this.prisma, (db) =>
+      new AssessmentDraftsService(db, this.studentAccess).removeInTransaction(
+        evaluationId,
+        studentId,
+      ),
+    );
+  }
+
+  private async removeInTransaction(
     evaluationId: bigint,
     studentId: bigint,
   ) {
@@ -291,6 +316,7 @@ export class AssessmentDraftsService {
       await this.studentAccess.getAnswerableEvaluation(
         evaluationId,
         studentId,
+        this.prisma,
       );
 
     const result =

@@ -1,3 +1,4 @@
+import { completeTransactionMock } from '../../test/utils/complete-transaction-mock';
 import { jest } from '@jest/globals';
 import { ConflictException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -144,7 +145,7 @@ describe('QuestionsService lifecycle safeguards', () => {
 
     transactionMock.mockImplementation(
       async (callback) =>
-        callback(prismaMock),
+        callback(completeTransactionMock(prismaMock, prismaMock)),
     );
   });
 
@@ -160,7 +161,7 @@ describe('QuestionsService lifecycle safeguards', () => {
     );
 
     expect(assertEditableMock)
-      .toHaveBeenCalledWith(BigInt(11));
+      .toHaveBeenCalledWith(BigInt(11), expect.anything());
 
     expect(questionCreateMock)
       .toHaveBeenCalledTimes(1);
@@ -191,8 +192,11 @@ describe('QuestionsService lifecycle safeguards', () => {
     expect(questionCountMock)
       .not.toHaveBeenCalled();
 
-    expect(transactionMock)
-      .not.toHaveBeenCalled();
+    expect(questionCreateMock).not.toHaveBeenCalled();
+expect(questionUpdateMock).not.toHaveBeenCalled();
+expect(questionDeleteMock).not.toHaveBeenCalled();
+expect(questionOptionCreateManyMock).not.toHaveBeenCalled();
+expect(questionOptionDeleteManyMock).not.toHaveBeenCalled();
 
     expect(questionCreateMock)
       .not.toHaveBeenCalled();
@@ -220,8 +224,11 @@ describe('QuestionsService lifecycle safeguards', () => {
       ConflictException,
     );
 
-    expect(transactionMock)
-      .not.toHaveBeenCalled();
+    expect(questionCreateMock).not.toHaveBeenCalled();
+expect(questionUpdateMock).not.toHaveBeenCalled();
+expect(questionDeleteMock).not.toHaveBeenCalled();
+expect(questionOptionCreateManyMock).not.toHaveBeenCalled();
+expect(questionOptionDeleteManyMock).not.toHaveBeenCalled();
   });
 
   it('blocks question creation when the whole question set is archived', async () => {
@@ -246,8 +253,11 @@ describe('QuestionsService lifecycle safeguards', () => {
       ConflictException,
     );
 
-    expect(transactionMock)
-      .not.toHaveBeenCalled();
+    expect(questionCreateMock).not.toHaveBeenCalled();
+expect(questionUpdateMock).not.toHaveBeenCalled();
+expect(questionDeleteMock).not.toHaveBeenCalled();
+expect(questionOptionCreateManyMock).not.toHaveBeenCalled();
+expect(questionOptionDeleteManyMock).not.toHaveBeenCalled();
   });
 
   it('blocks updating a question when its version is not editable', async () => {
@@ -284,10 +294,13 @@ describe('QuestionsService lifecycle safeguards', () => {
     );
 
     expect(assertEditableMock)
-      .toHaveBeenCalledWith(BigInt(11));
+      .toHaveBeenCalledWith(BigInt(11), expect.anything());
 
-    expect(transactionMock)
-      .not.toHaveBeenCalled();
+    expect(questionCreateMock).not.toHaveBeenCalled();
+expect(questionUpdateMock).not.toHaveBeenCalled();
+expect(questionDeleteMock).not.toHaveBeenCalled();
+expect(questionOptionCreateManyMock).not.toHaveBeenCalled();
+expect(questionOptionDeleteManyMock).not.toHaveBeenCalled();
 
     expect(questionUpdateMock)
       .not.toHaveBeenCalled();
@@ -319,10 +332,13 @@ describe('QuestionsService lifecycle safeguards', () => {
     );
 
     expect(assertEditableMock)
-      .toHaveBeenCalledWith(BigInt(11));
+      .toHaveBeenCalledWith(BigInt(11), expect.anything());
 
-    expect(transactionMock)
-      .not.toHaveBeenCalled();
+    expect(questionCreateMock).not.toHaveBeenCalled();
+expect(questionUpdateMock).not.toHaveBeenCalled();
+expect(questionDeleteMock).not.toHaveBeenCalled();
+expect(questionOptionCreateManyMock).not.toHaveBeenCalled();
+expect(questionOptionDeleteManyMock).not.toHaveBeenCalled();
 
     expect(questionDeleteMock)
       .not.toHaveBeenCalled();
@@ -353,12 +369,15 @@ describe('QuestionsService lifecycle safeguards', () => {
     );
 
     expect(assertEditableMock)
-      .toHaveBeenCalledWith(BigInt(11));
+      .toHaveBeenCalledWith(BigInt(11), expect.anything());
 
     expect(questionFindManyMock)
       .not.toHaveBeenCalled();
 
-    expect(transactionMock)
-      .not.toHaveBeenCalled();
+    expect(questionCreateMock).not.toHaveBeenCalled();
+expect(questionUpdateMock).not.toHaveBeenCalled();
+expect(questionDeleteMock).not.toHaveBeenCalled();
+expect(questionOptionCreateManyMock).not.toHaveBeenCalled();
+expect(questionOptionDeleteManyMock).not.toHaveBeenCalled();
   });
 });

@@ -1,3 +1,4 @@
+import { baseFixtures } from './utils/base-fixtures';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
@@ -11,6 +12,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 
 describe('Lecturer Dashboard (e2e)', () => {
   let app: INestApplication;
+ let baseline: Awaited<ReturnType<typeof baseFixtures>>;
   let prisma: PrismaService;
   let adminToken: string;
   let sokDaraToken: string; // lecturer of offering 1
@@ -70,10 +72,11 @@ describe('Lecturer Dashboard (e2e)', () => {
     app.setGlobalPrefix('api');
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
     await app.init();
+ baseline = await baseFixtures(app.get(PrismaService));
     prisma = app.get(PrismaService);
 
     const login = (email: string) =>
-      api().post('/api/auth/login').send({ email, password: 'Password123' }).then((res) => res.body.access_token);
+      api().post('/api/auth/login').send({ identifier: email, password: 'Password123' }).then((res) => res.body.access_token);
 
     adminToken = await login('admin@itc.edu.kh');
     sokDaraToken = await login('sokdara@itc.edu.kh');
@@ -92,11 +95,9 @@ describe('Lecturer Dashboard (e2e)', () => {
       { question_text: 'Comments', question_type: 'TEXT', is_required: false },
     ]);
     [q1, q2, q3] = main.qIds;
-    const other = await newVersion([{ question_text: 'Overall', question_type: 'RATING' }]);
-    const third = await newVersion([{ question_text: 'Overall', question_type: 'RATING' }]);
 
     // Sok Dara's closed evaluation with three real submissions
-    closedEvalId = await newEvaluation('1', main.id, true);
+    closedEvalId = await newEvaluation(baseline.offering1, main.id, true);
     const answers = [
       [5, 3, 'Great examples.'],
       [4, 3, ''],
@@ -117,9 +118,12 @@ describe('Lecturer Dashboard (e2e)', () => {
     }
     await api().post(`/api/evaluations/${closedEvalId}/close`).set(admin());
 
-    openEvalId = await newEvaluation('1', other.id, true);
-    draftEvalId = await newEvaluation('1', third.id, false);
-    chanThyEvalId = await newEvaluation('2', other.id, true);
+    const other = await newVersion([{ question_text: 'Overall', question_type: 'RATING' }]);
+    openEvalId = await newEvaluation(baseline.offering1, other.id, true);
+
+    chanThyEvalId = await newEvaluation(baseline.offering2, other.id, true);
+    const third = await newVersion([{ question_text: 'Overall', question_type: 'RATING' }]);
+    draftEvalId = await newEvaluation(baseline.offering1, third.id, false);
   }, 90000);
 
   afterAll(async () => {
@@ -131,7 +135,7 @@ describe('Lecturer Dashboard (e2e)', () => {
     await prisma.evaluation_participants.deleteMany({ where: { evaluation_id: { in: eIds } } });
     await prisma.evaluations.deleteMany({ where: { id: { in: eIds } } });
     await prisma.questions.deleteMany({ where: { survey_version_id: { in: vIds } } });
-    await prisma.survey_versions.deleteMany({ where: { id: { in: vIds } } });
+    await prisma.survey_versions.deleteMany({ where: { survey_id: BigInt(tempSurveyId) } });
     if (tempSurveyId) await prisma.surveys.delete({ where: { id: BigInt(tempSurveyId) } });
 
     await app.close();
@@ -177,10 +181,10 @@ describe('Lecturer Dashboard (e2e)', () => {
       const res = await dashboard(closedEvalId, sokDaraToken);
 
       expect(res.status).toBe(200);
-      expect(res.body.course.code).toBe('CS301');
-      expect(res.body.eligible_count).toBe(5);
+      expect(res.body.course.code).toBe('E2E-BASE-1');
+      expect(res.body.eligible_count).toBe(3);
       expect(res.body.response_count).toBe(3);
-      expect(res.body.response_rate).toBe(0.6);
+      expect(res.body.response_rate).toBe(1);
     });
 
     it('per-question averages and distributions are exact', async () => {

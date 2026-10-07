@@ -1,3 +1,4 @@
+import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
   BadRequestException,
   ConflictException,
@@ -120,7 +121,35 @@ export class SurveysService {
    * This prevents a question set from being created without
    * its initial version.
    */
-  async create(
+  async create(dto: CreateSurveyDto, createdBy: bigint) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new SurveysService(db).createInTransaction(dto, createdBy),
+      (error: any) => {
+        /*
+         * P2034 can occur when concurrent serializable
+         * transactions conflict.
+         *
+         * The caller may safely review/retry the request.
+         */
+        if (error?.code === 'P2034') {
+          throw new ConflictException(
+            'The question set changed during creation. Please review the latest data and try again.',
+          );
+        }
+
+        if (error?.code === 'P2002') {
+          throw new ConflictException(
+            'A question set with this title already exists',
+          );
+        }
+
+        throw error;
+      },
+    );
+  }
+
+  private async createInTransaction(
     dto: CreateSurveyDto,
     createdBy: bigint,
   ) {
@@ -241,7 +270,29 @@ export class SurveysService {
    *
    * Archived sets are read-only.
    */
-  async update(
+  async update(id: bigint, dto: UpdateSurveyDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new SurveysService(db).updateInTransaction(id, dto),
+      (error: any) => {
+        if (error?.code === 'P2034') {
+          throw new ConflictException(
+            'The question set changed while it was being updated. Please review the latest data and try again.',
+          );
+        }
+
+        if (error?.code === 'P2002') {
+          throw new ConflictException(
+            'A question set with this title already exists',
+          );
+        }
+
+        throw error;
+      },
+    );
+  }
+
+  private async updateInTransaction(
     id: bigint,
     dto: UpdateSurveyDto,
   ) {
@@ -399,7 +450,23 @@ export class SurveysService {
    *
    * archived_at only retires the set from future use/editing.
    */
-  async archive(
+  async archive(id: bigint) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new SurveysService(db).archiveInTransaction(id),
+      (error: any) => {
+        if (error?.code === 'P2034') {
+          throw new ConflictException(
+            'The question set changed while it was being archived. Please review the latest data and try again.',
+          );
+        }
+
+        throw error;
+      },
+    );
+  }
+
+  private async archiveInTransaction(
     id: bigint,
   ) {
     try {
@@ -610,7 +677,29 @@ export class SurveysService {
    *      ↓
    * survey
    */
-  async remove(
+  async remove(id: bigint) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new SurveysService(db).removeInTransaction(id),
+      (error: any) => {
+        if (error?.code === 'P2034') {
+          throw new ConflictException(
+            'The question set changed while deletion was being processed. Please review the latest data and try again.',
+          );
+        }
+
+        if (error?.code === 'P2003') {
+          throw new ConflictException(
+            'Question set is referenced by historical data and cannot be deleted',
+          );
+        }
+
+        throw error;
+      },
+    );
+  }
+
+  private async removeInTransaction(
     id: bigint,
   ) {
     try {

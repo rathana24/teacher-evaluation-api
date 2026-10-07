@@ -46,7 +46,7 @@ describe('Semesters (e2e)', () => {
     prisma = app.get(PrismaService);
 
     // Get the seeded academic year dynamically
-    const academicYear = await prisma.academic_years.findFirst();
+    const academicYear = await prisma.academic_years.create({data:{name:`S-${Date.now()}`,start_year:2026}});
 
     if (!academicYear) {
       throw new Error(
@@ -75,7 +75,7 @@ describe('Semesters (e2e)', () => {
       request(app.getHttpServer())
         .post('/api/auth/login')
         .send({
-          email,
+          identifier: email,
           password: 'Password123',
         })
         .then((res) => res.body.access_token);
@@ -86,6 +86,10 @@ describe('Semesters (e2e)', () => {
   }, 30000);
 
   afterAll(async () => {
+    if (academicYearId) {
+      await prisma.semesters.deleteMany({where:{academic_year_id:academicYearId}});
+      await prisma.academic_years.delete({where:{id:academicYearId}});
+    }
     await app.close();
   });
 
@@ -96,7 +100,7 @@ describe('Semesters (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           semester_name: testSemesterName,
-          academic_year_id: Number(academicYearId),
+          academic_year_id: Number(academicYearId), semester_number: 1,
           start_date: '2026-03-01',
           end_date: '2026-07-31',
         });
@@ -113,7 +117,7 @@ describe('Semesters (e2e)', () => {
         .set('Authorization', `Bearer ${studentToken}`)
         .send({
           semester_name: 'Nope',
-          academic_year_id: Number(academicYearId),
+          academic_year_id: Number(academicYearId), semester_number: 1,
         });
 
       expect(res.status).toBe(403);
@@ -125,7 +129,7 @@ describe('Semesters (e2e)', () => {
         .set('Authorization', `Bearer ${lecturerToken}`)
         .send({
           semester_name: 'Nope',
-          academic_year_id: Number(academicYearId),
+          academic_year_id: Number(academicYearId), semester_number: 1,
         });
 
       expect(res.status).toBe(403);
@@ -137,7 +141,7 @@ describe('Semesters (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           semester_name: '',
-          academic_year_id: Number(academicYearId),
+          academic_year_id: Number(academicYearId), semester_number: 1,
         });
 
       expect(res.status).toBe(400);
@@ -149,7 +153,7 @@ describe('Semesters (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           semester_name: 'Bad Date',
-          academic_year_id: Number(academicYearId),
+          academic_year_id: Number(academicYearId), semester_number: 1,
           start_date: 'not-a-date',
         });
 
@@ -162,7 +166,7 @@ describe('Semesters (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           semester_name: 'Backwards',
-          academic_year_id: Number(academicYearId),
+          academic_year_id: Number(academicYearId), semester_number: 1,
           start_date: '2026-07-31',
           end_date: '2026-03-01',
         });
@@ -176,7 +180,7 @@ describe('Semesters (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           semester_name: testSemesterName,
-          academic_year_id: Number(academicYearId),
+          academic_year_id: Number(academicYearId), semester_number: 1,
         });
 
       expect(res.status).toBe(409);

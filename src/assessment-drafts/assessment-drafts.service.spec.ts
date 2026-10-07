@@ -163,6 +163,9 @@ describe('AssessmentDraftsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    Object.assign(prismaMock, {
+      $transaction: jest.fn(async (callback: (tx: any) => Promise<any>) => callback(prismaMock)),
+    });
 
     const module: TestingModule =
       await Test.createTestingModule({
@@ -248,7 +251,7 @@ describe('AssessmentDraftsService', () => {
       getAnswerableEvaluationMock,
     ).toHaveBeenCalledWith(
       evaluationId,
-      studentId,
+      studentId, expect.anything()
     );
 
     expect(

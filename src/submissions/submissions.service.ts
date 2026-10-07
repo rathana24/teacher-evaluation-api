@@ -10,6 +10,7 @@ import {
 
 import { PrismaService } from '../prisma/prisma.service';
 import { StudentAccessService } from '../student-access/student-access.service';
+import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
   AnswerDto,
   SubmitResponseDto,
@@ -46,6 +47,20 @@ export class SubmissionsService {
     studentId: bigint,
     dto: SubmitResponseDto,
   ) {
+    return inSerializableTransaction(this.prisma, (db) =>
+      new SubmissionsService(db, this.studentAccess).submitInTransaction(
+        evaluationId,
+        studentId,
+        dto,
+      ),
+    );
+  }
+
+  private async submitInTransaction(
+    evaluationId: bigint,
+    studentId: bigint,
+    dto: SubmitResponseDto,
+  ) {
     /*
      * 1. Apply the same access rules used when viewing the
      * questionnaire.
@@ -62,6 +77,7 @@ export class SubmissionsService {
       await this.studentAccess.getAnswerableEvaluation(
         evaluationId,
         studentId,
+        this.prisma,
       );
 
     /*

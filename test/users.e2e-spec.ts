@@ -23,7 +23,7 @@ describe('Users (e2e)', () => {
   const expectedEmail = mixedCaseEmail.toLowerCase();
 
   const login = (email: string, password = 'Password123') =>
-    request(app.getHttpServer()).post('/api/auth/login').send({ email, password });
+    request(app.getHttpServer()).post('/api/auth/login').send({ identifier: email, password });
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -78,8 +78,8 @@ describe('Users (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(res.status).toBe(200);
-      expect(res.body.length).toBeGreaterThan(0);
-      for (const user of res.body) {
+      expect(res.body.data.length).toBeGreaterThan(0);
+      for (const user of res.body.data) {
         expect(user.password_hash).toBeUndefined();
       }
     });
@@ -90,8 +90,8 @@ describe('Users (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(res.status).toBe(200);
-      expect(res.body.length).toBeGreaterThan(0);
-      for (const user of res.body) {
+      expect(res.body.data.length).toBeGreaterThan(0);
+      for (const user of res.body.data) {
         expect(user.role).toBe('LECTURER');
       }
     });
@@ -131,7 +131,7 @@ describe('Users (e2e)', () => {
       const res = await request(app.getHttpServer())
         .post('/api/users')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ email: expectedEmail, password: 'Password123', full_name: 'Duplicate', role: 'STUDENT' });
+        .send({ email: expectedEmail, password: 'Password123', full_name: 'Duplicate', role: 'LECTURER' });
 
       expect(res.status).toBe(409);
     });

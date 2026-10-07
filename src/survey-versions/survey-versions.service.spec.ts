@@ -1,3 +1,4 @@
+import { completeTransactionMock } from '../../test/utils/complete-transaction-mock';
 import { jest } from '@jest/globals';
 import {
   BadRequestException,
@@ -222,7 +223,7 @@ describe(
             (client: any) =>
               Promise<any>,
         ) => {
-          return callback(tx);
+          return callback(completeTransactionMock(prismaMock, tx));
         },
       );
 
@@ -396,6 +397,7 @@ describe(
       'applyToUnfinished',
       () => {
         beforeEach(() => {
+          versionFindManyMock.mockResolvedValue([{ id: 20n }]);
           surveyFindUniqueMock
             .mockResolvedValue({
               id: 1n,
@@ -562,10 +564,7 @@ describe(
                   is: null,
                 },
 
-                NOT: {
-                  survey_version_id:
-                    20n,
-                },
+                OR: [{survey_version_id:null},{survey_version_id:{not:20n}}],
               },
 
               data: {
@@ -689,9 +688,9 @@ describe(
               NotFoundException,
             );
 
-            expect(
-              transactionMock,
-            ).not.toHaveBeenCalled();
+            expect(participantUpdateManyMock).not.toHaveBeenCalled();
+expect(versionCreateMock).not.toHaveBeenCalled();
+expect(versionDeleteMock).not.toHaveBeenCalled();
           },
         );
 
@@ -837,9 +836,9 @@ describe(
               ConflictException,
             );
 
-            expect(
-              transactionMock,
-            ).not.toHaveBeenCalled();
+            expect(participantUpdateManyMock).not.toHaveBeenCalled();
+expect(versionCreateMock).not.toHaveBeenCalled();
+expect(versionDeleteMock).not.toHaveBeenCalled();
 
             expect(
               participantUpdateManyMock,
@@ -874,9 +873,9 @@ describe(
               BadRequestException,
             );
 
-            expect(
-              transactionMock,
-            ).not.toHaveBeenCalled();
+            expect(participantUpdateManyMock).not.toHaveBeenCalled();
+expect(versionCreateMock).not.toHaveBeenCalled();
+expect(versionDeleteMock).not.toHaveBeenCalled();
           },
         );
 
@@ -1237,9 +1236,9 @@ describe(
               ConflictException,
             );
 
-            expect(
-              transactionMock,
-            ).not.toHaveBeenCalled();
+            expect(participantUpdateManyMock).not.toHaveBeenCalled();
+expect(versionCreateMock).not.toHaveBeenCalled();
+expect(versionDeleteMock).not.toHaveBeenCalled();
           },
         );
 
@@ -1317,9 +1316,9 @@ describe(
               ConflictException,
             );
 
-            expect(
-              transactionMock,
-            ).not.toHaveBeenCalled();
+            expect(participantUpdateManyMock).not.toHaveBeenCalled();
+expect(versionCreateMock).not.toHaveBeenCalled();
+expect(versionDeleteMock).not.toHaveBeenCalled();
           },
         );
       },

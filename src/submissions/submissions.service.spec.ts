@@ -1,3 +1,4 @@
+import { completeTransactionMock } from '../../test/utils/complete-transaction-mock';
 import { jest } from '@jest/globals';
 import {
   BadRequestException,
@@ -212,7 +213,7 @@ describe('SubmissionsService', () => {
     transactionMock.mockImplementation(
       async (
         callback: (tx: any) => Promise<any>,
-      ) => callback(txMock),
+      ) => callback(completeTransactionMock(prismaMock, txMock)),
     );
 
     mockInitialAccess();
@@ -701,9 +702,9 @@ describe('SubmissionsService', () => {
       BadRequestException,
     );
 
-    expect(
-      transactionMock,
-    ).not.toHaveBeenCalled();
+    expect(participantUpdateManyMock).not.toHaveBeenCalled();
+expect(responseCreateMock).not.toHaveBeenCalled();
+expect(answerCreateMock).not.toHaveBeenCalled();
   });
 
   it('should reject duplicate answers for the same question', async () => {
@@ -730,9 +731,9 @@ describe('SubmissionsService', () => {
       BadRequestException,
     );
 
-    expect(
-      transactionMock,
-    ).not.toHaveBeenCalled();
+    expect(participantUpdateManyMock).not.toHaveBeenCalled();
+expect(responseCreateMock).not.toHaveBeenCalled();
+expect(answerCreateMock).not.toHaveBeenCalled();
   });
 
   it('should reject an out-of-range rating', async () => {
@@ -754,9 +755,9 @@ describe('SubmissionsService', () => {
       BadRequestException,
     );
 
-    expect(
-      transactionMock,
-    ).not.toHaveBeenCalled();
+    expect(participantUpdateManyMock).not.toHaveBeenCalled();
+expect(responseCreateMock).not.toHaveBeenCalled();
+expect(answerCreateMock).not.toHaveBeenCalled();
   });
 
   it('should reject when a required question is unanswered', async () => {
@@ -779,9 +780,9 @@ describe('SubmissionsService', () => {
       ),
     );
 
-    expect(
-      transactionMock,
-    ).not.toHaveBeenCalled();
+    expect(participantUpdateManyMock).not.toHaveBeenCalled();
+expect(responseCreateMock).not.toHaveBeenCalled();
+expect(answerCreateMock).not.toHaveBeenCalled();
   });
 
   it('should trim TEXT answers before saving', async () => {
@@ -918,9 +919,9 @@ describe('SubmissionsService', () => {
       BadRequestException,
     );
 
-    expect(
-      transactionMock,
-    ).not.toHaveBeenCalled();
+    expect(participantUpdateManyMock).not.toHaveBeenCalled();
+expect(responseCreateMock).not.toHaveBeenCalled();
+expect(answerCreateMock).not.toHaveBeenCalled();
   });
 
   it('should reject multiple selections for MULTIPLE_CHOICE', async () => {
@@ -973,9 +974,9 @@ describe('SubmissionsService', () => {
       BadRequestException,
     );
 
-    expect(
-      transactionMock,
-    ).not.toHaveBeenCalled();
+    expect(participantUpdateManyMock).not.toHaveBeenCalled();
+expect(responseCreateMock).not.toHaveBeenCalled();
+expect(answerCreateMock).not.toHaveBeenCalled();
   });
 
   it('should not delete the draft when response creation fails', async () => {

@@ -1,3 +1,4 @@
+import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
   BadRequestException,
   ConflictException,
@@ -183,6 +184,20 @@ export class UsersService {
   }
 
   async create(dto: CreateUserDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new UsersService(db).createInTransaction(dto),
+      (e: any) => {
+        if (e.code === 'P2002') {
+          throw new ConflictException('Email is already in use');
+        }
+
+        throw e;
+      },
+    );
+  }
+
+  private async createInTransaction(dto: CreateUserDto) {
     validateBcryptPasswordBytes(
       dto.password,
     );
@@ -220,7 +235,21 @@ export class UsersService {
     }
   }
 
-  async update(
+  async update(id: bigint, dto: UpdateUserDto, currentUserId: bigint) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new UsersService(db).updateInTransaction(id, dto, currentUserId),
+      (e: any) => {
+        if (e.code === 'P2002') {
+          throw new ConflictException('Email is already in use');
+        }
+
+        throw e;
+      },
+    );
+  }
+
+  private async updateInTransaction(
     id: bigint,
     dto: UpdateUserDto,
     currentUserId: bigint,
@@ -334,7 +363,30 @@ export class UsersService {
   // PERMANENT USER DELETION
   // =========================================================
 
-  async remove(
+  async remove(id: bigint, currentUserId: bigint) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new UsersService(db).removeInTransaction(id, currentUserId),
+      (e: any) => {
+        /*
+         * A reference may theoretically appear
+         * between the initial check and DELETE.
+         *
+         * PostgreSQL/Prisma will reject it through
+         * the foreign key, which we expose as 409.
+         */
+        if (e.code === 'P2003') {
+          throw new ConflictException(
+            'User is still referenced by existing records and cannot be permanently deleted. Deactivate the account instead.',
+          );
+        }
+
+        throw e;
+      },
+    );
+  }
+
+  private async removeInTransaction(
     id: bigint,
     currentUserId: bigint,
   ) {

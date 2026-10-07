@@ -1,3 +1,4 @@
+import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
   BadRequestException,
   ConflictException,
@@ -31,6 +32,20 @@ export class AcademicYearsService {
   }
 
   async create(dto: CreateAcademicYearDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new AcademicYearsService(db).createInTransaction(dto),
+      (e: any) => {
+        if (e.code === 'P2002') {
+          throw new ConflictException('Academic year already exists');
+        }
+
+        throw e;
+      },
+    );
+  }
+
+  private async createInTransaction(dto: CreateAcademicYearDto) {
     const startDate = dto.start_date ? new Date(dto.start_date) : null;
     const endDate = dto.end_date ? new Date(dto.end_date) : null;
 
@@ -71,6 +86,20 @@ export class AcademicYearsService {
   }
 
   async update(id: bigint, dto: UpdateAcademicYearDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new AcademicYearsService(db).updateInTransaction(id, dto),
+      (e: any) => {
+        if (e.code === 'P2002') {
+          throw new ConflictException('Academic year already exists');
+        }
+
+        throw e;
+      },
+    );
+  }
+
+  private async updateInTransaction(id: bigint, dto: UpdateAcademicYearDto) {
     const existing = await this.findOne(id);
 
     const startDate =
@@ -123,6 +152,22 @@ export class AcademicYearsService {
   }
 
   async remove(id: bigint) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new AcademicYearsService(db).removeInTransaction(id),
+      (e: any) => {
+        if (e.code === 'P2003') {
+          throw new ConflictException(
+            'Academic year is used by semesters and cannot be deleted',
+          );
+        }
+
+        throw e;
+      },
+    );
+  }
+
+  private async removeInTransaction(id: bigint) {
     await this.findOne(id);
 
     try {

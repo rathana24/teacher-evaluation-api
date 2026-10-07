@@ -178,7 +178,7 @@ export class SurveyVersionsController {
     summary:
       'Apply a new question-set version to safe unfinished assignments',
     description:
-      'Locks this DRAFT version and applies it only to unfinished participants in evaluations using the same named question set. Completed participants keep their original version. Participants with saved drafts are skipped so their saved answers are not silently invalidated. The evaluation base version is not changed.',
+      'Applies only the actual latest version in this named question set to safe unfinished participants. A DRAFT target is locked; an already LOCKED target may be reconciled again. Completed participants and participants with saved drafts retain their original versions. The evaluation base version is preserved. Repeated calls resolve current eligibility; a durable reviewed operation receipt is not yet supported.',
   })
   @ApiParam({
     name: 'versionId',
@@ -203,7 +203,7 @@ export class SurveyVersionsController {
   @ApiResponse({
     status: 409,
     description:
-      'The version is not DRAFT or its state changed during reconciliation',
+      'The target is archived or superseded, the named set is archived, or a concurrent change prevented atomic reconciliation. Reload and review before retrying.',
   })
   applyToUnfinished(
     @Param(

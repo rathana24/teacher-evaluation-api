@@ -1,3 +1,4 @@
+import { completeTransactionMock } from '../../test/utils/complete-transaction-mock';
 import { jest } from '@jest/globals';
 import {
   ConflictException,
@@ -194,7 +195,7 @@ describe(
             (client: any) =>
               Promise<any>,
         ) => {
-          return callback(tx);
+          return callback(completeTransactionMock(prismaMock, tx));
         },
       );
 
@@ -316,9 +317,7 @@ describe(
               ConflictException,
             );
 
-            expect(
-              transactionMock,
-            ).not.toHaveBeenCalled();
+            expect(versionCreateMock).not.toHaveBeenCalled();
 
             expect(
               versionCreateMock,

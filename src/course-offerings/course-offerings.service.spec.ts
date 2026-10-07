@@ -1,3 +1,4 @@
+import { completeTransactionMock } from '../../test/utils/complete-transaction-mock';
 import { jest } from '@jest/globals';
 import {
   BadRequestException,
@@ -113,7 +114,7 @@ describe('CourseOfferingsService', () => {
 
       $transaction: jest.fn(
         async (callback: (tx: any) => Promise<any>) =>
-          callback({
+          callback(completeTransactionMock(prismaMock, {
             course_offerings: {
               create: async (...args: any[]) => {
                 transactionResult =
@@ -133,7 +134,7 @@ describe('CourseOfferingsService', () => {
               createMany: groupScopeCreateMany,
               deleteMany: groupScopeDeleteMany,
             },
-          }),
+          })),
       ),
     };
 
@@ -1158,7 +1159,7 @@ describe('CourseOfferingsService', () => {
           lecturer_id: 20n,
           semester_id: 30n,
           section_code: 'B',
-          id: {
+          year_level: 3, class_type: 'COURSE', id: {
             not: 1n,
           },
         },

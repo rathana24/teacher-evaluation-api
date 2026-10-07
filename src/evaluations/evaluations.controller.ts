@@ -133,7 +133,7 @@ export class EvaluationsController {
     summary:
       'Create a DRAFT evaluation and confirm its participant group',
     description:
-      'Preferred question-set flow: provide survey_id and the backend selects the latest usable version from that named question set only. participant_scope defaults to ALL_ENROLLED for backward compatibility. For a reviewed targeting flow, send the exact confirmed_student_ids returned by the participant preview.',
+      'Send the reviewed survey_version_id to detect a stale question selection (409). Set-only selection validates the actual latest version and rejects an empty/archived latest version without fallback. participant_scope defaults to ALL_ENROLLED. For reviewed targeting, send the unchanged context and exact confirmed_student_ids returned by preview. Validation and writes share a serializable transaction; a concurrent conflict requires review and retry.',
   })
   @ApiResponse({
     status: 201,
@@ -212,7 +212,7 @@ export class EvaluationsController {
     summary:
       'Open a DRAFT evaluation and lock its question-set version',
     description:
-      'Uses the participant list already confirmed and frozen on the DRAFT evaluation. Opening does not silently add students from later enrollment, profile, or generation changes.',
+      'Uses the frozen participant list. A newer question version returns 409 and preserves the draft assignment for re-review. Existing assignments may continue after their named set is archived. Opening never silently substitutes versions or adds later enrollments.',
   })
   @ApiParam({
     name: 'id',
@@ -237,7 +237,7 @@ export class EvaluationsController {
   @ApiResponse({
     status: 409,
     description:
-      'Evaluation is not a DRAFT',
+      'Evaluation is not a DRAFT, a newer question version requires re-review, or a concurrent operation conflicted',
   })
   open(
     @Param(

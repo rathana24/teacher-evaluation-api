@@ -154,6 +154,8 @@ export class EnrollmentsController {
   @ApiOperation({
     summary:
       'Enroll one student in a course offering',
+    description:
+      'student_id is a user/account ID. Validates ACTIVE status and any saved academic-year/generation/major/year/group scope inside the same serializable transaction as enrollment. Legacy no-scope offerings do not infer restrictions from section_code.',
   })
   @ApiResponse({
     status: 201,
@@ -165,7 +167,7 @@ export class EnrollmentsController {
   @ApiResponse({
     status: 400,
     description:
-      'Invalid input, student_id is not a STUDENT, or student account is not ACTIVE',
+      'Invalid input, inactive/non-student account, missing placement, or placement outside the saved offering scope',
   })
   @ApiResponse({
     status: 404,
@@ -174,7 +176,7 @@ export class EnrollmentsController {
   @ApiResponse({
     status: 409,
     description:
-      'Student is already enrolled in this course offering',
+      'Duplicate enrollment or concurrent state change requiring review and retry',
   })
   create(
     @Param('offeringId', ParseBigIntPipe)

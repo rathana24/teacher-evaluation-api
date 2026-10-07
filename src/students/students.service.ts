@@ -1,3 +1,4 @@
+import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
   BadRequestException,
   ConflictException,
@@ -666,6 +667,23 @@ export class StudentsService {
     studentIds: bigint[],
     classGroupValue: string,
   ) {
+    return inSerializableTransaction(this.prisma, (db) =>
+      new StudentsService(
+        db,
+        this.studentEvaluationProgressService,
+      ).bulkUpdateClassGroupInTransaction(
+        academicYearId,
+        studentIds,
+        classGroupValue,
+      ),
+    );
+  }
+
+  private async bulkUpdateClassGroupInTransaction(
+    academicYearId: bigint,
+    studentIds: bigint[],
+    classGroupValue: string,
+  ) {
     const classGroup =
       normalizeClassGroup(
         classGroupValue,
@@ -1025,6 +1043,20 @@ export class StudentsService {
   }
 
   async create(dto: CreateStudentDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) =>
+        new StudentsService(
+          db,
+          this.studentEvaluationProgressService,
+        ).createInTransaction(dto),
+      (error: any) => {
+        this.handlePrismaError(error);
+      },
+    );
+  }
+
+  private async createInTransaction(dto: CreateStudentDto) {
     const studentCode =
       normalizeStudentCode(dto.student_code);
 
@@ -1178,7 +1210,21 @@ export class StudentsService {
     }
   }
 
-  async update(
+  async update(id: bigint, dto: UpdateStudentDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) =>
+        new StudentsService(
+          db,
+          this.studentEvaluationProgressService,
+        ).updateInTransaction(id, dto),
+      (error: any) => {
+        this.handlePrismaError(error);
+      },
+    );
+  }
+
+  private async updateInTransaction(
     id: bigint,
     dto: UpdateStudentDto,
   ) {
@@ -1297,6 +1343,20 @@ export class StudentsService {
   }
 
   async remove(id: bigint) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) =>
+        new StudentsService(
+          db,
+          this.studentEvaluationProgressService,
+        ).removeInTransaction(id),
+      (error: any) => {
+        this.handlePrismaError(error);
+      },
+    );
+  }
+
+  private async removeInTransaction(id: bigint) {
     const student =
       await this.prisma.students.findUnique({
         where: { id },

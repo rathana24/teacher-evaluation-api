@@ -1,6 +1,8 @@
 # Assessment / Teaching Evaluation System — Backend
 
-> **Backend status:** Improvement scope implemented and regression-tested  
+For professor review and frontend handoff, read the [consolidated project report](docs/BACKEND_PROJECT_REPORT.md) or its [Word version](docs/BACKEND_PROJECT_REPORT.docx).
+
+> **Backend status:** Safety improvements implemented; full frontend acceptance awaits agreed contracts and school policies. See [current requirements review](docs/BACKEND_PROJECT_REPORT.md#7-backend-improvement-requirements-and-delivery-status).
 > **Stack:** NestJS · TypeScript · PostgreSQL · Prisma · JWT/Passport · Swagger · Jest · ts-jest · Supertest  
 > **Roles:** ADMIN · LECTURER · STUDENT  
 > **API base path:** `/api`

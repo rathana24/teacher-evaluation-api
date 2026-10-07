@@ -1,10 +1,11 @@
+import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
   BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { class_type, Prisma } from '@prisma/client';
 
 import { normalizeClassGroups } from '../common/utils/class-group.util';
 import { PrismaService } from '../prisma/prisma.service';
@@ -276,6 +277,16 @@ export class CourseOfferingsService {
   }
 
   async create(dto: CreateCourseOfferingDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new CourseOfferingsService(db).createInTransaction(dto),
+      (e: any) => {
+        this.handleWriteError(e);
+      },
+    );
+  }
+
+  private async createInTransaction(dto: CreateCourseOfferingDto) {
     const courseId = BigInt(dto.course_id);
     const lecturerId = BigInt(dto.lecturer_id);
     const semesterId = BigInt(dto.semester_id);
@@ -303,6 +314,8 @@ export class CourseOfferingsService {
       lecturerId,
       semesterId,
       sectionCode,
+      yearLevel,
+      classType ?? null,
     );
 
     await this.validateGroupScopes(
@@ -351,7 +364,17 @@ export class CourseOfferingsService {
     }
   }
 
-  async update(
+  async update(id: bigint, dto: UpdateCourseOfferingDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new CourseOfferingsService(db).updateInTransaction(id, dto),
+      (e: any) => {
+        this.handleWriteError(e);
+      },
+    );
+  }
+
+  private async updateInTransaction(
     id: bigint,
     dto: UpdateCourseOfferingDto,
   ) {
@@ -398,6 +421,8 @@ export class CourseOfferingsService {
       lecturerId,
       semesterId,
       sectionCode,
+      yearLevel,
+      classType,
       id,
     );
 
@@ -471,6 +496,21 @@ export class CourseOfferingsService {
   }
 
   async remove(id: bigint) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new CourseOfferingsService(db).removeInTransaction(id),
+      (e: any) => {
+        if (e.code === 'P2003') {
+          throw new ConflictException(
+            'Course offering has enrollments or evaluations and cannot be deleted',
+          );
+        }
+        throw e;
+      },
+    );
+  }
+
+  private async removeInTransaction(id: bigint) {
     await this.findOne(id);
 
     try {
@@ -738,6 +778,8 @@ export class CourseOfferingsService {
     lecturerId: bigint,
     semesterId: bigint,
     sectionCode: string | null,
+    yearLevel: number | null,
+    classType: class_type | null,
     excludeId?: bigint,
   ) {
     const duplicate =
@@ -747,6 +789,8 @@ export class CourseOfferingsService {
           lecturer_id: lecturerId,
           semester_id: semesterId,
           section_code: sectionCode,
+          year_level: yearLevel,
+          class_type: classType,
 
           id:
             excludeId !== undefined

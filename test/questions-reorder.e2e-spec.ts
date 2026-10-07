@@ -1,3 +1,4 @@
+import { baseFixtures } from './utils/base-fixtures';
 import {
   INestApplication,
   ValidationPipe,
@@ -14,6 +15,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 
 describe('Questions Reorder (e2e)', () => {
   let app: INestApplication;
+ let baseline: Awaited<ReturnType<typeof baseFixtures>>;
   let prisma: PrismaService;
 
   let adminToken: string;
@@ -56,6 +58,7 @@ describe('Questions Reorder (e2e)', () => {
     );
 
     await app.init();
+ baseline = await baseFixtures(app.get(PrismaService));
 
     prisma = app.get(PrismaService);
 
@@ -68,7 +71,7 @@ describe('Questions Reorder (e2e)', () => {
       request(app.getHttpServer())
         .post('/api/auth/login')
         .send({
-          email,
+          identifier: email,
           password: 'Password123',
         })
         .then((res) => res.body.access_token);
@@ -641,13 +644,13 @@ describe('Questions Reorder (e2e)', () => {
       app.getHttpServer(),
     )
       .put(
-        '/api/survey-versions/1/questions/reorder',
+        `/api/survey-versions/${baseline.version}/questions/reorder`,
       )
       .set(auth())
       .send({
         questions: [
           {
-            question_id: '1',
+            question_id: baseline.question,
             display_order: 1,
           },
         ],

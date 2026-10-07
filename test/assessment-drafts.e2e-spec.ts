@@ -24,6 +24,14 @@ describe('Assessment Drafts (e2e)', () => {
   let surveyId: string;
   let versionId: string;
   let evaluationId: string;
+  let offeringId: string;
+
+  let courseId: bigint | undefined;
+  let semesterId: bigint | undefined;
+  let academicYearId: bigint | undefined;
+  let generationId: bigint | undefined;
+
+  const fixtureUserIds: bigint[] = [];
 
   let qRating: string;
   let qText: string;
@@ -156,32 +164,134 @@ describe('Assessment Drafts (e2e)', () => {
 
     prisma = app.get(PrismaService);
 
-    const login = (email: string) =>
-      api()
+    const login = async (identifier: string): Promise<string> => {
+      const res = await api()
         .post('/api/auth/login')
-        .send({
-          email,
-          password: 'Password123',
-        })
-        .then(
-          (res) => res.body.access_token as string,
-        );
+        .send({ identifier, password: 'Password123' });
 
-    adminToken = await login(
-      'admin@itc.edu.kh',
-    );
+      expect(res.status).toBe(200);
+      expect(typeof res.body.access_token).toBe('string');
+      expect(res.body.access_token.length).toBeGreaterThan(0);
 
-    lecturerToken = await login(
-      'sokdara@itc.edu.kh',
-    );
+      return res.body.access_token;
+    };
 
-    student1Token = await login(
-      'student1@itc.edu.kh',
-    );
+    adminToken = await login('admin@itc.edu.kh');
+    lecturerToken = await login('sokdara@itc.edu.kh');
 
-    student2Token = await login(
-      'student2@itc.edu.kh',
-    );
+    const lecturer = await prisma.users.findUniqueOrThrow({
+      where: { email: 'sokdara@itc.edu.kh' },
+    });
+    const seedStudent = await prisma.users.findUniqueOrThrow({
+      where: { email: 'student1@itc.edu.kh' },
+    });
+    const department = await prisma.departments.findUniqueOrThrow({
+      where: { code: 'AMS' },
+    });
+
+    const fixtures = await prisma.$transaction(async (tx) => {
+      const now = new Date();
+
+      const year = await tx.academic_years.create({
+        data: {
+          name: `DR-${stamp}`,
+          start_year: 2026,
+          is_active: false,
+        },
+      });
+
+      const semester = await tx.semesters.create({
+        data: {
+          academic_year_id: year.id,
+          semester_name: 'Drafts E2E',
+          created_at: now,
+          updated_at: now,
+        },
+      });
+
+      const course = await tx.courses.create({
+        data: {
+          course_code: `E2E-DR-${stamp}`,
+          course_name: 'Drafts E2E Course',
+          department_id: department.id,
+          created_at: now,
+          updated_at: now,
+        },
+      });
+
+      const generation = await tx.student_generations.create({
+        data: {
+          name: `E2E-DR-${stamp}`,
+          entry_academic_year_id: year.id,
+          starting_year_level: 1,
+        },
+      });
+
+      const userIds: bigint[] = [];
+
+      for (let index = 0; index < 2; index++) {
+        const user = await tx.users.create({
+          data: {
+            email: `draft-${stamp}-${index}@example.test`,
+            full_name: `Draft E2E Student ${index}`,
+            password_hash: seedStudent.password_hash,
+            role: 'STUDENT',
+            status: 'ACTIVE',
+            created_at: now,
+            updated_at: now,
+          },
+        });
+
+        userIds.push(user.id);
+
+        await tx.students.create({
+          data: {
+            user_id: user.id,
+            student_code: `E2E-DR-${stamp}-${index}`,
+            generation_id: generation.id,
+          },
+        });
+      }
+
+      const offering = await tx.course_offerings.create({
+        data: {
+          course_id: course.id,
+          lecturer_id: lecturer.id,
+          semester_id: semester.id,
+          class_type: 'COURSE',
+          section_code: `DRAFT-${stamp}`,
+          created_at: now,
+          updated_at: now,
+        },
+      });
+
+      await tx.enrollments.createMany({
+        data: userIds.map((userId) => ({
+          course_offering_id: offering.id,
+          student_id: userId,
+          enrolled_at: now,
+        })),
+      });
+
+      return {
+        yearId: year.id,
+        semesterId: semester.id,
+        courseId: course.id,
+        generationId: generation.id,
+        userIds,
+        offeringId: offering.id.toString(),
+      };
+    });
+
+    academicYearId = fixtures.yearId;
+    semesterId = fixtures.semesterId;
+    courseId = fixtures.courseId;
+    generationId = fixtures.generationId;
+    fixtureUserIds.push(...fixtures.userIds);
+    offeringId = fixtures.offeringId;
+
+    student1Token = await login(`draft-${stamp}-0@example.test`);
+    student2Token = await login(`draft-${stamp}-1@example.test`);
 
     // ------------------------------------------------
     // Create survey
@@ -202,16 +312,14 @@ describe('Assessment Drafts (e2e)', () => {
     // Create survey version
     // ------------------------------------------------
 
-    const version = await api()
-      .post(
-        `/api/surveys/${surveyId}/versions`,
-      )
-      .set(admin())
-      .send({});
+    const version = await prisma.survey_versions.findFirstOrThrow({
+      where: {
+        survey_id: BigInt(surveyId),
+        version_no: 1,
+      },
+    });
 
-    expect(version.status).toBe(201);
-
-    versionId = version.body.id;
+    versionId = version.id.toString();
 
     // ------------------------------------------------
     // RATING
@@ -341,7 +449,7 @@ describe('Assessment Drafts (e2e)', () => {
       .post('/api/evaluations')
       .set(admin())
       .send({
-        course_offering_id: '1',
+        course_offering_id: offeringId,
         survey_version_id: versionId,
         start_at: hourAgo,
         end_at: nextWeek,
@@ -364,9 +472,14 @@ describe('Assessment Drafts (e2e)', () => {
       .set(admin());
 
     expect(opened.status).toBe(200);
+    expect(opened.body.status).toBe('OPEN');
+    expect(opened.body._count.evaluation_participants).toBe(2);
   }, 60000);
 
   afterAll(async () => {
+    try {
+      if (prisma) {
+        await prisma.$transaction(async (tx) => {
     if (evaluationId) {
       const evaluationIdBigInt =
         BigInt(evaluationId);
@@ -376,7 +489,7 @@ describe('Assessment Drafts (e2e)', () => {
       // ------------------------------------------------
 
       const participants =
-        await prisma.evaluation_participants.findMany({
+        await tx.evaluation_participants.findMany({
           where: {
             evaluation_id: evaluationIdBigInt,
           },
@@ -391,7 +504,7 @@ describe('Assessment Drafts (e2e)', () => {
         );
 
       if (participantIds.length > 0) {
-        await prisma.assessment_drafts.deleteMany({
+        await tx.assessment_drafts.deleteMany({
           where: {
             participant_id: {
               in: participantIds,
@@ -406,7 +519,7 @@ describe('Assessment Drafts (e2e)', () => {
       // ------------------------------------------------
 
       const responseRows =
-        await prisma.responses.findMany({
+        await tx.responses.findMany({
           where: {
             evaluation_id: evaluationIdBigInt,
           },
@@ -422,7 +535,7 @@ describe('Assessment Drafts (e2e)', () => {
 
       if (responseIds.length > 0) {
         const answerRows =
-          await prisma.answers.findMany({
+          await tx.answers.findMany({
             where: {
               response_id: {
                 in: responseIds,
@@ -439,7 +552,7 @@ describe('Assessment Drafts (e2e)', () => {
           );
 
         if (answerIds.length > 0) {
-          await prisma.answer_options.deleteMany({
+          await tx.answer_options.deleteMany({
             where: {
               answer_id: {
                 in: answerIds,
@@ -448,7 +561,7 @@ describe('Assessment Drafts (e2e)', () => {
           });
         }
 
-        await prisma.answers.deleteMany({
+        await tx.answers.deleteMany({
           where: {
             response_id: {
               in: responseIds,
@@ -457,19 +570,19 @@ describe('Assessment Drafts (e2e)', () => {
         });
       }
 
-      await prisma.responses.deleteMany({
+      await tx.responses.deleteMany({
         where: {
           evaluation_id: evaluationIdBigInt,
         },
       });
 
-      await prisma.evaluation_participants.deleteMany({
+      await tx.evaluation_participants.deleteMany({
         where: {
           evaluation_id: evaluationIdBigInt,
         },
       });
 
-      await prisma.evaluations.deleteMany({
+      await tx.evaluations.deleteMany({
         where: {
           id: evaluationIdBigInt,
         },
@@ -484,7 +597,7 @@ describe('Assessment Drafts (e2e)', () => {
       const versionIdBigInt =
         BigInt(versionId);
 
-      await prisma.question_options.deleteMany({
+      await tx.question_options.deleteMany({
         where: {
           questions: {
             survey_version_id:
@@ -493,14 +606,14 @@ describe('Assessment Drafts (e2e)', () => {
         },
       });
 
-      await prisma.questions.deleteMany({
+      await tx.questions.deleteMany({
         where: {
           survey_version_id:
             versionIdBigInt,
         },
       });
 
-      await prisma.survey_versions.deleteMany({
+      await tx.survey_versions.deleteMany({
         where: {
           id: versionIdBigInt,
         },
@@ -512,14 +625,59 @@ describe('Assessment Drafts (e2e)', () => {
     // ------------------------------------------------
 
     if (surveyId) {
-      await prisma.surveys.deleteMany({
+      await tx.surveys.deleteMany({
         where: {
           id: BigInt(surveyId),
         },
       });
     }
 
-    await app.close();
+          if (courseId !== undefined) {
+            const offerings = await tx.course_offerings.findMany({
+              where: { course_id: courseId },
+              select: { id: true },
+            });
+            const offeringIds = offerings.map((offering) => offering.id);
+
+            await tx.enrollments.deleteMany({
+              where: { course_offering_id: { in: offeringIds } },
+            });
+            await tx.course_offerings.deleteMany({
+              where: { id: { in: offeringIds } },
+            });
+            await tx.courses.delete({ where: { id: courseId } });
+          }
+
+          if (fixtureUserIds.length > 0) {
+            await tx.students.deleteMany({
+              where: { user_id: { in: fixtureUserIds } },
+            });
+            await tx.users.deleteMany({
+              where: { id: { in: fixtureUserIds } },
+            });
+          }
+          if (generationId !== undefined) {
+            await tx.student_generations.delete({
+              where: { id: generationId },
+            });
+          }
+          if (semesterId !== undefined) {
+            await tx.semesters.delete({
+              where: { id: semesterId },
+            });
+          }
+          if (academicYearId !== undefined) {
+            await tx.academic_years.delete({
+              where: { id: academicYearId },
+            });
+          }
+        });
+      }
+    } finally {
+      if (app) {
+        await app.close();
+      }
+    }
   });
 
   // ==================================================
@@ -574,6 +732,26 @@ describe('Assessment Drafts (e2e)', () => {
           rating_value: 4,
         },
       ]);
+
+      const participant =
+        await prisma.evaluation_participants.findUniqueOrThrow({
+          where: {
+            evaluation_id_student_id: {
+              evaluation_id: BigInt(evaluationId),
+              student_id: fixtureUserIds[0],
+            },
+          },
+        });
+
+      const draft = await prisma.assessment_drafts.findUniqueOrThrow({
+        where: { participant_id: participant.id },
+      });
+
+      expect(draft.survey_version_id).toBe(BigInt(versionId));
+      expect(draft.answers_json).toEqual([
+        { question_id: qRating, rating_value: 4 },
+      ]);
+      expect(participant.has_submitted).toBe(false);
     });
 
     it('student can load the saved draft -> 200', async () => {
@@ -700,6 +878,68 @@ describe('Assessment Drafts (e2e)', () => {
   // ==================================================
 
   describe('draft validation', () => {
+    let draftBefore: {
+      id: bigint;
+      survey_version_id: bigint | null;
+      answers_json: unknown;
+      updated_at: Date;
+    };
+
+    beforeEach(async () => {
+      const participant =
+        await prisma.evaluation_participants.findUniqueOrThrow({
+          where: {
+            evaluation_id_student_id: {
+              evaluation_id: BigInt(evaluationId),
+              student_id: fixtureUserIds[0],
+            },
+          },
+        });
+
+      draftBefore = await prisma.assessment_drafts.findUniqueOrThrow({
+        where: { participant_id: participant.id },
+        select: {
+          id: true,
+          survey_version_id: true,
+          answers_json: true,
+          updated_at: true,
+        },
+      });
+    });
+
+    afterEach(async () => {
+      const participant =
+        await prisma.evaluation_participants.findUniqueOrThrow({
+          where: {
+            evaluation_id_student_id: {
+              evaluation_id: BigInt(evaluationId),
+              student_id: fixtureUserIds[0],
+            },
+          },
+        });
+
+      expect(participant.has_submitted).toBe(false);
+      expect(
+        await prisma.responses.count({
+          where: { evaluation_id: BigInt(evaluationId) },
+        }),
+      ).toBe(0);
+    });
+
+    const expectDraftUnchanged = async () => {
+      const unchanged = await prisma.assessment_drafts.findUniqueOrThrow({
+        where: { id: draftBefore.id },
+        select: {
+          id: true,
+          survey_version_id: true,
+          answers_json: true,
+          updated_at: true,
+        },
+      });
+
+      expect(unchanged).toEqual(draftBefore);
+    };
+
     it('question outside the survey -> 400', async () => {
       const res = await saveDraft(
         student1Token,
@@ -712,6 +952,7 @@ describe('Assessment Drafts (e2e)', () => {
       );
 
       expect(res.status).toBe(400);
+      await expectDraftUnchanged();
     });
 
     it('same question twice -> 400', async () => {
@@ -730,6 +971,7 @@ describe('Assessment Drafts (e2e)', () => {
       );
 
       expect(res.status).toBe(400);
+      await expectDraftUnchanged();
     });
 
     it('RATING above 5 -> 400', async () => {
@@ -744,6 +986,7 @@ describe('Assessment Drafts (e2e)', () => {
       );
 
       expect(res.status).toBe(400);
+      await expectDraftUnchanged();
     });
 
     it('RATING rejects text -> 400', async () => {
@@ -758,6 +1001,7 @@ describe('Assessment Drafts (e2e)', () => {
       );
 
       expect(res.status).toBe(400);
+      await expectDraftUnchanged();
     });
 
     it('TEXT rejects rating_value -> 400', async () => {
@@ -772,6 +1016,7 @@ describe('Assessment Drafts (e2e)', () => {
       );
 
       expect(res.status).toBe(400);
+      await expectDraftUnchanged();
     });
 
     it('AGREEMENT accepts a valid numeric draft -> 200', async () => {
@@ -837,6 +1082,7 @@ describe('Assessment Drafts (e2e)', () => {
       );
 
       expect(res.status).toBe(400);
+      await expectDraftUnchanged();
     });
 
     it('MULTIPLE_CHOICE rejects option from another question -> 400', async () => {
@@ -853,6 +1099,7 @@ describe('Assessment Drafts (e2e)', () => {
       );
 
       expect(res.status).toBe(400);
+      await expectDraftUnchanged();
     });
 
     // ------------------------------------------------
@@ -891,6 +1138,7 @@ describe('Assessment Drafts (e2e)', () => {
       );
 
       expect(res.status).toBe(400);
+      await expectDraftUnchanged();
     });
 
     it('CHECKBOX rejects duplicate option IDs -> 400', async () => {
@@ -908,6 +1156,7 @@ describe('Assessment Drafts (e2e)', () => {
       );
 
       expect(res.status).toBe(400);
+      await expectDraftUnchanged();
     });
 
     it('non-numeric question_id -> 400', async () => {
@@ -922,6 +1171,7 @@ describe('Assessment Drafts (e2e)', () => {
       );
 
       expect(res.status).toBe(400);
+      await expectDraftUnchanged();
     });
   });
 
@@ -967,7 +1217,7 @@ describe('Assessment Drafts (e2e)', () => {
             evaluation_id_student_id: {
               evaluation_id:
                 BigInt(evaluationId),
-              student_id: BigInt(4),
+                student_id: fixtureUserIds[0],
             },
           },
         });
@@ -983,6 +1233,7 @@ describe('Assessment Drafts (e2e)', () => {
         });
 
       expect(before).not.toBeNull();
+      expect(before!.survey_version_id).toBe(BigInt(versionId));
 
       const submitted = await submit(
         student1Token,
@@ -1004,6 +1255,20 @@ describe('Assessment Drafts (e2e)', () => {
         });
 
       expect(after).toBeNull();
+
+      const responses = await prisma.responses.findMany({
+        where: { evaluation_id: BigInt(evaluationId) },
+      });
+
+      expect(responses).toHaveLength(1);
+      expect(responses[0].survey_version_id).toBe(BigInt(versionId));
+
+      const updatedParticipant =
+        await prisma.evaluation_participants.findUniqueOrThrow({
+          where: { id: participant!.id },
+        });
+
+      expect(updatedParticipant.has_submitted).toBe(true);
     });
 
     it('student cannot save another draft after final submission -> 409', async () => {

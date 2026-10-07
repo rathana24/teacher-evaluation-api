@@ -1,3 +1,5 @@
+import { matchesOfferingScope } from '../common/utils/offering-scope.util';
+import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
   BadRequestException,
   ConflictException,
@@ -49,6 +51,33 @@ export class EnrollmentsService {
   }
 
   async create(offeringId: bigint, dto: CreateEnrollmentDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) =>
+        new EnrollmentsService(db, this.studentsService).createInTransaction(
+          offeringId,
+          dto,
+        ),
+      (error: any) => {
+        if (error instanceof Prisma.PrismaClientKnownRequestError) {
+          if (error.code === 'P2002') {
+            throw new ConflictException(
+              'Student is already enrolled in this course offering',
+            );
+          }
+
+          if (error.code === 'P2034') {
+            throw new ConflictException(
+              'Enrollment state changed concurrently. Review the student and offering before retrying.',
+            );
+          }
+        }
+
+        throw error;
+      },
+    );
+  }
+  private async createInTransaction(offeringId: bigint, dto: CreateEnrollmentDto) {
     const studentId = BigInt(dto.student_id); // users.id, not students.id
 
     try {
@@ -104,20 +133,8 @@ export class EnrollmentsService {
             );
           }
 
-          const group = normalizeClassGroups([
-            placement.class_group ?? '',
-          ])[0];
-
           const matchesScope =
-            group !== undefined &&
-            offering.group_scopes.some(
-              (scope) =>
-                scope.academic_year_id === academicYearId &&
-                scope.generation_id === student.generation_id &&
-                scope.major_id === placement.major_id &&
-                scope.year_level === placement.year_level &&
-                normalizeClassGroups([scope.class_group])[0] === group,
-            );
+            matchesOfferingScope(offering.group_scopes, academicYearId, student.generation_id, placement);
 
           if (!matchesScope) {
             throw new BadRequestException(
@@ -156,7 +173,15 @@ export class EnrollmentsService {
     }
   }
 
-  async previewGroup(
+  async previewGroup(offeringId: bigint, dto: EnrollmentGroupSelectionDto) {
+    return inSerializableTransaction(this.prisma, (db) =>
+      new EnrollmentsService(
+        db,
+        this.studentsService,
+      ).previewGroupInTransaction(offeringId, dto),
+    );
+  }
+  private async previewGroupInTransaction(
     offeringId: bigint,
     dto: EnrollmentGroupSelectionDto,
   ) {
@@ -238,7 +263,29 @@ export class EnrollmentsService {
     };
   }
 
-  async bulkCreate(
+  async bulkCreate(offeringId: bigint, dto: EnrollmentGroupSelectionDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) =>
+        new EnrollmentsService(
+          db,
+          this.studentsService,
+        ).bulkCreateInTransaction(offeringId, dto),
+      (error: any) => {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2034'
+        ) {
+          throw new ConflictException(
+            'Enrollment state changed concurrently. Please preview the group again before confirming.',
+          );
+        }
+
+        throw error;
+      },
+    );
+  }
+  private async bulkCreateInTransaction(
     offeringId: bigint,
     dto: EnrollmentGroupSelectionDto,
   ) {
@@ -446,25 +493,22 @@ export class EnrollmentsService {
         return false;
       }
 
-      const group = normalizeClassGroups([
-        placement.class_group ?? '',
-      ])[0];
-
-      return (
-        group !== undefined &&
-        offering.group_scopes.some(
-          (scope) =>
-            scope.academic_year_id === academicYearId &&
-            scope.generation_id === student.generation_id &&
-            scope.major_id === placement.major_id &&
-            scope.year_level === placement.year_level &&
-            normalizeClassGroups([scope.class_group])[0] === group,
-        )
-      );
+      return matchesOfferingScope(offering.group_scopes, academicYearId, student.generation_id, placement);
     });
   }
 
   async previewReassignment(
+    sourceOfferingId: bigint,
+    dto: EnrollmentReassignmentDto,
+  ) {
+    return inSerializableTransaction(this.prisma, (db) =>
+      new EnrollmentsService(
+        db,
+        this.studentsService,
+      ).previewReassignmentInTransaction(sourceOfferingId, dto),
+    );
+  }
+  private async previewReassignmentInTransaction(
       sourceOfferingId: bigint,
       dto: EnrollmentReassignmentDto,
     ) {
@@ -622,21 +666,7 @@ export class EnrollmentsService {
         ])[0] ?? null;
 
       const matchesTargetScope =
-        normalizedStudentGroup !== null &&
-        targetOffering.group_scopes.some(
-          (scope) =>
-            scope.academic_year_id ===
-              placement.academic_year_id &&
-            scope.generation_id ===
-              student.generation_id &&
-            scope.major_id ===
-              placement.major_id &&
-            scope.year_level ===
-              placement.year_level &&
-            normalizeClassGroups([
-              scope.class_group,
-            ])[0] === normalizedStudentGroup,
-        );
+        matchesOfferingScope(targetOffering.group_scopes, targetOffering.semesters.academic_year_id, student.generation_id, placement);
 
       if (!matchesTargetScope) {
         throw new BadRequestException(
@@ -773,6 +803,31 @@ export class EnrollmentsService {
     }
 
   async confirmReassignment(
+    sourceOfferingId: bigint,
+    dto: ConfirmEnrollmentReassignmentDto,
+  ) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) =>
+        new EnrollmentsService(
+          db,
+          this.studentsService,
+        ).confirmReassignmentInTransaction(sourceOfferingId, dto),
+      (error: any) => {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2034'
+        ) {
+          throw new ConflictException(
+            'Reassignment state changed concurrently. Please preview again before confirming.',
+          );
+        }
+
+        throw error;
+      },
+    );
+  }
+  private async confirmReassignmentInTransaction(
     sourceOfferingId: bigint,
     dto: ConfirmEnrollmentReassignmentDto,
   ) {
@@ -932,28 +987,10 @@ export class EnrollmentsService {
           );
         }
 
-        const normalizedStudentGroup =
-          normalizeClassGroups([
-            placement.class_group ?? '',
-          ])[0] ?? null;
+
 
         const matchesTargetScope =
-          normalizedStudentGroup !== null &&
-          targetOffering.group_scopes.some(
-            (scope) =>
-              scope.academic_year_id ===
-                placement.academic_year_id &&
-              scope.generation_id ===
-                student.generation_id &&
-              scope.major_id ===
-                placement.major_id &&
-              scope.year_level ===
-                placement.year_level &&
-              normalizeClassGroups([
-                scope.class_group,
-              ])[0] ===
-                normalizedStudentGroup,
-          );
+          matchesOfferingScope(targetOffering.group_scopes, targetOffering.semesters.academic_year_id, student.generation_id, placement);
 
         if (!matchesTargetScope) {
           throw new ConflictException(
@@ -1121,7 +1158,15 @@ export class EnrollmentsService {
     }
   }
 
-  async remove(
+  async remove(offeringId: bigint, studentId: bigint) {
+    return inSerializableTransaction(this.prisma, (db) =>
+      new EnrollmentsService(db, this.studentsService).removeInTransaction(
+        offeringId,
+        studentId,
+      ),
+    );
+  }
+  private async removeInTransaction(
     offeringId: bigint,
     studentId: bigint,
   ) {

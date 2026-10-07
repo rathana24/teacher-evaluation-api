@@ -1,3 +1,5 @@
+import { PrismaService } from '../src/prisma/prisma.service';
+import { baseFixtures } from './utils/base-fixtures';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
@@ -10,6 +12,7 @@ import { AppModule } from '../src/app.module';
 
 describe('Surveys (e2e)', () => {
   let app: INestApplication;
+ let baseline: Awaited<ReturnType<typeof baseFixtures>>;
   let adminToken: string;
   let studentToken: string;
   let lecturerToken: string;
@@ -27,11 +30,12 @@ describe('Surveys (e2e)', () => {
     app.setGlobalPrefix('api');
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
     await app.init();
+ baseline = await baseFixtures(app.get(PrismaService));
 
     const login = (email: string) =>
       request(app.getHttpServer())
         .post('/api/auth/login')
-        .send({ email, password: 'Password123' })
+        .send({ identifier: email, password: 'Password123' })
         .then((res) => res.body.access_token);
 
     adminToken = await login('admin@itc.edu.kh');
@@ -74,8 +78,8 @@ describe('Surveys (e2e)', () => {
       expect(res.status).toBe(201);
       expect(res.body.title).toBe(testTitle);
       expect(res.body.created_by).toBe(adminId);
-      expect(res.body.users.full_name).toBe('System Admin');
-      expect(res.body.survey_versions).toEqual([]);
+      expect(res.body.users.id).toBe(adminId);
+      expect(res.body.survey_versions).toHaveLength(1); expect(res.body.survey_versions[0]).toMatchObject({version_no:1,status:'DRAFT'});
       createdSurveyId = res.body.id;
     });
 
@@ -164,9 +168,9 @@ describe('Surveys (e2e)', () => {
   });
 
   describe('DELETE /api/surveys/:id', () => {
-    it('cannot delete a survey that has versions (seeded survey 1) -> 409', async () => {
+    it('cannot delete a question set referenced by evaluation history -> 409', async () => {
       const res = await request(app.getHttpServer())
-        .delete('/api/surveys/1')
+        .delete(`/api/surveys/${baseline.survey}`)
         .set('Authorization', `Bearer ${adminToken}`);
       expect(res.status).toBe(409);
     });
@@ -178,11 +182,11 @@ describe('Surveys (e2e)', () => {
       expect(res.status).toBe(403);
     });
 
-    it('ADMIN can delete a survey with no versions -> 204', async () => {
+    it('ADMIN can delete an unused set together with its atomic V1 -> 200', async () => {
       const res = await request(app.getHttpServer())
         .delete(`/api/surveys/${createdSurveyId}`)
         .set('Authorization', `Bearer ${adminToken}`);
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(200);
     });
 
     it('deleted survey is gone -> 404', async () => {

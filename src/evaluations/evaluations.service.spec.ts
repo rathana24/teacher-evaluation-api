@@ -361,7 +361,7 @@ describe('EvaluationsService', () => {
   });
 
   describe('create', () => {
-    it('should select the latest usable version from the selected named question set', async () => {
+    it('should validate the latest version from the selected named question set', async () => {
       await service.create(
         {
           course_offering_id: '1',
@@ -388,23 +388,13 @@ describe('EvaluationsService', () => {
       ).toHaveBeenCalledWith({
         where: {
           survey_id: BigInt(2),
-
-          status: {
-            not: 'ARCHIVED',
-          },
-
-          questions: {
-            some: {},
-          },
         },
 
         orderBy: {
           version_no: 'desc',
         },
 
-        select: {
-          id: true,
-        },
+        select:{id:true,status:true,_count:{select:{questions:true}}},
       });
 
       expect(
@@ -498,7 +488,7 @@ describe('EvaluationsService', () => {
         ),
       ).rejects.toThrow(
         new BadRequestException(
-          'The selected question set has no usable survey version with questions',
+          'The selected question set has no survey version',
         ),
       );
 

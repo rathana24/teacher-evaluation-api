@@ -18,15 +18,18 @@ describe('Submission (e2e)', () => {
 
   let adminToken: string;
   let lecturerToken: string;
-  let student1Token: string; // user 4
-  let student2Token: string; // user 5
-  let student3Token: string; // user 6
+  let student1Token: string;
+  let student2Token: string;
+  let student3Token: string;
 
   let tempSurveyId: string;
+ let secondarySurveyId: string;
   let versionAId: string;
   let versionBId: string;
 
   let tempOfferingId: string;
+  let mainOfferingId: string;
+  let foreignQuestionId: string;
 
   let openEvalId: string;
   let closedEvalId: string;
@@ -47,6 +50,13 @@ describe('Submission (e2e)', () => {
   let checkboxOption1: string;
   let checkboxOption2: string;
   let checkboxOption3: string;
+
+  let courseId: bigint | undefined;
+  let semesterId: bigint | undefined;
+  let academicYearId: bigint | undefined;
+  let generationId: bigint | undefined;
+
+  const fixtureUserIds: bigint[] = [];
 
   const stamp = Date.now();
 
@@ -128,11 +138,16 @@ describe('Submission (e2e)', () => {
         end_at: nextWeek,
       });
 
-    await api()
+    expect(created.status).toBe(201);
+
+    const opened = await api()
       .post(
         `/api/evaluations/${created.body.id}/open`,
       )
       .set(admin());
+
+    expect(opened.status).toBe(200);
+    expect(opened.body.status).toBe('OPEN');
 
     return created.body.id as string;
   }
@@ -141,12 +156,17 @@ describe('Submission (e2e)', () => {
     versionId: string,
     body: Record<string, unknown>,
   ) {
-    return api()
+    const res = await api()
       .post(
         `/api/survey-versions/${versionId}/questions`,
       )
       .set(admin())
       .send(body);
+
+    expect(res.status).toBe(201);
+    expect(res.body.id).toMatch(/^\d+$/);
+
+    return res;
   }
 
   beforeAll(async () => {
@@ -170,36 +190,156 @@ describe('Submission (e2e)', () => {
 
     prisma = app.get(PrismaService);
 
-    const login = (email: string) =>
-      api()
+    const login = async (identifier: string): Promise<string> => {
+      const res = await api()
         .post('/api/auth/login')
-        .send({
-          email,
-          password: 'Password123',
-        })
-        .then(
-          (res) => res.body.access_token,
-        );
+        .send({ identifier, password: 'Password123' });
 
-    adminToken = await login(
-      'admin@itc.edu.kh',
-    );
+      expect(res.status).toBe(200);
+      expect(typeof res.body.access_token).toBe('string');
+      expect(res.body.access_token.length).toBeGreaterThan(0);
 
-    lecturerToken = await login(
-      'sokdara@itc.edu.kh',
-    );
+      return res.body.access_token;
+    };
 
-    student1Token = await login(
-      'student1@itc.edu.kh',
-    );
+    adminToken = await login('admin@itc.edu.kh');
+    lecturerToken = await login('sokdara@itc.edu.kh');
 
-    student2Token = await login(
-      'student2@itc.edu.kh',
-    );
+    const lecturer = await prisma.users.findUniqueOrThrow({
+      where: { email: 'sokdara@itc.edu.kh' },
+    });
+    const seedStudent = await prisma.users.findUniqueOrThrow({
+      where: { email: 'student1@itc.edu.kh' },
+    });
+    const department = await prisma.departments.findUniqueOrThrow({
+      where: { code: 'AMS' },
+    });
 
-    student3Token = await login(
-      'student3@itc.edu.kh',
-    );
+    const fixtures = await prisma.$transaction(async (tx) => {
+      const now = new Date();
+
+      const year = await tx.academic_years.create({
+        data: {
+          name: `SU-${stamp}`,
+          start_year: 2026,
+          is_active: false,
+        },
+      });
+
+      const semester = await tx.semesters.create({
+        data: {
+          academic_year_id: year.id,
+          semester_name: 'Submissions E2E',
+          created_at: now,
+          updated_at: now,
+        },
+      });
+
+      const course = await tx.courses.create({
+        data: {
+          course_code: `E2E-SUB-${stamp}`,
+          course_name: 'Submissions E2E Course',
+          department_id: department.id,
+          created_at: now,
+          updated_at: now,
+        },
+      });
+
+      const generation = await tx.student_generations.create({
+        data: {
+          name: `E2E-SUB-${stamp}`,
+          entry_academic_year_id: year.id,
+          starting_year_level: 1,
+        },
+      });
+
+      const userIds: bigint[] = [];
+
+      for (let index = 0; index < 3; index++) {
+        const user = await tx.users.create({
+          data: {
+            email: `submission-${stamp}-${index}@example.test`,
+            full_name: `Submission E2E Student ${index}`,
+            password_hash: seedStudent.password_hash,
+            role: 'STUDENT',
+            status: 'ACTIVE',
+            created_at: now,
+            updated_at: now,
+          },
+        });
+
+        userIds.push(user.id);
+
+        await tx.students.create({
+          data: {
+            user_id: user.id,
+            student_code: `E2E-SUB-${stamp}-${index}`,
+            generation_id: generation.id,
+          },
+        });
+      }
+
+      const offeringData = {
+        course_id: course.id,
+        lecturer_id: lecturer.id,
+        semester_id: semester.id,
+        class_type: 'COURSE' as const,
+        created_at: now,
+        updated_at: now,
+      };
+
+      const main = await tx.course_offerings.create({
+        data: {
+          ...offeringData,
+          section_code: `MAIN-${stamp}`,
+        },
+      });
+
+      const other = await tx.course_offerings.create({
+        data: {
+          ...offeringData,
+          section_code: `OTHER-${stamp}`,
+        },
+      });
+
+      await tx.enrollments.createMany({
+        data: userIds.map((userId) => ({
+          course_offering_id: main.id,
+          student_id: userId,
+          enrolled_at: now,
+        })),
+      });
+
+      await tx.enrollments.create({
+        data: {
+          course_offering_id: other.id,
+          student_id: userIds[1],
+          enrolled_at: now,
+        },
+      });
+
+      return {
+        yearId: year.id,
+        semesterId: semester.id,
+        courseId: course.id,
+        generationId: generation.id,
+        userIds,
+        mainOfferingId: main.id.toString(),
+        otherOfferingId: other.id.toString(),
+      };
+    });
+
+    academicYearId = fixtures.yearId;
+    semesterId = fixtures.semesterId;
+    courseId = fixtures.courseId;
+    generationId = fixtures.generationId;
+    fixtureUserIds.push(...fixtures.userIds);
+    mainOfferingId = fixtures.mainOfferingId;
+    tempOfferingId = fixtures.otherOfferingId;
+
+    student1Token = await login(`submission-${stamp}-0@example.test`);
+    student2Token = await login(`submission-${stamp}-1@example.test`);
+    student3Token = await login(`submission-${stamp}-2@example.test`);
 
     // ------------------------------------------------
     // Survey
@@ -212,20 +352,21 @@ describe('Submission (e2e)', () => {
         title: `E2E Submit ${stamp}`,
       });
 
+    expect(survey.status).toBe(201);
     tempSurveyId = survey.body.id;
 
     // ------------------------------------------------
     // Version A — all six question types
     // ------------------------------------------------
 
-    const versionA = await api()
-      .post(
-        `/api/surveys/${tempSurveyId}/versions`,
-      )
-      .set(admin())
-      .send({});
+    const versionA = await prisma.survey_versions.findFirstOrThrow({
+      where: {
+        survey_id: BigInt(tempSurveyId),
+        version_no: 1,
+      },
+    });
 
-    versionAId = versionA.body.id;
+    versionAId = versionA.id.toString();
 
     const rating1 = await addQuestion(
       versionAId,
@@ -356,249 +497,156 @@ describe('Submission (e2e)', () => {
     // Version B — simple rating survey
     // ------------------------------------------------
 
+    const secondSet = await request(app.getHttpServer()).post('/api/surveys').set(admin()).send({title:`E2E submissions other ${stamp}`});
+    expect(secondSet.status).toBe(201); secondarySurveyId = secondSet.body.id;
     const versionB = await api()
       .post(
-        `/api/surveys/${tempSurveyId}/versions`,
+        `/api/surveys/${secondarySurveyId}/versions`,
       )
       .set(admin())
-      .send({});
+      .send({ copy_questions: false });
 
+    expect(versionB.status).toBe(201);
     versionBId = versionB.body.id;
 
-    await addQuestion(versionBId, {
+    const foreignQuestion = await addQuestion(versionBId, {
       question_text: 'Overall',
       question_type: 'RATING',
     });
 
-    // ------------------------------------------------
-    // Evaluations
-    // ------------------------------------------------
+    foreignQuestionId = foreignQuestion.body.id;
 
-    openEvalId =
-      await createOpenEvaluation(
-        '1',
-        versionAId,
-      );
+    openEvalId = await createOpenEvaluation(mainOfferingId, versionAId);
+    closedEvalId = await createOpenEvaluation(mainOfferingId, versionBId);
 
-    closedEvalId =
-      await createOpenEvaluation(
-        '1',
-        versionBId,
-      );
-
-    await api()
+    const closed = await api()
       .post(
         `/api/evaluations/${closedEvalId}/close`,
       )
       .set(admin());
 
-    // ------------------------------------------------
-    // Separate offering — only student2 enrolled
-    // ------------------------------------------------
+    expect(closed.status).toBe(200);
+    expect(closed.body.status).toBe('CLOSED');
 
-    const offering = await api()
-      .post('/api/course-offerings')
-      .set(admin())
-      .send({
-        course_id: '2',
-        lecturer_id: '2',
-        semester_id: '1',
-        section_code: `E2E-SUB-${stamp}`,
-      });
-
-    tempOfferingId = offering.body.id;
-
-    await api()
-      .post(
-        `/api/course-offerings/${tempOfferingId}/enrollments`,
-      )
-      .set(admin())
-      .send({
-        student_id: '5',
-      });
-
-    otherEvalId =
-      await createOpenEvaluation(
-        tempOfferingId,
-        versionBId,
-      );
+    otherEvalId = await createOpenEvaluation(tempOfferingId, versionBId);
   }, 60000);
 
   afterAll(async () => {
-    const evalIds = [
-      openEvalId,
-      closedEvalId,
-      otherEvalId,
-    ]
-      .filter(
-        (id): id is string =>
-          id !== undefined,
-      )
-      .map((id) => BigInt(id));
+    try {
+      if (prisma) {
+        await prisma.$transaction(async (tx) => {
+          if (tempSurveyId) {
+            const surveyId = BigInt(tempSurveyId);
 
-    const versionIds = [
-      versionAId,
-      versionBId,
-    ]
-      .filter(
-        (id): id is string =>
-          id !== undefined,
-      )
-      .map((id) => BigInt(id));
+            const versions = await tx.survey_versions.findMany({
+              where: { survey_id: { in: [surveyId, BigInt(secondarySurveyId)] } },
+              select: { id: true },
+            });
+            const versionIds = versions.map((version) => version.id);
 
-    // ----------------------------------------------
-    // Responses
-    //
-    // answer_options -> answers -> responses
-    // ----------------------------------------------
+            const evaluations = await tx.evaluations.findMany({
+              where: { survey_version_id: { in: versionIds } },
+              select: { id: true },
+            });
+            const evaluationIds = evaluations.map(
+              (evaluation) => evaluation.id,
+            );
+            const evaluationFilter = { in: evaluationIds };
 
-    if (evalIds.length > 0) {
-      const responseRows =
-        await prisma.responses.findMany({
-          where: {
-            evaluation_id: {
-              in: evalIds,
-            },
-          },
-          select: {
-            id: true,
-          },
-        });
-
-      const responseIds =
-        responseRows.map(
-          (response) => response.id,
-        );
-
-      if (responseIds.length > 0) {
-        const answerRows =
-          await prisma.answers.findMany({
-            where: {
-              response_id: {
-                in: responseIds,
-              },
-            },
-            select: {
-              id: true,
-            },
-          });
-
-        const answerIds =
-          answerRows.map(
-            (answer) => answer.id,
-          );
-
-        if (answerIds.length > 0) {
-          await prisma.answer_options.deleteMany(
-            {
+            await tx.answer_options.deleteMany({
               where: {
-                answer_id: {
-                  in: answerIds,
+                answers: {
+                  responses: { evaluation_id: evaluationFilter },
                 },
               },
-            },
-          );
-        }
+            });
+            await tx.answers.deleteMany({
+              where: {
+                responses: { evaluation_id: evaluationFilter },
+              },
+            });
+            await tx.responses.deleteMany({
+              where: { evaluation_id: evaluationFilter },
+            });
+            await tx.assessment_drafts.deleteMany({
+              where: {
+                evaluation_participants: {
+                  evaluation_id: evaluationFilter,
+                },
+              },
+            });
+            await tx.evaluation_participants.deleteMany({
+              where: { evaluation_id: evaluationFilter },
+            });
+            await tx.evaluation_generation_targets.deleteMany({
+              where: { evaluation_id: evaluationFilter },
+            });
+            await tx.evaluation_group_targets.deleteMany({
+              where: { evaluation_id: evaluationFilter },
+            });
+            await tx.evaluations.deleteMany({
+              where: { id: evaluationFilter },
+            });
+            await tx.question_options.deleteMany({
+              where: {
+                questions: { survey_version_id: { in: versionIds } },
+              },
+            });
+            await tx.questions.deleteMany({
+              where: { survey_version_id: { in: versionIds } },
+            });
+            await tx.survey_versions.deleteMany({
+              where: { id: { in: versionIds } },
+            });
+            await tx.surveys.delete({ where: { id: surveyId } });
+          }
 
-        await prisma.answers.deleteMany({
-          where: {
-            response_id: {
-              in: responseIds,
-            },
-          },
+          if (courseId !== undefined) {
+            const offerings = await tx.course_offerings.findMany({
+              where: { course_id: courseId },
+              select: { id: true },
+            });
+            const offeringIds = offerings.map((offering) => offering.id);
+
+            await tx.enrollments.deleteMany({
+              where: { course_offering_id: { in: offeringIds } },
+            });
+            await tx.course_offerings.deleteMany({
+              where: { id: { in: offeringIds } },
+            });
+            await tx.courses.delete({ where: { id: courseId } });
+          }
+
+          if (fixtureUserIds.length > 0) {
+            await tx.students.deleteMany({
+              where: { user_id: { in: fixtureUserIds } },
+            });
+            await tx.users.deleteMany({
+              where: { id: { in: fixtureUserIds } },
+            });
+          }
+          if (generationId !== undefined) {
+            await tx.student_generations.delete({
+              where: { id: generationId },
+            });
+          }
+          if (semesterId !== undefined) {
+            await tx.semesters.delete({
+              where: { id: semesterId },
+            });
+          }
+          if (academicYearId !== undefined) {
+            await tx.academic_years.delete({
+              where: { id: academicYearId },
+            });
+          }
         });
       }
-
-      await prisma.responses.deleteMany({
-        where: {
-          evaluation_id: {
-            in: evalIds,
-          },
-        },
-      });
-
-      await prisma.evaluation_participants.deleteMany(
-        {
-          where: {
-            evaluation_id: {
-              in: evalIds,
-            },
-          },
-        },
-      );
-
-      await prisma.evaluations.deleteMany({
-        where: {
-          id: {
-            in: evalIds,
-          },
-        },
-      });
+    } finally {
+      if (app) {
+        await app.close();
+      }
     }
-
-    // ----------------------------------------------
-    // Temporary offering
-    // ----------------------------------------------
-
-    if (tempOfferingId) {
-      await prisma.enrollments.deleteMany({
-        where: {
-          course_offering_id: BigInt(
-            tempOfferingId,
-          ),
-        },
-      });
-
-      await prisma.course_offerings.delete({
-        where: {
-          id: BigInt(tempOfferingId),
-        },
-      });
-    }
-
-    // ----------------------------------------------
-    // Survey questions
-    //
-    // question_options -> questions -> versions
-    // ----------------------------------------------
-
-    if (versionIds.length > 0) {
-      await prisma.question_options.deleteMany({
-        where: {
-          questions: {
-            survey_version_id: {
-              in: versionIds,
-            },
-          },
-        },
-      });
-
-      await prisma.questions.deleteMany({
-        where: {
-          survey_version_id: {
-            in: versionIds,
-          },
-        },
-      });
-
-      await prisma.survey_versions.deleteMany({
-        where: {
-          id: {
-            in: versionIds,
-          },
-        },
-      });
-    }
-
-    if (tempSurveyId) {
-      await prisma.surveys.delete({
-        where: {
-          id: BigInt(tempSurveyId),
-        },
-      });
-    }
-
-    await app.close();
   });
 
   // ==================================================
@@ -634,6 +682,26 @@ describe('Submission (e2e)', () => {
   describe(
     'answer validation (nothing is saved)',
     () => {
+      afterEach(async () => {
+        expect(
+          await prisma.responses.count({
+            where: { evaluation_id: BigInt(openEvalId) },
+          }),
+        ).toBe(0);
+
+        const participant =
+          await prisma.evaluation_participants.findUniqueOrThrow({
+            where: {
+              evaluation_id_student_id: {
+                evaluation_id: BigInt(openEvalId),
+                student_id: fixtureUserIds[0],
+              },
+            },
+          });
+
+        expect(participant.has_submitted).toBe(false);
+      });
+
       it('empty answers list -> 400', async () => {
         const res = await submit(
           openEvalId,
@@ -965,7 +1033,7 @@ describe('Submission (e2e)', () => {
         const answers = [
           ...validAnswers(),
           {
-            question_id: '1',
+            question_id: foreignQuestionId,
             rating_value: 5,
           },
         ];
@@ -1117,6 +1185,8 @@ describe('Submission (e2e)', () => {
       expect(response).not.toHaveProperty(
         'student_id',
       );
+
+      expect(response.survey_version_id).toBe(BigInt(versionAId));
 
       expect(response).not.toHaveProperty(
         'participant_id',
@@ -1288,6 +1358,21 @@ describe('Submission (e2e)', () => {
         });
 
       expect(count).toBe(3);
+
+      const submittedParticipants =
+        await prisma.evaluation_participants.findMany({
+          where: {
+            evaluation_id: BigInt(openEvalId),
+            has_submitted: true,
+          },
+          select: { student_id: true },
+        });
+
+      expect(
+        submittedParticipants
+          .map((participant) => participant.student_id)
+          .sort((a, b) => Number(a - b)),
+      ).toEqual([...fixtureUserIds].sort((a, b) => Number(a - b)));
     });
   });
 });
