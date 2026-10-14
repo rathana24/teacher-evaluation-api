@@ -44,6 +44,7 @@ model assessment_drafts {
 }
 
 model academic_years {
+  // SQL owns the one-active partial index and numeric-year/date CHECKs.
   id         BigInt    @id @default(autoincrement())
   name       String    @unique @db.VarChar(20)
   start_year Int?
@@ -83,6 +84,8 @@ model user_departments {
   users       users       @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   departments departments @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  // SQL migration owns the partial unique index on user_id WHERE is_primary = TRUE.
+  // Keep this composite key: users may have multiple non-primary memberships.
   @@id([user_id, department_id])
 }
 
@@ -104,6 +107,7 @@ model majors {
 }
 
 model student_generations {
+  // SQL owns starting_year_level BETWEEN 1 AND 5.
   id                     BigInt   @id @default(autoincrement())
   name                   String   @unique @db.VarChar(100)
   entry_academic_year_id BigInt
@@ -133,6 +137,7 @@ model students {
 }
 
 model student_academic_records {
+  // SQL owns year_level BETWEEN 1 AND 5.
   id                 BigInt                     @id @default(autoincrement())
   student_id         BigInt
   academic_year_id   BigInt
@@ -151,6 +156,8 @@ model student_academic_records {
 }
 
 model course_offerings {
+  // SQL owns the nullable level CHECK and NULLS NOT DISTINCT on the index below.
+  // Keep the six-field compound selector; migrate deploy preserves SQL semantics.
   id           BigInt      @id @default(autoincrement())
   course_id    BigInt
   lecturer_id  BigInt
@@ -172,6 +179,7 @@ model course_offerings {
 }
 
 model course_offering_group_scopes {
+  // SQL owns year_level BETWEEN 1 AND 5.
   id                     BigInt   @id @default(autoincrement())
   course_offering_id     BigInt
   academic_year_id       BigInt
@@ -208,6 +216,7 @@ model courses {
 }
 
 model course_year_rules {
+  // SQL owns year_level BETWEEN 1 AND 5.
   id         BigInt   @id @default(autoincrement())
   course_id  BigInt
   major_id   BigInt
@@ -272,6 +281,7 @@ model evaluation_participants {
 }
 
 model evaluations {
+  // SQL owns the nullable timestamp ordering CHECK.
   id                 BigInt                       @id @default(autoincrement())
   course_offering_id BigInt
   survey_version_id  BigInt
@@ -308,6 +318,7 @@ model evaluation_generation_targets {
 }
 
 model evaluation_group_targets {
+  // SQL owns year_level BETWEEN 1 AND 5 in addition to historical-label protection.
   id                 BigInt    @id @default(autoincrement())
   evaluation_id      BigInt
   academic_year_id   BigInt
@@ -374,6 +385,7 @@ model responses {
 }
 
 model semesters {
+  // SQL owns the nullable calendar-date ordering CHECK.
   id               BigInt    @id @default(autoincrement())
   semester_name    String    @db.VarChar(50)
   semester_number  Int?
@@ -391,6 +403,7 @@ model semesters {
 }
 
 model surveys {
+  // SQL owns survey_title_key(text), global normalized uniqueness and nonblank CHECK.
   id          BigInt    @id @default(autoincrement())
   title       String    @db.VarChar(200)
   description String?

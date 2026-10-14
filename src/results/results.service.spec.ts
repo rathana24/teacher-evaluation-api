@@ -416,7 +416,7 @@ describe('ResultsService', () => {
     );
   });
 
-  it('should exclude DRAFT evaluations from lecturer results', async () => {
+  it('should release only CLOSED evaluations owned by the lecturer', async () => {
     usersFindFirstMock.mockResolvedValue({
       id: 20n,
       full_name: 'Lecturer One',
@@ -430,9 +430,7 @@ describe('ResultsService', () => {
     expect(evaluationsFindManyMock).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          status: {
-            not: 'DRAFT',
-          },
+          status: 'CLOSED',
           course_offerings: {
             lecturer_id: 20n,
           },

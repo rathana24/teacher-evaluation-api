@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, question_type } from '@prisma/client';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import * as bcrypt from 'bcrypt';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
@@ -25,6 +26,8 @@ import { CommentsService } from '../src/comments/comments.service';
 import { LecturerDashboardService } from '../src/lecturer-dashboard/lecturer-dashboard.service';
 import { ResultsService } from '../src/results/results.service';
 import { ReviewedWorkflowsService } from '../src/reviewed-workflows/reviewed-workflows.service';
+import { CourseOfferingsService } from '../src/course-offerings/course-offerings.service';
+import { SemestersService } from '../src/semesters/semesters.service';
 
 const historical = createRequire(`${process.cwd()}/package.json`)(
   './scripts/historical-metadata.cjs',
@@ -127,6 +130,8 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
   const extraGenerationIds: bigint[] = [],
     extraMajorIds: bigint[] = [],
     extraYearIds: bigint[] = [];
+  const extraSemesterIds: bigint[] = [];
+  const extraDepartmentIds: bigint[] = [];
   const students: {
     account: bigint;
     profile: bigint;
@@ -183,7 +188,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
       group,
     };
   }
-  async function offering(groups: string[] = []) {
+  async function offering(groups: string[] = [], semesterId = semester) {
     const now = new Date();
     const course = await prisma.courses.create({
       data: {
@@ -199,7 +204,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
       data: {
         course_id: course.id,
         lecturer_id: lecturer,
-        semester_id: semester,
+        semester_id: semesterId,
         class_type: groups.length === 1 ? 'TD' : 'COURSE',
         year_level: 1,
         section_code: 'A label is not a scope',
@@ -273,8 +278,8 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
       include: { questions: true },
     });
   }
-  async function evaluation() {
-    const assignment = await offering(['A', 'B']);
+  async function evaluation(semesterId = semester) {
+    const assignment = await offering(['A', 'B'], semesterId);
     const { set, v1 } = await survey();
     const now = new Date();
     await prisma.enrollments.createMany({
@@ -445,6 +450,9 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
             await tx.students.deleteMany({
               where: { user_id: { in: userIds } },
             });
+            await tx.user_departments.deleteMany({
+              where: { user_id: { in: userIds } },
+            });
             await tx.users.deleteMany({ where: { id: { in: userIds } } });
             await tx.student_generations.deleteMany({
               where: {
@@ -454,11 +462,17 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
             await tx.majors.deleteMany({
               where: { id: { in: [major, ...extraMajorIds].filter(Boolean) } },
             });
+            await tx.semesters.deleteMany({
+              where: { id: { in: extraSemesterIds } },
+            });
             if (semester)
               await tx.semesters.delete({ where: { id: semester } });
             if (year) await tx.academic_years.delete({ where: { id: year } });
             await tx.academic_years.deleteMany({
               where: { id: { in: extraYearIds } },
+            });
+            await tx.departments.deleteMany({
+              where: { id: { in: extraDepartmentIds } },
             });
             if (department)
               await tx.departments.delete({ where: { id: department } });
@@ -1375,6 +1389,719 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
     );
     expect(ambiguous.candidate_version_id).toBeNull();
     expect(ambiguous.issues).toContain('NO_SINGLE_ORIGINAL_VERSION');
+  });
+
+  describe('One primary department per user', () => {
+    let departments: bigint[];
+    const migration = readFileSync(
+      'prisma/migrations/20261014010000_enforce_one_primary_department/migration.sql',
+      'utf8',
+    );
+    const rows = (userId: bigint) =>
+      prisma.user_departments.findMany({
+        where: { user_id: userId },
+        orderBy: { department_id: 'asc' },
+      });
+    const owner = () => account('LECTURER', `primary-${userIds.length}`);
+    const post = (userId: bigint, departmentId: bigint, isPrimary?: boolean) =>
+      api()
+        .post(`/api/users/${userId}/departments`)
+        .set(authorization())
+        .send({
+          department_id: Number(departmentId),
+          ...(isPrimary !== undefined ? { is_primary: isPrimary } : {}),
+        });
+    const member = (userId: bigint, departmentId: bigint, isPrimary = false) =>
+      prisma.user_departments.create({
+        data: {
+          user_id: userId,
+          department_id: departmentId,
+          is_primary: isPrimary,
+        },
+      });
+    const newDepartment = async () => {
+      const result = await prisma.departments.create({
+        data: {
+          code: `PD${extraDepartmentIds.length}-${stamp}`,
+          name: `Primary department ${extraDepartmentIds.length}-${stamp}`,
+        },
+      });
+      extraDepartmentIds.push(result.id);
+      return result.id;
+    };
+    beforeAll(async () => {
+      departments = [
+        await newDepartment(),
+        await newDepartment(),
+        await newDepartment(),
+      ];
+    });
+
+    it('keeps multiple non-primary memberships and permits zero primary departments', async () => {
+      const userId = await owner();
+      for (const departmentId of departments)
+        expect((await post(userId, departmentId, false)).status).toBe(201);
+      const memberships = await rows(userId);
+      expect(memberships).toHaveLength(3);
+      expect(memberships.every((row) => !row.is_primary)).toBe(true);
+      const listed = await api()
+        .get(`/api/users/${userId}/departments`)
+        .set(authorization());
+      expect(listed.status).toBe(200);
+      expect(listed.body).toHaveLength(3);
+      expect(JSON.stringify(listed.body)).not.toContain('password_hash');
+    });
+
+    it('switches primary atomically, retains other memberships/timestamps and returns consistent profile flags', async () => {
+      const userId = await owner();
+      for (const departmentId of departments)
+        await member(userId, departmentId);
+      expect((await post(userId, departments[0], true)).status).toBe(201);
+      const original = await rows(userId);
+      const switched = await post(userId, departments[1], true);
+      expect(switched.status).toBe(201);
+      expect(switched.body.is_primary).toBe(true);
+      const after = await rows(userId);
+      expect(
+        after.filter((row) => row.is_primary).map((row) => row.department_id),
+      ).toEqual([departments[1]]);
+      expect(
+        after.map((row) => ({
+          department_id: row.department_id,
+          created_at: row.created_at,
+        })),
+      ).toEqual(
+        original.map((row) => ({
+          department_id: row.department_id,
+          created_at: row.created_at,
+        })),
+      );
+      const user = await prisma.users.findUniqueOrThrow({
+        where: { id: userId },
+      });
+      const login = await api()
+        .post('/api/auth/login')
+        .send({ identifier: user.email, password: 'Consistency123' });
+      expect(login.status).toBe(200);
+      const profile = await api()
+        .get('/api/auth/me')
+        .set({ Authorization: `Bearer ${login.body.access_token}` });
+      expect(profile.status).toBe(200);
+      expect(
+        profile.body.user_departments
+          .filter((row: any) => row.is_primary)
+          .map((row: any) => row.department.id),
+      ).toEqual([String(departments[1])]);
+    });
+
+    it('keeps repeated assignment idempotent and allows demotion/removal without inventing a replacement primary', async () => {
+      const userId = await owner();
+      await post(userId, departments[0], true);
+      await post(userId, departments[1], false);
+      const original = await rows(userId);
+      expect((await post(userId, departments[0], true)).status).toBe(201);
+      expect(await rows(userId)).toEqual(original);
+      expect((await post(userId, departments[0])).status).toBe(201);
+      expect((await rows(userId)).every((row) => !row.is_primary)).toBe(true);
+      await post(userId, departments[0], true);
+      const removed = await api()
+        .delete(`/api/users/${userId}/departments/${departments[0]}`)
+        .set(authorization());
+      expect(removed.status).toBe(200);
+      const after = await rows(userId);
+      expect(after).toHaveLength(1);
+      expect(after[0].department_id).toBe(departments[1]);
+      expect(after[0].is_primary).toBe(false);
+    });
+
+    it('rejects missing/inactive departments and malformed input without demoting an existing primary', async () => {
+      const userId = await owner();
+      await member(userId, departments[0], true);
+      const inactiveId = await newDepartment();
+      await prisma.departments.update({
+        where: { id: inactiveId },
+        data: { status: 'INACTIVE' },
+      });
+      const original = await rows(userId);
+      expect((await post(userId, inactiveId, true)).status).toBe(400);
+      expect((await post(userId, 999999999n, true)).status).toBe(400);
+      expect((await post(999999999n, departments[0], true)).status).toBe(404);
+      const malformed = await api()
+        .post(`/api/users/${userId}/departments`)
+        .set(authorization())
+        .send({ department_id: Number(departments[1]), is_primary: 'true' });
+      expect(malformed.status).toBe(400);
+      expect(await rows(userId)).toEqual(original);
+    });
+
+    it('requires ADMIN authorization and saves no memberships for rejected callers', async () => {
+      const userId = await owner();
+      const path = `/api/users/${userId}/departments`;
+      const body = { department_id: Number(departments[0]), is_primary: true };
+      expect((await api().post(path).send(body)).status).toBe(401);
+      for (const accountId of [lecturer, students[0].account]) {
+        const user = await prisma.users.findUniqueOrThrow({
+          where: { id: accountId },
+        });
+        const login = await api()
+          .post('/api/auth/login')
+          .send({ identifier: user.email, password: 'Consistency123' });
+        expect(login.status).toBe(200);
+        expect(
+          (
+            await api()
+              .post(path)
+              .set({ Authorization: `Bearer ${login.body.access_token}` })
+              .send(body)
+          ).status,
+        ).toBe(403);
+      }
+      expect(await rows(userId)).toEqual([]);
+    });
+
+    it('rejects duplicate primaries through direct SQL atomically while retaining non-primary membership support', async () => {
+      const userId = await owner();
+      await expect(prisma.$executeRaw`
+        INSERT INTO user_departments (user_id, department_id, is_primary)
+        VALUES (${userId}, ${departments[0]}, TRUE),
+               (${userId}, ${departments[1]}, FALSE),
+               (${userId}, ${departments[2]}, TRUE)`).rejects.toMatchObject({
+        code: 'P2010',
+        meta: { code: '23505' },
+      });
+      expect(await rows(userId)).toEqual([]);
+      for (const departmentId of departments)
+        await member(userId, departmentId);
+      expect(await rows(userId)).toHaveLength(3);
+    });
+
+    it('rejects a simultaneous first-primary race without partial membership changes and allows a deliberate retry after reload', async () => {
+      const userId = await owner();
+      const firstGate = gateTransaction(prisma, 'user_departments', 'upsert');
+      const secondGate = gateTransaction(prisma, 'user_departments', 'upsert');
+      const first = new UsersService(firstGate.db).assignDepartment(userId, {
+        department_id: Number(departments[0]),
+        is_primary: true,
+      });
+      const second = new UsersService(secondGate.db).assignDepartment(userId, {
+        department_id: Number(departments[1]),
+        is_primary: true,
+      });
+      const firstResult = first.then(
+        (value) => ({ value, error: null }),
+        (error) => ({ value: null, error }),
+      );
+      const secondResult = second.then(
+        (value) => ({ value, error: null }),
+        (error) => ({ value: null, error }),
+      );
+      try {
+        await Promise.all([firstGate.wait(first), secondGate.wait(second)]);
+      } finally {
+        firstGate.release();
+        secondGate.release();
+      }
+      const outcomes = await Promise.all([firstResult, secondResult]);
+      expect(outcomes.filter((result) => result.error === null)).toHaveLength(
+        1,
+      );
+      const failure = outcomes.find((result) => result.error !== null)!.error;
+      expect(failure).toBeInstanceOf(ConflictException);
+      expect(failure.getResponse()).toMatchObject({
+        code: 'DEPARTMENT_ASSIGNMENT_CONFLICT',
+      });
+      const committed = await rows(userId);
+      expect(committed).toHaveLength(1);
+      expect(committed[0].is_primary).toBe(true);
+      const retryDepartment =
+        committed[0].department_id === departments[0]
+          ? departments[1]
+          : departments[0];
+      expect((await post(userId, retryDepartment, true)).status).toBe(201);
+      const afterRetry = await rows(userId);
+      expect(afterRetry).toHaveLength(2);
+      expect(
+        afterRetry
+          .filter((row) => row.is_primary)
+          .map((row) => row.department_id),
+      ).toEqual([retryDepartment]);
+    });
+
+    it('rolls back the previous-primary demotion if the target department disappears before upsert', async () => {
+      const userId = await owner();
+      await member(userId, departments[0], true);
+      await member(userId, departments[1]);
+      const targetId = await newDepartment();
+      const original = await rows(userId);
+      const gate = gateTransaction(prisma, 'user_departments', 'upsert');
+      const assigning = new UsersService(gate.db).assignDepartment(userId, {
+        department_id: Number(targetId),
+        is_primary: true,
+      });
+      const outcome = assigning.then(
+        () => null,
+        (error) => error,
+      );
+      try {
+        await gate.wait(assigning);
+        await prisma.departments.delete({ where: { id: targetId } });
+      } finally {
+        gate.release();
+      }
+      const failure = await outcome;
+      expect(failure).not.toBeNull();
+      expect([400, 409]).toContain(failure.getStatus());
+      expect(await rows(userId)).toEqual(original);
+    });
+
+    const temporaryTable = async (tx: Prisma.TransactionClient) => {
+      await tx.$executeRawUnsafe(
+        'CREATE TEMP TABLE user_departments (user_id BIGINT, department_id BIGINT, is_primary BOOLEAN NOT NULL, created_at TIMESTAMP DEFAULT NOW(), PRIMARY KEY (user_id, department_id)) ON COMMIT DROP',
+      );
+      await tx.$executeRawUnsafe('SET LOCAL search_path TO pg_temp, public');
+    };
+
+    it('applies the exact migration to clean temporary data without altering rows or restricting non-primary memberships', async () => {
+      await prisma.$transaction(async (tx) => {
+        await temporaryTable(tx);
+        await tx.$executeRawUnsafe(
+          'INSERT INTO user_departments (user_id, department_id, is_primary) VALUES (1, 1, TRUE), (1, 2, FALSE), (1, 3, FALSE)',
+        );
+        const original = await tx.$queryRawUnsafe(
+          'SELECT * FROM user_departments ORDER BY department_id',
+        );
+        await tx.$executeRawUnsafe(migration);
+        expect(
+          await tx.$queryRawUnsafe(
+            'SELECT * FROM user_departments ORDER BY department_id',
+          ),
+        ).toEqual(original);
+        const indexes = await tx.$queryRaw<
+          { unique: boolean; predicate: string }[]
+        >`
+          SELECT i.indisunique AS unique, pg_get_expr(i.indpred, i.indrelid) AS predicate
+          FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+          WHERE i.indrelid = 'user_departments'::regclass AND c.relname = 'user_departments_one_primary_per_user_idx'`;
+        expect(indexes).toHaveLength(1);
+        expect(indexes[0].unique).toBe(true);
+        expect(indexes[0].predicate).toContain('is_primary');
+      });
+    });
+
+    it('blocks the exact migration for duplicate temporary primaries without choosing or rewriting an assignment', async () => {
+      await prisma.$transaction(async (tx) => {
+        await temporaryTable(tx);
+        await tx.$executeRawUnsafe(
+          'INSERT INTO user_departments (user_id, department_id, is_primary) VALUES (1, 1, TRUE), (1, 2, TRUE), (1, 3, FALSE)',
+        );
+        const original = await tx.$queryRawUnsafe(
+          'SELECT * FROM user_departments ORDER BY department_id',
+        );
+        await tx.$executeRawUnsafe('SAVEPOINT primary_preflight');
+        await expect(tx.$executeRawUnsafe(migration)).rejects.toThrow(
+          'Multiple primary departments exist',
+        );
+        await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT primary_preflight');
+        expect(
+          await tx.$queryRawUnsafe(
+            'SELECT * FROM user_departments ORDER BY department_id',
+          ),
+        ).toEqual(original);
+        const [index] = await tx.$queryRaw<
+          { name: string | null }[]
+        >`SELECT to_regclass('pg_temp.user_departments_one_primary_per_user_idx')::text AS name`;
+        expect(index.name).toBeNull();
+      });
+    });
+  });
+
+  describe('Closed lecturer results and teaching history', () => {
+    let lecturerToken: string;
+    const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
+    const loginAccount = async (id: bigint) => {
+      const user = await prisma.users.findUniqueOrThrow({ where: { id } });
+      const result = await api().post('/api/auth/login').send({
+        identifier: user.email,
+        password: 'Consistency123',
+      });
+      expect(result.status).toBe(200);
+      return result.body.access_token as string;
+    };
+    const newYear = async () => {
+      const result = await prisma.academic_years.create({
+        data: { name: `P${extraYearIds.length}-${stamp}`, start_year: 2027 },
+      });
+      extraYearIds.push(result.id);
+      return result.id;
+    };
+    const newSemester = async () => {
+      const now = new Date();
+      const result = await prisma.semesters.create({
+        data: {
+          academic_year_id: year,
+          semester_name: `Policy-${extraSemesterIds.length}-${stamp}`,
+          semester_number: null,
+          created_at: now,
+          updated_at: now,
+        },
+      });
+      extraSemesterIds.push(result.id);
+      return result.id;
+    };
+    const history = (id: bigint) =>
+      prisma.course_offerings.findUniqueOrThrow({
+        where: { id },
+        include: {
+          group_scopes: true,
+          enrollments: true,
+          evaluations: {
+            include: {
+              generation_targets: true,
+              group_targets: true,
+              evaluation_participants: { include: { assessment_drafts: true } },
+              responses: {
+                include: { answers: { include: { answer_options: true } } },
+              },
+            },
+          },
+        },
+      });
+    const pendingCreation = async (assignmentId: bigint) => {
+      const { v1 } = await survey();
+      await prisma.enrollments.createMany({
+        data: students.map((s) => ({
+          student_id: s.account,
+          course_offering_id: assignmentId,
+          enrolled_at: new Date(),
+        })),
+      });
+      return {
+        course_offering_id: String(assignmentId),
+        survey_version_id: String(v1.id),
+        confirmed_student_ids: students.map((s) => String(s.account)),
+      };
+    };
+
+    beforeAll(async () => {
+      lecturerToken = await loginAccount(lecturer);
+    });
+
+    it('withholds OPEN/DRAFT lecturer answers and releases owned results, dashboard and comments after close', async () => {
+      const open = await evaluation();
+      const draft = await evaluation();
+      await prisma.evaluations.update({
+        where: { id: draft.id },
+        data: { status: 'DRAFT' },
+      });
+      const comment = 'Policy withheld comment';
+      await app.get(SubmissionsService).submit(open.id, students[0].account, {
+        answers: [
+          ...answers(open.v1).answers,
+          {
+            question_id: String(
+              open.v1.questions.find((q) => q.question_type === 'TEXT')!.id,
+            ),
+            text_value: comment,
+          },
+        ],
+      });
+      const before = await history(open.assignment.id);
+      const withheld = await api()
+        .get('/api/lecturer/results')
+        .set(bearer(lecturerToken));
+      expect(withheld.status).toBe(200);
+      expect(
+        withheld.body.evaluations.some((e: any) =>
+          [String(open.id), String(draft.id)].includes(e.evaluation.id),
+        ),
+      ).toBe(false);
+      expect(
+        withheld.body.evaluations.every(
+          (e: any) => e.evaluation.status === 'CLOSED',
+        ),
+      ).toBe(true);
+      expect(JSON.stringify(withheld.body)).not.toContain(comment);
+      for (const suffix of ['dashboard', 'comments']) {
+        expect(
+          (
+            await api()
+              .get(`/api/lecturer/evaluations/${open.id}/${suffix}`)
+              .set(bearer(lecturerToken))
+          ).status,
+        ).toBe(409);
+      }
+      const adminResults = await api()
+        .get('/api/admin/results')
+        .set(authorization());
+      expect(adminResults.status).toBe(200);
+      expect(
+        adminResults.body.some((e: any) => e.evaluation.id === String(open.id)),
+      ).toBe(true);
+      expect(await history(open.assignment.id)).toEqual(before);
+      await app.get(EvaluationsService).close(open.id);
+      const released = await api()
+        .get('/api/lecturer/results')
+        .set(bearer(lecturerToken));
+      const own = released.body.evaluations.find(
+        (e: any) => e.evaluation.id === String(open.id),
+      );
+      expect(released.status).toBe(200);
+      expect(own.submission_count).toBe(1);
+      expect(JSON.stringify(own)).toContain(comment);
+      expect(JSON.stringify(own)).not.toMatch(
+        /student_id|participant_id|response_id|password_hash/,
+      );
+      for (const suffix of ['dashboard', 'comments']) {
+        expect(
+          (
+            await api()
+              .get(`/api/lecturer/evaluations/${open.id}/${suffix}`)
+              .set(bearer(lecturerToken))
+          ).status,
+        ).toBe(200);
+      }
+      const after = await history(open.assignment.id);
+      expect(after.evaluations[0].responses).toEqual(
+        before.evaluations[0].responses,
+      );
+      expect(after.evaluations[0].evaluation_participants).toEqual(
+        before.evaluations[0].evaluation_participants,
+      );
+    });
+
+    it('returns an empty released list for another lecturer and preserves authentication, role and ownership checks', async () => {
+      const stranger = await account(
+        'LECTURER',
+        `policy-empty-${userIds.length}`,
+      );
+      const token = await loginAccount(stranger);
+      const empty = await api().get('/api/lecturer/results').set(bearer(token));
+      expect(empty.status).toBe(200);
+      expect(empty.body.evaluations).toEqual([]);
+      expect((await api().get('/api/lecturer/results')).status).toBe(401);
+      const studentToken = await loginAccount(students[0].account);
+      expect(
+        (await api().get('/api/lecturer/results').set(bearer(studentToken)))
+          .status,
+      ).toBe(403);
+      const e = await evaluation();
+      await app.get(EvaluationsService).close(e.id);
+      expect(
+        (
+          await api()
+            .get(`/api/lecturer/evaluations/${e.id}/comments`)
+            .set(bearer(token))
+        ).status,
+      ).toBe(403);
+    });
+
+    it.each(['DRAFT', 'OPEN', 'CLOSED'] as const)(
+      'rejects course/lecturer/semester changes for %s evaluations with exact history unchanged',
+      async (status) => {
+        const e = await evaluation();
+        if (status !== 'OPEN')
+          await prisma.evaluations.update({
+            where: { id: e.id },
+            data: { status },
+          });
+        if (status === 'OPEN') {
+          await app
+            .get(AssessmentDraftsService)
+            .save(e.id, students[0].account, answers(e.v1));
+          await app
+            .get(SubmissionsService)
+            .submit(e.id, students[1].account, answers(e.v1));
+        }
+        const alternate = await offering();
+        const alternateLecturer = await account(
+          'LECTURER',
+          `policy-alt-${userIds.length}`,
+        );
+        const alternateSemester = await newSemester();
+        const before = await history(e.assignment.id);
+        for (const change of [
+          { course_id: String(alternate.course_id) },
+          { lecturer_id: String(alternateLecturer) },
+          { semester_id: String(alternateSemester) },
+        ]) {
+          const result = await api()
+            .put(`/api/course-offerings/${e.assignment.id}`)
+            .set(authorization())
+            .send(change);
+          expect(result.status).toBe(409);
+          expect(result.body.code).toBe('OFFERING_HISTORY_PROTECTED');
+          expect(await history(e.assignment.id)).toEqual(before);
+        }
+      },
+    );
+
+    it.each(['DRAFT', 'OPEN', 'CLOSED'] as const)(
+      'rejects an indirect academic-year move through a semester used by a %s evaluation',
+      async (status) => {
+        const ownSemester = await newSemester();
+        const e = await evaluation(ownSemester);
+        if (status !== 'OPEN')
+          await prisma.evaluations.update({
+            where: { id: e.id },
+            data: { status },
+          });
+        const targetYear = await newYear();
+        const original = await prisma.semesters.findUniqueOrThrow({
+          where: { id: ownSemester },
+        });
+        const before = await history(e.assignment.id);
+        const rejected = await api()
+          .put(`/api/semesters/${ownSemester}`)
+          .set(authorization())
+          .send({ academic_year_id: Number(targetYear) });
+        expect(rejected.status).toBe(409);
+        expect(rejected.body.code).toBe('SEMESTER_HISTORY_PROTECTED');
+        expect(
+          await prisma.semesters.findUniqueOrThrow({
+            where: { id: ownSemester },
+          }),
+        ).toEqual(original);
+        expect(await history(e.assignment.id)).toEqual(before);
+      },
+    );
+
+    it('keeps unused offering and unused semester context editable', async () => {
+      const ownSemester = await newSemester();
+      const unused = await offering([], ownSemester);
+      const alternate = await offering();
+      const alternateLecturer = await account(
+        'LECTURER',
+        `policy-unused-${userIds.length}`,
+      );
+      const targetYear = await newYear();
+      const semesterEdit = await api()
+        .put(`/api/semesters/${ownSemester}`)
+        .set(authorization())
+        .send({ academic_year_id: Number(targetYear) });
+      expect(semesterEdit.status).toBe(200);
+      const result = await api()
+        .put(`/api/course-offerings/${unused.id}`)
+        .set(authorization())
+        .send({
+          course_id: String(alternate.course_id),
+          lecturer_id: String(alternateLecturer),
+          semester_id: String(semester),
+        });
+      expect(result.status).toBe(200);
+      expect(result.body.lecturer_id).toBe(String(alternateLecturer));
+      expect(result.body.course_id).toBe(String(alternate.course_id));
+      expect(result.body.semester_id).toBe(String(semester));
+      expect(
+        await prisma.evaluations.count({
+          where: { course_offering_id: unused.id },
+        }),
+      ).toBe(0);
+    });
+
+    it('permits display edits and identical context IDs while retaining scope, drafts and answers', async () => {
+      const ownSemester = await newSemester();
+      const e = await evaluation(ownSemester);
+      await app
+        .get(AssessmentDraftsService)
+        .save(e.id, students[0].account, answers(e.v1));
+      await app
+        .get(SubmissionsService)
+        .submit(e.id, students[1].account, answers(e.v1));
+      const before = await history(e.assignment.id);
+      const result = await api()
+        .put(`/api/course-offerings/${e.assignment.id}`)
+        .set(authorization())
+        .send({
+          course_id: String(e.assignment.course_id),
+          lecturer_id: String(lecturer),
+          semester_id: String(ownSemester),
+          section_code: 'Policy display edit',
+        });
+      expect(result.status).toBe(200);
+      const semesterEdit = await api()
+        .put(`/api/semesters/${ownSemester}`)
+        .set(authorization())
+        .send({
+          academic_year_id: Number(year),
+          semester_name: 'Policy renamed semester',
+        });
+      expect(semesterEdit.status).toBe(200);
+      const after = await history(e.assignment.id);
+      expect(after.evaluations).toEqual(before.evaluations);
+      expect(after.enrollments).toEqual(before.enrollments);
+      expect(after.group_scopes).toEqual(before.group_scopes);
+      expect(after.section_code).toBe('Policy display edit');
+    });
+
+    it('rolls back a teaching reassignment when evaluation creation commits during its protected transaction', async () => {
+      const unused = await offering();
+      const input = await pendingCreation(unused.id);
+      const alternateLecturer = await account(
+        'LECTURER',
+        `policy-race-${userIds.length}`,
+      );
+      const gate = gateTransaction(prisma, 'course_offerings', 'update');
+      const updating = new CourseOfferingsService(gate.db).update(unused.id, {
+        lecturer_id: String(alternateLecturer),
+      });
+      const outcome = updating.then(
+        () => null,
+        (error) => error,
+      );
+      try {
+        await gate.wait(updating);
+        await app.get(EvaluationsService).create(input, admin);
+      } finally {
+        gate.release();
+      }
+      expect(await outcome).toBeInstanceOf(ConflictException);
+      expect(
+        (
+          await prisma.course_offerings.findUniqueOrThrow({
+            where: { id: unused.id },
+          })
+        ).lecturer_id,
+      ).toBe(lecturer);
+      expect(
+        await prisma.evaluations.count({
+          where: { course_offering_id: unused.id },
+        }),
+      ).toBe(1);
+    });
+
+    it('rolls back a semester year move when evaluation creation commits during its protected transaction', async () => {
+      const ownSemester = await newSemester();
+      const unused = await offering([], ownSemester);
+      const input = await pendingCreation(unused.id);
+      const targetYear = await newYear();
+      const gate = gateTransaction(prisma, 'semesters', 'update');
+      const updating = new SemestersService(gate.db).update(ownSemester, {
+        academic_year_id: Number(targetYear),
+      });
+      const outcome = updating.then(
+        () => null,
+        (error) => error,
+      );
+      try {
+        await gate.wait(updating);
+        await app.get(EvaluationsService).create(input, admin);
+      } finally {
+        gate.release();
+      }
+      expect(await outcome).toBeInstanceOf(ConflictException);
+      expect(
+        (
+          await prisma.semesters.findUniqueOrThrow({
+            where: { id: ownSemester },
+          })
+        ).academic_year_id,
+      ).toBe(year);
+      expect(
+        await prisma.evaluations.count({
+          where: { course_offering_id: unused.id },
+        }),
+      ).toBe(1);
+    });
   });
 
   describe('Approved student progression', () => {
@@ -3148,9 +3875,15 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
       const url = `/api/evaluations/${e.id}/open`;
       const originalEnd = e.end_at;
       const originalStart = e.start_at;
+      await expect(
+        prisma.evaluations.update({
+          where: { id: e.id },
+          data: { start_at: new Date(Date.now() + 172_800_000) },
+        }),
+      ).rejects.toThrow('evaluations_date_order_check');
       await prisma.evaluations.update({
         where: { id: e.id },
-        data: { start_at: new Date(Date.now() + 172_800_000) },
+        data: { start_at: null },
       });
       expect((await post(`${url}/preview`)).status).toBe(400);
       await prisma.evaluations.update({
@@ -3159,12 +3892,12 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
       });
       await prisma.evaluations.update({
         where: { id: e.id },
-        data: { end_at: new Date(0) },
+        data: { start_at: new Date(0), end_at: new Date(1) },
       });
       expect((await post(`${url}/preview`)).status).toBe(400);
       await prisma.evaluations.update({
         where: { id: e.id },
-        data: { end_at: originalEnd },
+        data: { start_at: originalStart, end_at: originalEnd },
       });
       await prisma.survey_versions.update({
         where: { id: e.v1.id },

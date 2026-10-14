@@ -4,7 +4,8 @@ For professor review and frontend handoff, read the [consolidated project report
 
 For frontend testing, start with the [handoff checklist and request examples](docs/BACKEND_PROJECT_REPORT.md#88-frontend-team-handoff-and-acceptance-checklist) and [isolated setup guide](TESTING.md#frontend-team-preview-from-the-github-repository). Clone the delivery commit identified by the project owner; the earlier `578c63f` baseline does not contain these improvements.
 
-> **Backend status:** Review-bound confirmation, exact-result retries, older-version retention, version-update impact and approved repeat/transfer/pause/resume/yearly-group progression, academic-year curriculum revisions and retained global question-set titles and immutable historical target labels are implemented and tested. Frontend integration/cutover, official recovery evidence and school deployment remain pending. Deploy all four additive review, progression, curriculum and historical-label migrations before using the updated backend. See [current requirements review](docs/BACKEND_PROJECT_REPORT.md#7-backend-improvement-requirements-and-delivery-status).
+> **Backend status:** Review-bound confirmation, exact-result retries, older-version retention, version-update impact and approved repeat/transfer/pause/resume/yearly-group progression, academic-year curriculum revisions and retained global question-set titles and immutable historical target labels are implemented and tested. Frontend integration/cutover, official recovery evidence and school deployment remain pending. School deployment must use the reviewed target-specific migration procedure. Local normal and test are aligned through all 18 migrations after verified backup/restore/rehearsal. Another deployment target needs its own reviewed migration procedure. See [current requirements review](docs/BACKEND_PROJECT_REPORT.md#7-backend-improvement-requirements-and-delivery-status).
+> **Approved local follow-up:** Lecturer results require CLOSED evaluations. Evaluated offerings retain course/lecturer/semester identity and their semesters retain academic-year identity. Primary-department protection retains other memberships. The new safeguards enforce one active academic year, globally unique literal questionnaire titles, nullable offering uniqueness, year-level bounds and ordered dates. Generation maximum and UTC calendar-date validation are documented in Swagger. Full regression passed 514 unit and 471 API tests. Both application databases have 28 application tables/199 columns; normal and test both have all 18 migrations. The earlier approved normal alignment passed 16 read-only API checks; normal records/schema/sequences were also preserved during this new implementation. Fresh backup/restore and rehearsal are complete: 160 PostgreSQL/API cases and 16 read-only copied-data GET checks passed, with original records preserved. The approved normal migration is complete: all original values/sequences/old migration records were preserved and 16 read-only normal checks passed. The owner authorized publication to master after final review. Use the delivery commit containing this report and record its SHA with git rev-parse HEAD; see report Sections 9.1 and 11.8-11.13.
 > **Stack:** NestJS · TypeScript · PostgreSQL · Prisma · JWT/Passport · Swagger · Jest · ts-jest · Supertest  
 > **Roles:** ADMIN · LECTURER · STUDENT  
 > **API base path:** `/api`
@@ -1787,11 +1788,7 @@ Check migration state when needed:
 npx prisma migrate status
 ```
 
-For development database migration:
-
-```bash
-npx prisma migrate dev
-```
+For frontend evaluation, use `npm.cmd run test:e2e:migrate` with the guarded local test configuration. For any normal deployment, follow the reviewed audit/backup/approval procedure in Section 23.5 and the consolidated report. Supplied SQL-owned protections must remain in the migration chain.
 
 Do not manually remove historical migration folders that are already part of the applied migration chain.
 
@@ -1873,9 +1870,9 @@ HTTP Response
 Latest full regression checkpoint for the current improvement implementation:
 
 ```text
-Test Suites: 31 passed, 31 total
-Tests:       309 passed, 309 total
-Snapshots:   0
+Unit: 43 suites / 514 tests passed
+API:  19 suites / 471 tests passed
+Failed/pending: 0
 ```
 
 TypeScript validation also passed:
@@ -1996,15 +1993,17 @@ cd teacher-evaluation-api
 
 ## 23.2 Install Dependencies
 
+The recorded evaluation used Node.js 24.16.0 and PostgreSQL 18.4. Supplied migrations require PostgreSQL 15 or newer for NULLS NOT DISTINCT; other compatible runtime/server versions have not been evaluated here. Use the lockfile for repeatable installation:
+
 ```bash
-npm install
+npm ci
 ```
 
 ---
 
 ## 23.3 Environment Variables
 
-Configure `.env`.
+For frontend preview and synthetic testing, follow [the guarded setup](TESTING.md#frontend-team-preview-from-the-github-repository), using `.env.test.local` and `teacher_evaluation_test`. The following `.env` instructions describe the normal backend connection; do not use that database for synthetic testing.
 
 Typical configuration includes:
 
@@ -2036,23 +2035,25 @@ Check:
 npx prisma migrate status
 ```
 
-For a development database when migrations need to be applied:
+For the isolated frontend preview, deploy supplied migrations with `npm.cmd run test:e2e:migrate`. For a normal database, review the target, audit existing records, verify a restorable backup and approve its migration plan before applying:
 
 ```bash
-npx prisma migrate dev
+npx prisma migrate deploy
 ```
+
+Do not use `migrate dev`, `db push` or reset commands to align a populated school database. SQL-owned indexes, checks and history guards must be preserved through the supplied migrations.
 
 ---
 
 ## 23.6 Seed Development Data
 
-If required:
+For frontend evaluation, use the guarded synthetic seed:
 
-```bash
-npx prisma db seed
+```powershell
+npm.cmd run test:e2e:seed
 ```
 
-Seed data is intended for development/testing only.
+This validates `.env.test.local` and targets local `teacher_evaluation_test`. It restores synthetic account passwords, so coordinate with other testers. Do not run the general Prisma seed against the normal database.
 
 ---
 
@@ -2368,8 +2369,8 @@ npx tsc --noEmit
 PASS ✅
 
 Full regression:
-31 / 31 test suites passed
-309 / 309 tests passed
+Unit: 43 suites / 514 tests passed
+API: 19 suites / 471 tests passed
 PASS ✅
 ```
 
@@ -2400,53 +2401,23 @@ Large structural changes should be avoided during this stage unless final integr
 
 # 28. Quick Start
 
-For a teammate joining the project:
+For frontend preview, first follow [the isolated setup guide](TESTING.md#frontend-team-preview-from-the-github-repository): install the documented runtime/database, create local `teacher_evaluation_test`, run `npm.cmd ci`, copy `.env.test.example` only if `.env.test.local` does not exist, and configure private local test credentials. Then run each command successfully before the next:
 
-```bash
-# 1. Install dependencies
-npm install
-
-# 2. Configure .env
-
-# 3. Generate Prisma Client
-npx prisma generate
-
-# 4. Check migration state
-npx prisma migrate status
-
-# 5. Apply migrations when required for the development database
-npx prisma migrate dev
-
-# 6. Start backend
-npm run start:dev
+```powershell
+npm.cmd run test:e2e:generate
+npm.cmd run test:e2e:check
+npm.cmd run test:e2e:migrate
+npm.cmd run test:e2e:seed
+npm.cmd test -- --runInBand
+npm.cmd run test:e2e
+npm.cmd run build
+npm.cmd run lint
+npm.cmd run start:test
 ```
 
-Open Swagger:
+Open `http://localhost:3000/api/docs` and `http://localhost:3000/api/health`. Use the synthetic role accounts and request sequences in the consolidated report, then stop with Ctrl+C. This preview supplies the backend API; the frontend team must evaluate their own UI separately. Do not substitute the normal database or rerun seeding while other testers use the same accounts.
 
-```text
-http://localhost:3000/api/docs
-```
-
-Verify the backend:
-
-```bash
-npx tsc --noEmit
-npm test -- --runInBand
-npm run build
-```
-
-Run E2E tests when the E2E environment is configured:
-
-```bash
-npm run test:e2e
-```
-
-Latest regression checkpoint:
-
-```text
-31 test suites passed
-309 tests passed
-```
+Latest full regression: 43 unit suites/514 tests and 19 API suites/471 tests passed; report Sections 9.1 and 11.12 record the evidence and completed local database alignment.
 
 ---
 
@@ -2481,29 +2452,10 @@ Role-based authorization
 The current improvement implementation has passed the latest full regression checkpoint of:
 
 ```text
-31 / 31 test suites
-309 / 309 tests
+43 unit suites / 514 unit tests passed
+19 API suites / 471 API tests passed
 ```
 
 and is ready for final frontend integration testing and internship defense review.
 
-Command:
-npx prisma migrate dev --name add_participant_survey_version
-
-Purpose:
-Creates and applies a new Prisma database migration during development.
-
-What happens when executed:
-1. Prisma reads schema.prisma.
-2. It compares the Prisma schema with the current migration/database state.
-3. It generates a migration folder containing SQL changes.
-4. It applies the migration to PostgreSQL.
-5. Prisma records the migration in _prisma_migrations.
-
-Why we used it:
-We added survey_version_id to evaluation participants so each unfinished
-student could safely use an effective questionnaire version.
-
-Important:
-This changes the database schema. It is different from `prisma generate`,
-which only regenerates Prisma Client and does not migrate the database.
+Historical development note: the participant-level survey_version_id field was added through an existing versioned migration to preserve each unfinished student's effective questionnaire. That migration is supplied in the repository; frontend testers deploy existing migrations through the guarded runner instead of generating it again. Prisma generate rebuilds the client and does not change the database schema.

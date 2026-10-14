@@ -1,4 +1,6 @@
 import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
+import { calendarDate } from '../common/utils/calendar-date.util';
+import { throwKnownDatabaseConstraint } from '../common/utils/database-constraint.util';
 import {
   BadRequestException,
   ConflictException,
@@ -36,6 +38,7 @@ export class AcademicYearsService {
       this.prisma,
       (db) => new AcademicYearsService(db).createInTransaction(dto),
       (e: any) => {
+        throwKnownDatabaseConstraint(e);
         if (e.code === 'P2002') {
           throw new ConflictException('Academic year already exists');
         }
@@ -46,8 +49,8 @@ export class AcademicYearsService {
   }
 
   private async createInTransaction(dto: CreateAcademicYearDto) {
-    const startDate = dto.start_date ? new Date(dto.start_date) : null;
-    const endDate = dto.end_date ? new Date(dto.end_date) : null;
+    const startDate = calendarDate(dto.start_date);
+    const endDate = calendarDate(dto.end_date);
 
     this.checkDateOrder(startDate, endDate);
 
@@ -77,6 +80,7 @@ export class AcademicYearsService {
         });
       });
     } catch (e: any) {
+      throwKnownDatabaseConstraint(e);
       if (e.code === 'P2002') {
         throw new ConflictException('Academic year already exists');
       }
@@ -90,6 +94,7 @@ export class AcademicYearsService {
       this.prisma,
       (db) => new AcademicYearsService(db).updateInTransaction(id, dto),
       (e: any) => {
+        throwKnownDatabaseConstraint(e);
         if (e.code === 'P2002') {
           throw new ConflictException('Academic year already exists');
         }
@@ -104,11 +109,11 @@ export class AcademicYearsService {
 
     const startDate =
       dto.start_date !== undefined
-        ? new Date(dto.start_date)
+        ? calendarDate(dto.start_date)
         : existing.start_date;
 
     const endDate =
-      dto.end_date !== undefined ? new Date(dto.end_date) : existing.end_date;
+      dto.end_date !== undefined ? calendarDate(dto.end_date) : existing.end_date;
 
     this.checkDateOrder(startDate, endDate);
 
@@ -141,6 +146,7 @@ export class AcademicYearsService {
         });
       });
     } catch (e: any) {
+      throwKnownDatabaseConstraint(e);
       if (
         e.code === 'P2004' ||
         (e instanceof Error &&

@@ -12,23 +12,17 @@ import { SemestersService } from './semesters.service';
 describe('SemestersService', () => {
   let service: SemestersService;
 
-  const semesterFindManyMock =
-    jest.fn<(args: any) => Promise<any>>();
+  const semesterFindManyMock = jest.fn<(args: any) => Promise<any>>();
 
-  const semesterFindUniqueMock =
-    jest.fn<(args: any) => Promise<any>>();
+  const semesterFindUniqueMock = jest.fn<(args: any) => Promise<any>>();
 
-  const semesterCreateMock =
-    jest.fn<(args: any) => Promise<any>>();
+  const semesterCreateMock = jest.fn<(args: any) => Promise<any>>();
 
-  const semesterUpdateMock =
-    jest.fn<(args: any) => Promise<any>>();
+  const semesterUpdateMock = jest.fn<(args: any) => Promise<any>>();
 
-  const semesterDeleteMock =
-    jest.fn<(args: any) => Promise<any>>();
+  const semesterDeleteMock = jest.fn<(args: any) => Promise<any>>();
 
-  const academicYearFindUniqueMock =
-    jest.fn<(args: any) => Promise<any>>();
+  const academicYearFindUniqueMock = jest.fn<(args: any) => Promise<any>>();
 
   const prismaMock = {
     semesters: {
@@ -41,6 +35,10 @@ describe('SemestersService', () => {
     academic_years: {
       findUnique: academicYearFindUniqueMock,
     },
+    evaluations: { count: jest.fn<any>().mockResolvedValue(0) },
+    $transaction: jest.fn(async (callback: (db: any) => Promise<any>) =>
+      callback(prismaMock),
+    ),
   };
 
   const academicYear = {
@@ -117,15 +115,13 @@ describe('SemestersService', () => {
   it('throws when semester does not exist', async () => {
     semesterFindUniqueMock.mockResolvedValue(null);
 
-    await expect(
-      service.findOne(999n),
-    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.findOne(999n)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('creates a semester with an explicit semester number', async () => {
-    academicYearFindUniqueMock.mockResolvedValue(
-      academicYear,
-    );
+    academicYearFindUniqueMock.mockResolvedValue(academicYear);
     semesterCreateMock.mockResolvedValue(semester);
 
     const result = await service.create({
@@ -138,9 +134,7 @@ describe('SemestersService', () => {
 
     expect(result).toEqual(semester);
 
-    expect(
-      academicYearFindUniqueMock,
-    ).toHaveBeenCalledWith({
+    expect(academicYearFindUniqueMock).toHaveBeenCalledWith({
       where: {
         id: 1n,
       },
@@ -185,17 +179,13 @@ describe('SemestersService', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
 
-    expect(
-      academicYearFindUniqueMock,
-    ).not.toHaveBeenCalled();
+    expect(academicYearFindUniqueMock).not.toHaveBeenCalled();
 
     expect(semesterCreateMock).not.toHaveBeenCalled();
   });
 
   it('returns a conflict for duplicate semester name or number', async () => {
-    academicYearFindUniqueMock.mockResolvedValue(
-      academicYear,
-    );
+    academicYearFindUniqueMock.mockResolvedValue(academicYear);
 
     semesterCreateMock.mockRejectedValue({
       code: 'P2002',
@@ -220,9 +210,7 @@ describe('SemestersService', () => {
       semester_number: 2,
     };
 
-    semesterUpdateMock.mockResolvedValue(
-      updatedSemester,
-    );
+    semesterUpdateMock.mockResolvedValue(updatedSemester);
 
     const result = await service.update(10n, {
       semester_number: 2,
@@ -251,9 +239,7 @@ describe('SemestersService', () => {
       semester_name: 'First Semester',
     };
 
-    semesterUpdateMock.mockResolvedValue(
-      renamedSemester,
-    );
+    semesterUpdateMock.mockResolvedValue(renamedSemester);
 
     await service.update(10n, {
       semester_name: 'First Semester',
@@ -278,9 +264,7 @@ describe('SemestersService', () => {
       semester_number: null,
     };
 
-    semesterFindUniqueMock.mockResolvedValue(
-      historicalSemester,
-    );
+    semesterFindUniqueMock.mockResolvedValue(historicalSemester);
 
     semesterUpdateMock.mockResolvedValue({
       ...historicalSemester,
@@ -311,9 +295,7 @@ describe('SemestersService', () => {
       start_year: 2027,
     };
 
-    academicYearFindUniqueMock.mockResolvedValue(
-      newAcademicYear,
-    );
+    academicYearFindUniqueMock.mockResolvedValue(newAcademicYear);
 
     semesterUpdateMock.mockResolvedValue({
       ...semester,
@@ -325,9 +307,7 @@ describe('SemestersService', () => {
       academic_year_id: 2,
     });
 
-    expect(
-      academicYearFindUniqueMock,
-    ).toHaveBeenCalledWith({
+    expect(academicYearFindUniqueMock).toHaveBeenCalledWith({
       where: {
         id: 2n,
       },
@@ -377,9 +357,7 @@ describe('SemestersService', () => {
       code: 'P2003',
     });
 
-    await expect(
-      service.remove(10n),
-    ).rejects.toThrow(
+    await expect(service.remove(10n)).rejects.toThrow(
       'Semester is used by course offerings and cannot be deleted',
     );
   });

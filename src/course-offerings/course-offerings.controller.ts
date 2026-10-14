@@ -166,7 +166,7 @@ export class CourseOfferingsController {
   @ApiOperation({
     summary: 'Update a course offering',
     description:
-      'Updates offering metadata. Curriculum-bound offerings retain course, semester, year level, groups and saved revisions; create another offering for changed curriculum context. Resending identical groups keeps saved rows and does not revalidate against a later withdrawal.',
+      'An offering with any evaluation (including DRAFT) retains its course, lecturer and semester; a changed teaching assignment requires a new offering. Unchanged IDs and permitted display metadata remain editable. Curriculum-bound offerings also retain year level, groups and saved revisions. Resending identical groups keeps saved rows and does not revalidate against a later withdrawal.',
   })
   @ApiParam({
     name: 'id',
@@ -192,7 +192,7 @@ export class CourseOfferingsController {
   @ApiResponse({
     status: 409,
     description:
-      'Duplicate offering, protected curriculum context, or obsolete/inapplicable curriculum revision',
+      'OFFERING_HISTORY_PROTECTED for changed course/lecturer/semester on an evaluated offering; duplicate offering, protected curriculum context, or obsolete/inapplicable curriculum revision',
   })
   update(
     @Param('id', ParseBigIntPipe) id: bigint,

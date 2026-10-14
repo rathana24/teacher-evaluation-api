@@ -133,9 +133,7 @@ export class ResultsService {
 
     const evaluations = await this.prisma.evaluations.findMany({
       where: {
-        status: {
-          not: 'DRAFT',
-        },
+        status: 'CLOSED',
 
         course_offerings: {
           lecturer_id: lecturerId,

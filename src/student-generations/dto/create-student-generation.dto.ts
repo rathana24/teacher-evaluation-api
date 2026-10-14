@@ -7,6 +7,7 @@ import {
   Matches,
   MaxLength,
   Min,
+  Max,
 } from 'class-validator';
 
 export class CreateStudentGenerationDto {
@@ -39,9 +40,11 @@ export class CreateStudentGenerationDto {
       'Starting year level of the generation, normally 1',
     default: 1,
     minimum: 1,
+    maximum: 5,
   })
   @IsOptional()
   @IsInt()
   @Min(1)
+  @Max(5)
   starting_year_level?: number;
 }

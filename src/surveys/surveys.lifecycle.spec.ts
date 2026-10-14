@@ -22,8 +22,8 @@ describe('SurveysService lifecycle safeguards', () => {
   const surveyFindUniqueOrThrowMock =
     jest.fn<(args: any) => Promise<any>>();
 
-  const surveyFindFirstMock =
-    jest.fn<(args: any) => Promise<any>>();
+  const titleQueryMock =
+    jest.fn<(args: any) => Promise<any[]>>();
 
   const surveyCreateMock =
     jest.fn<(args: any) => Promise<any>>();
@@ -67,7 +67,6 @@ describe('SurveysService lifecycle safeguards', () => {
       findUnique: surveyFindUniqueMock,
       findUniqueOrThrow:
         surveyFindUniqueOrThrowMock,
-      findFirst: surveyFindFirstMock,
       create: surveyCreateMock,
       update: surveyUpdateMock,
       delete: surveyDeleteMock,
@@ -88,6 +87,7 @@ describe('SurveysService lifecycle safeguards', () => {
     },
 
     $transaction: transactionMock,
+    $queryRaw: titleQueryMock,
   };
 
   const activeSurvey = {
@@ -150,8 +150,8 @@ describe('SurveysService lifecycle safeguards', () => {
         callback(completeTransactionMock(prismaMock, prismaMock)),
     );
 
-    surveyFindFirstMock
-      .mockResolvedValue(null);
+    titleQueryMock
+      .mockResolvedValue([]);
 
     surveyCreateMock
       .mockResolvedValue({
@@ -230,11 +230,11 @@ describe('SurveysService lifecycle safeguards', () => {
   });
 
   it('rejects a duplicate normalized title', async () => {
-    surveyFindFirstMock
-      .mockResolvedValue({
+    titleQueryMock
+      .mockResolvedValue([{
         id: BigInt(99),
         archived_at: null,
-      });
+      }]);
 
     await expect(
       service.create(

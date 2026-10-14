@@ -1,9 +1,6 @@
 import { jest } from '@jest/globals';
 
-import {
-  BadRequestException,
-  ConflictException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
@@ -26,21 +23,14 @@ type SafeUser = {
 describe('UsersService', () => {
   let service: UsersService;
 
-  const usersCreateMock = jest.fn<
-    (...args: unknown[]) => Promise<SafeUser>
-  >();
+  const usersCreateMock = jest.fn<(...args: unknown[]) => Promise<SafeUser>>();
 
-  const usersFindUniqueMock = jest.fn<
-    (...args: unknown[]) => Promise<SafeUser | null>
-  >();
+  const usersFindUniqueMock =
+    jest.fn<(...args: unknown[]) => Promise<SafeUser | null>>();
 
-  const usersUpdateMock = jest.fn<
-    (...args: unknown[]) => Promise<SafeUser>
-  >();
+  const usersUpdateMock = jest.fn<(...args: unknown[]) => Promise<SafeUser>>();
 
-  const usersCountMock = jest.fn<
-    (...args: unknown[]) => Promise<number>
-  >();
+  const usersCountMock = jest.fn<(...args: unknown[]) => Promise<number>>();
 
   const prismaMock = {
     users: {
@@ -78,34 +68,28 @@ describe('UsersService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     Object.assign(prismaMock, {
-      $transaction: jest.fn(async (callback: (tx: any) => Promise<any>) => callback(prismaMock)),
+      $transaction: jest.fn(async (callback: (tx: any) => Promise<any>) =>
+        callback(prismaMock),
+      ),
     });
 
-    const module: TestingModule =
-      await Test.createTestingModule({
-        providers: [
-          UsersService,
-          {
-            provide: PrismaService,
-            useValue: prismaMock,
-          },
-        ],
-      }).compile();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        UsersService,
+        {
+          provide: PrismaService,
+          useValue: prismaMock,
+        },
+      ],
+    }).compile();
 
-    service =
-      module.get<UsersService>(UsersService);
+    service = module.get<UsersService>(UsersService);
 
-    usersFindUniqueMock.mockResolvedValue(
-      existingUser,
-    );
+    usersFindUniqueMock.mockResolvedValue(existingUser);
 
-    usersCreateMock.mockResolvedValue(
-      existingUser,
-    );
+    usersCreateMock.mockResolvedValue(existingUser);
 
-    usersUpdateMock.mockResolvedValue(
-      existingUser,
-    );
+    usersUpdateMock.mockResolvedValue(existingUser);
 
     usersCountMock.mockResolvedValue(2);
   });
@@ -113,6 +97,33 @@ describe('UsersService', () => {
   it('should be defined', () => {
     expect(service).toBeDefined();
   });
+
+  it.each(['P2002', 'P2034'])(
+    'maps transaction-level %s to a reloadable department-assignment conflict',
+    async (code) => {
+      (prismaMock as any).$transaction.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError(
+          'Concurrent membership conflict',
+          {
+            code,
+            clientVersion: '6.19.3',
+          },
+        ),
+      );
+      try {
+        await service.assignDepartment(10n, {
+          department_id: 1,
+          is_primary: true,
+        });
+        throw new Error('Expected conflict');
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConflictException);
+        expect((error as ConflictException).getResponse()).toMatchObject({
+          code: 'DEPARTMENT_ASSIGNMENT_CONFLICT',
+        });
+      }
+    },
+  );
 
   describe('create', () => {
     it('should create a staff user with normalized email and gender', async () => {
@@ -124,18 +135,14 @@ describe('UsersService', () => {
         role: 'LECTURER',
       });
 
-      expect(
-        usersCreateMock,
-      ).toHaveBeenCalledWith(
+      expect(usersCreateMock).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            email:
-              'newlecturer@itc.edu.kh',
+            email: 'newlecturer@itc.edu.kh',
             full_name: 'Keo Sophal',
             gender: 'MALE',
             role: 'LECTURER',
-            password_hash:
-              expect.any(String),
+            password_hash: expect.any(String),
           }),
         }),
       );
@@ -149,13 +156,10 @@ describe('UsersService', () => {
         role: 'LECTURER',
       });
 
-      expect(
-        usersCreateMock,
-      ).toHaveBeenCalledWith(
+      expect(usersCreateMock).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            email:
-              'lecturer2@itc.edu.kh',
+            email: 'lecturer2@itc.edu.kh',
             full_name: 'Lecturer Two',
             gender: null,
             role: 'LECTURER',
@@ -169,8 +173,7 @@ describe('UsersService', () => {
        * 😀 uses 4 UTF-8 bytes.
        * 19 × 4 = 76 bytes.
        */
-      const tooLongPassword =
-        '😀'.repeat(19);
+      const tooLongPassword = '😀'.repeat(19);
 
       await expect(
         service.create({
@@ -180,47 +183,35 @@ describe('UsersService', () => {
           role: 'LECTURER',
         }),
       ).rejects.toThrow(
-        new BadRequestException(
-          'Password must not exceed 72 UTF-8 bytes',
-        ),
+        new BadRequestException('Password must not exceed 72 UTF-8 bytes'),
       );
 
-      expect(
-        usersCreateMock,
-      ).not.toHaveBeenCalled();
+      expect(usersCreateMock).not.toHaveBeenCalled();
     });
 
     it('should map duplicate email to ConflictException', async () => {
-      const prismaError =
-        new Prisma.PrismaClientKnownRequestError(
-          'Unique constraint failed',
-          {
-            code: 'P2002',
-            clientVersion: '6.19.3',
-            meta: {
-              target: ['email'],
-            },
+      const prismaError = new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed',
+        {
+          code: 'P2002',
+          clientVersion: '6.19.3',
+          meta: {
+            target: ['email'],
           },
-        );
-
-      usersCreateMock.mockRejectedValue(
-        prismaError,
+        },
       );
+
+      usersCreateMock.mockRejectedValue(prismaError);
 
       await expect(
         service.create({
           email: 'lecturer@itc.edu.kh',
           password: 'Password123',
-          full_name:
-            'Duplicate Lecturer',
+          full_name: 'Duplicate Lecturer',
           gender: 'FEMALE',
           role: 'LECTURER',
         }),
-      ).rejects.toThrow(
-        new ConflictException(
-          'Email is already in use',
-        ),
-      );
+      ).rejects.toThrow(new ConflictException('Email is already in use'));
     });
   });
 
@@ -229,28 +220,22 @@ describe('UsersService', () => {
       await service.update(
         BigInt(10),
         {
-          email:
-            ' UPDATED@ITC.EDU.KH ',
-          full_name:
-            ' Updated Lecturer ',
+          email: ' UPDATED@ITC.EDU.KH ',
+          full_name: ' Updated Lecturer ',
           gender: 'FEMALE',
         },
         BigInt(1),
       );
 
-      expect(
-        usersUpdateMock,
-      ).toHaveBeenCalledWith(
+      expect(usersUpdateMock).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
             id: BigInt(10),
           },
 
           data: expect.objectContaining({
-            email:
-              'updated@itc.edu.kh',
-            full_name:
-              'Updated Lecturer',
+            email: 'updated@itc.edu.kh',
+            full_name: 'Updated Lecturer',
             gender: 'FEMALE',
           }),
         }),
@@ -261,15 +246,12 @@ describe('UsersService', () => {
       await service.update(
         BigInt(10),
         {
-          full_name:
-            'Updated Lecturer',
+          full_name: 'Updated Lecturer',
         },
         BigInt(1),
       );
 
-      expect(
-        usersUpdateMock,
-      ).toHaveBeenCalledWith(
+      expect(usersUpdateMock).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             gender: undefined,
@@ -279,8 +261,7 @@ describe('UsersService', () => {
     });
 
     it('should reset password, hash it, and increment auth_version', async () => {
-      const newPassword =
-        'NewPassword456';
+      const newPassword = 'NewPassword456';
 
       await service.update(
         BigInt(10),
@@ -290,61 +271,39 @@ describe('UsersService', () => {
         BigInt(1),
       );
 
-      expect(
-        usersUpdateMock,
-      ).toHaveBeenCalledTimes(1);
+      expect(usersUpdateMock).toHaveBeenCalledTimes(1);
 
-      const updateArgument =
-        usersUpdateMock.mock
-          .calls[0][0] as {
-          where: {
-            id: bigint;
-          };
-
-          data: {
-            password_hash?: string;
-
-            auth_version?: {
-              increment: number;
-            };
-
-            updated_at: Date;
-          };
-
-          select: Record<
-            string,
-            unknown
-          >;
+      const updateArgument = usersUpdateMock.mock.calls[0][0] as {
+        where: {
+          id: bigint;
         };
 
-      expect(
-        updateArgument.where,
-      ).toEqual({
+        data: {
+          password_hash?: string;
+
+          auth_version?: {
+            increment: number;
+          };
+
+          updated_at: Date;
+        };
+
+        select: Record<string, unknown>;
+      };
+
+      expect(updateArgument.where).toEqual({
         id: BigInt(10),
       });
 
-      expect(
-        updateArgument.data
-          .password_hash,
-      ).toEqual(expect.any(String));
+      expect(updateArgument.data.password_hash).toEqual(expect.any(String));
+
+      expect(updateArgument.data.password_hash).not.toBe(newPassword);
 
       expect(
-        updateArgument.data
-          .password_hash,
-      ).not.toBe(newPassword);
-
-      expect(
-        await bcrypt.compare(
-          newPassword,
-          updateArgument.data
-            .password_hash!,
-        ),
+        await bcrypt.compare(newPassword, updateArgument.data.password_hash!),
       ).toBe(true);
 
-      expect(
-        updateArgument.data
-          .auth_version,
-      ).toEqual({
+      expect(updateArgument.data.auth_version).toEqual({
         increment: 1,
       });
 
@@ -352,58 +311,37 @@ describe('UsersService', () => {
        * The safe response selection must not
        * expose password_hash or auth_version.
        */
-      expect(
-        updateArgument.select,
-      ).not.toHaveProperty(
-        'password_hash',
-      );
+      expect(updateArgument.select).not.toHaveProperty('password_hash');
 
-      expect(
-        updateArgument.select,
-      ).not.toHaveProperty(
-        'auth_version',
-      );
+      expect(updateArgument.select).not.toHaveProperty('auth_version');
     });
 
     it('should not increment auth_version when password is not changed', async () => {
       await service.update(
         BigInt(10),
         {
-          full_name:
-            'Updated Lecturer',
+          full_name: 'Updated Lecturer',
         },
         BigInt(1),
       );
 
-      expect(
-        usersUpdateMock,
-      ).toHaveBeenCalledTimes(1);
+      expect(usersUpdateMock).toHaveBeenCalledTimes(1);
 
-      const updateArgument =
-        usersUpdateMock.mock
-          .calls[0][0] as {
-          data: {
-            password_hash?:
-              | string
-              | undefined;
+      const updateArgument = usersUpdateMock.mock.calls[0][0] as {
+        data: {
+          password_hash?: string | undefined;
 
-            auth_version?:
-              | {
-                  increment: number;
-                }
-              | undefined;
-          };
+          auth_version?:
+            | {
+                increment: number;
+              }
+            | undefined;
         };
+      };
 
-      expect(
-        updateArgument.data
-          .password_hash,
-      ).toBeUndefined();
+      expect(updateArgument.data.password_hash).toBeUndefined();
 
-      expect(
-        updateArgument.data
-          .auth_version,
-      ).toBeUndefined();
+      expect(updateArgument.data.auth_version).toBeUndefined();
     });
 
     it('should reject an admin reset password exceeding 72 UTF-8 bytes', async () => {
@@ -412,22 +350,18 @@ describe('UsersService', () => {
        * DTO character limit but use 76 UTF-8
        * bytes, exceeding bcrypt's safe limit.
        */
-      const tooLongPassword =
-        '😀'.repeat(19);
+      const tooLongPassword = '😀'.repeat(19);
 
       await expect(
         service.update(
           BigInt(10),
           {
-            password:
-              tooLongPassword,
+            password: tooLongPassword,
           },
           BigInt(1),
         ),
       ).rejects.toThrow(
-        new BadRequestException(
-          'Password must not exceed 72 UTF-8 bytes',
-        ),
+        new BadRequestException('Password must not exceed 72 UTF-8 bytes'),
       );
 
       /*
@@ -435,9 +369,7 @@ describe('UsersService', () => {
        * that the target user exists, but the
        * update itself must never happen.
        */
-      expect(
-        usersUpdateMock,
-      ).not.toHaveBeenCalled();
+      expect(usersUpdateMock).not.toHaveBeenCalled();
     });
 
     it('should prevent the current admin from deactivating their own account', async () => {
@@ -450,20 +382,14 @@ describe('UsersService', () => {
           BigInt(10),
         ),
       ).rejects.toThrow(
-        new BadRequestException(
-          'You cannot deactivate your own account',
-        ),
+        new BadRequestException('You cannot deactivate your own account'),
       );
 
-      expect(
-        usersUpdateMock,
-      ).not.toHaveBeenCalled();
+      expect(usersUpdateMock).not.toHaveBeenCalled();
     });
 
     it('should reject deactivation of the last active admin', async () => {
-      usersFindUniqueMock.mockResolvedValue(
-        existingAdmin,
-      );
+      usersFindUniqueMock.mockResolvedValue(existingAdmin);
 
       usersCountMock.mockResolvedValue(1);
 
@@ -476,29 +402,21 @@ describe('UsersService', () => {
           BigInt(1),
         ),
       ).rejects.toThrow(
-        new ConflictException(
-          'Cannot deactivate the last active admin',
-        ),
+        new ConflictException('Cannot deactivate the last active admin'),
       );
 
-      expect(
-        usersCountMock,
-      ).toHaveBeenCalledWith({
+      expect(usersCountMock).toHaveBeenCalledWith({
         where: {
           role: 'ADMIN',
           status: 'ACTIVE',
         },
       });
 
-      expect(
-        usersUpdateMock,
-      ).not.toHaveBeenCalled();
+      expect(usersUpdateMock).not.toHaveBeenCalled();
     });
 
     it('should allow deactivation of an admin when another active admin exists', async () => {
-      usersFindUniqueMock.mockResolvedValue(
-        existingAdmin,
-      );
+      usersFindUniqueMock.mockResolvedValue(existingAdmin);
 
       usersCountMock.mockResolvedValue(2);
 
@@ -515,18 +433,14 @@ describe('UsersService', () => {
         BigInt(1),
       );
 
-      expect(
-        usersCountMock,
-      ).toHaveBeenCalledWith({
+      expect(usersCountMock).toHaveBeenCalledWith({
         where: {
           role: 'ADMIN',
           status: 'ACTIVE',
         },
       });
 
-      expect(
-        usersUpdateMock,
-      ).toHaveBeenCalledWith(
+      expect(usersUpdateMock).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
             id: BigInt(20),
@@ -540,9 +454,7 @@ describe('UsersService', () => {
     });
 
     it('should not count active admins when deactivating a lecturer', async () => {
-      usersFindUniqueMock.mockResolvedValue(
-        existingUser,
-      );
+      usersFindUniqueMock.mockResolvedValue(existingUser);
 
       await service.update(
         BigInt(10),
@@ -552,46 +464,34 @@ describe('UsersService', () => {
         BigInt(1),
       );
 
-      expect(
-        usersCountMock,
-      ).not.toHaveBeenCalled();
+      expect(usersCountMock).not.toHaveBeenCalled();
 
-      expect(
-        usersUpdateMock,
-      ).toHaveBeenCalled();
+      expect(usersUpdateMock).toHaveBeenCalled();
     });
 
     it('should map duplicate email during update to ConflictException', async () => {
-      const prismaError =
-        new Prisma.PrismaClientKnownRequestError(
-          'Unique constraint failed',
-          {
-            code: 'P2002',
-            clientVersion: '6.19.3',
-            meta: {
-              target: ['email'],
-            },
+      const prismaError = new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed',
+        {
+          code: 'P2002',
+          clientVersion: '6.19.3',
+          meta: {
+            target: ['email'],
           },
-        );
-
-      usersUpdateMock.mockRejectedValue(
-        prismaError,
+        },
       );
+
+      usersUpdateMock.mockRejectedValue(prismaError);
 
       await expect(
         service.update(
           BigInt(10),
           {
-            email:
-              'existing@itc.edu.kh',
+            email: 'existing@itc.edu.kh',
           },
           BigInt(1),
         ),
-      ).rejects.toThrow(
-        new ConflictException(
-          'Email is already in use',
-        ),
-      );
+      ).rejects.toThrow(new ConflictException('Email is already in use'));
     });
   });
 });

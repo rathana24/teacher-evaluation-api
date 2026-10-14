@@ -1,6 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { throwKnownDatabaseConstraint } from './database-constraint.util';
 
 const transactionClients = new WeakSet<object>();
 
@@ -39,6 +40,7 @@ export async function inSerializableTransaction<T>(
       timeout: 20_000,
     });
   } catch (error) {
+    throwKnownDatabaseConstraint(error);
     let failure = error;
     // Include commit-time errors in the service's existing domain error mapping.
     if (mapError) {

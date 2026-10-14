@@ -5,10 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  Prisma,
-  user_role,
-} from '@prisma/client';
+import { Prisma, user_role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -54,23 +51,15 @@ function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
 
-function validateBcryptPasswordBytes(
-  password: string,
-) {
-  if (
-    Buffer.byteLength(password, 'utf8') > 72
-  ) {
-    throw new BadRequestException(
-      'Password must not exceed 72 UTF-8 bytes',
-    );
+function validateBcryptPasswordBytes(password: string) {
+  if (Buffer.byteLength(password, 'utf8') > 72) {
+    throw new BadRequestException('Password must not exceed 72 UTF-8 bytes');
   }
 }
 
 @Injectable()
 export class UsersService {
-  constructor(
-    private readonly prisma: PrismaService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   // =========================================================
   // USERS
@@ -80,8 +69,7 @@ export class UsersService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
 
-    const search =
-      query.search?.trim() || undefined;
+    const search = query.search?.trim() || undefined;
 
     /*
      * /users is the staff-management endpoint.
@@ -95,10 +83,7 @@ export class UsersService {
         query.role !== undefined
           ? query.role
           : {
-              in: [
-                user_role.ADMIN,
-                user_role.LECTURER,
-              ],
+              in: [user_role.ADMIN, user_role.LECTURER],
             },
 
       status: query.status,
@@ -123,25 +108,24 @@ export class UsersService {
         : {}),
     };
 
-    const [data, total] =
-      await this.prisma.$transaction([
-        this.prisma.users.findMany({
-          where,
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.users.findMany({
+        where,
 
-          select: safeUserSelect,
+        select: safeUserSelect,
 
-          orderBy: {
-            id: 'asc',
-          },
+        orderBy: {
+          id: 'asc',
+        },
 
-          skip: (page - 1) * limit,
-          take: limit,
-        }),
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
 
-        this.prisma.users.count({
-          where,
-        }),
-      ]);
+      this.prisma.users.count({
+        where,
+      }),
+    ]);
 
     return {
       data,
@@ -150,10 +134,7 @@ export class UsersService {
         page,
         limit,
         total,
-        total_pages:
-          total === 0
-            ? 0
-            : Math.ceil(total / limit),
+        total_pages: total === 0 ? 0 : Math.ceil(total / limit),
       },
 
       filters: {
@@ -165,19 +146,16 @@ export class UsersService {
   }
 
   async findOne(id: bigint) {
-    const user =
-      await this.prisma.users.findUnique({
-        where: {
-          id,
-        },
+    const user = await this.prisma.users.findUnique({
+      where: {
+        id,
+      },
 
-        select: safeUserSelect,
-      });
+      select: safeUserSelect,
+    });
 
     if (!user) {
-      throw new NotFoundException(
-        'User not found',
-      );
+      throw new NotFoundException('User not found');
     }
 
     return user;
@@ -198,15 +176,9 @@ export class UsersService {
   }
 
   private async createInTransaction(dto: CreateUserDto) {
-    validateBcryptPasswordBytes(
-      dto.password,
-    );
+    validateBcryptPasswordBytes(dto.password);
 
-    const passwordHash =
-      await bcrypt.hash(
-        dto.password,
-        BCRYPT_ROUNDS,
-      );
+    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
 
     const now = new Date();
 
@@ -226,9 +198,7 @@ export class UsersService {
       });
     } catch (e: any) {
       if (e.code === 'P2002') {
-        throw new ConflictException(
-          'Email is already in use',
-        );
+        throw new ConflictException('Email is already in use');
       }
 
       throw e;
@@ -254,20 +224,14 @@ export class UsersService {
     dto: UpdateUserDto,
     currentUserId: bigint,
   ) {
-    const existingUser =
-      await this.findOne(id);
+    const existingUser = await this.findOne(id);
 
     /*
      * The current admin must never be able
      * to deactivate their own account.
      */
-    if (
-      dto.status === 'INACTIVE' &&
-      id === currentUserId
-    ) {
-      throw new BadRequestException(
-        'You cannot deactivate your own account',
-      );
+    if (dto.status === 'INACTIVE' && id === currentUserId) {
+      throw new BadRequestException('You cannot deactivate your own account');
     }
 
     /*
@@ -279,33 +243,25 @@ export class UsersService {
       existingUser.status === 'ACTIVE' &&
       dto.status === 'INACTIVE'
     ) {
-      const activeAdminCount =
-        await this.prisma.users.count({
-          where: {
-            role: 'ADMIN',
-            status: 'ACTIVE',
-          },
-        });
+      const activeAdminCount = await this.prisma.users.count({
+        where: {
+          role: 'ADMIN',
+          status: 'ACTIVE',
+        },
+      });
 
       if (activeAdminCount <= 1) {
-        throw new ConflictException(
-          'Cannot deactivate the last active admin',
-        );
+        throw new ConflictException('Cannot deactivate the last active admin');
       }
     }
 
     if (dto.password !== undefined) {
-      validateBcryptPasswordBytes(
-        dto.password,
-      );
+      validateBcryptPasswordBytes(dto.password);
     }
 
     const passwordHash =
       dto.password !== undefined
-        ? await bcrypt.hash(
-            dto.password,
-            BCRYPT_ROUNDS,
-          )
+        ? await bcrypt.hash(dto.password, BCRYPT_ROUNDS)
         : undefined;
 
     try {
@@ -316,14 +272,10 @@ export class UsersService {
 
         data: {
           email:
-            dto.email !== undefined
-              ? normalizeEmail(dto.email)
-              : undefined,
+            dto.email !== undefined ? normalizeEmail(dto.email) : undefined,
 
           full_name:
-            dto.full_name !== undefined
-              ? dto.full_name.trim()
-              : undefined,
+            dto.full_name !== undefined ? dto.full_name.trim() : undefined,
 
           gender: dto.gender,
 
@@ -350,9 +302,7 @@ export class UsersService {
       });
     } catch (e: any) {
       if (e.code === 'P2002') {
-        throw new ConflictException(
-          'Email is already in use',
-        );
+        throw new ConflictException('Email is already in use');
       }
 
       throw e;
@@ -386,53 +336,45 @@ export class UsersService {
     );
   }
 
-  private async removeInTransaction(
-    id: bigint,
-    currentUserId: bigint,
-  ) {
+  private async removeInTransaction(id: bigint, currentUserId: bigint) {
     /*
      * The caller must never permanently
      * delete their own account.
      */
     if (id === currentUserId) {
-      throw new BadRequestException(
-        'You cannot delete your own account',
-      );
+      throw new BadRequestException('You cannot delete your own account');
     }
 
-    const user =
-      await this.prisma.users.findUnique({
-        where: {
-          id,
-        },
+    const user = await this.prisma.users.findUnique({
+      where: {
+        id,
+      },
 
-        select: {
-          id: true,
-          role: true,
+      select: {
+        id: true,
+        role: true,
 
-          student: {
-            select: {
-              id: true,
-            },
-          },
-
-          _count: {
-            select: {
-              course_offerings: true,
-              enrollments: true,
-              evaluation_participants: true,
-              evaluations: true,
-              surveys: true,
-              survey_versions: true,
-            },
+        student: {
+          select: {
+            id: true,
           },
         },
-      });
+
+        _count: {
+          select: {
+            course_offerings: true,
+            enrollments: true,
+            evaluation_participants: true,
+            evaluations: true,
+            surveys: true,
+            survey_versions: true,
+          },
+        },
+      },
+    });
 
     if (!user) {
-      throw new NotFoundException(
-        'User not found',
-      );
+      throw new NotFoundException('User not found');
     }
 
     /*
@@ -445,10 +387,7 @@ export class UsersService {
       );
     }
 
-    if (
-      user.role !== user_role.STUDENT &&
-      user.role !== user_role.LECTURER
-    ) {
+    if (user.role !== user_role.STUDENT && user.role !== user_role.LECTURER) {
       throw new BadRequestException(
         'Only student and lecturer accounts can be permanently deleted',
       );
@@ -465,8 +404,7 @@ export class UsersService {
     const hasHistoricalReferences =
       user._count.course_offerings > 0 ||
       user._count.enrollments > 0 ||
-      user._count
-        .evaluation_participants > 0 ||
+      user._count.evaluation_participants > 0 ||
       user._count.evaluations > 0 ||
       user._count.surveys > 0 ||
       user._count.survey_versions > 0;
@@ -478,51 +416,44 @@ export class UsersService {
     }
 
     try {
-      await this.prisma.$transaction(
-        async (tx) => {
-          /*
-           * Department assignments are
-           * non-historical account configuration.
-           */
-          await tx.user_departments.deleteMany({
+      await this.prisma.$transaction(async (tx) => {
+        /*
+         * Department assignments are
+         * non-historical account configuration.
+         */
+        await tx.user_departments.deleteMany({
+          where: {
+            user_id: id,
+          },
+        });
+
+        /*
+         * A STUDENT account may own a student
+         * profile and academic placement records.
+         *
+         * Academic records depend on students.id,
+         * so remove them before the profile.
+         */
+        if (user.role === user_role.STUDENT && user.student) {
+          await tx.student_academic_records.deleteMany({
             where: {
-              user_id: id,
+              student_id: user.student.id,
             },
           });
 
-          /*
-           * A STUDENT account may own a student
-           * profile and academic placement records.
-           *
-           * Academic records depend on students.id,
-           * so remove them before the profile.
-           */
-          if (
-            user.role === user_role.STUDENT &&
-            user.student
-          ) {
-            await tx.student_academic_records
-              .deleteMany({
-                where: {
-                  student_id:
-                    user.student.id,
-                },
-              });
-
-            await tx.students.delete({
-              where: {
-                id: user.student.id,
-              },
-            });
-          }
-
-          await tx.users.delete({
+          await tx.students.delete({
             where: {
-              id,
+              id: user.student.id,
             },
           });
-        },
-      );
+        }
+
+        await tx.users.delete({
+          where: {
+            id,
+          },
+        });
+      });
     } catch (e: any) {
       /*
        * A reference may theoretically appear
@@ -578,143 +509,136 @@ export class UsersService {
     });
   }
 
-  async assignDepartment(
+  async assignDepartment(userId: bigint, dto: AssignUserDepartmentDto) {
+    return inSerializableTransaction(
+      this.prisma,
+      (db) => new UsersService(db).assignDepartmentInTransaction(userId, dto),
+      (error: any) => {
+        if (['P2002', 'P2034'].includes(error?.code)) {
+          throw new ConflictException({
+            code: 'DEPARTMENT_ASSIGNMENT_CONFLICT',
+            message:
+              'Department assignments changed concurrently. Reload the assignments before retrying; no partial changes were saved.',
+          });
+        }
+        if (error?.code === 'P2003') {
+          throw new BadRequestException('Invalid user or department');
+        }
+        throw error;
+      },
+    );
+  }
+
+  private async assignDepartmentInTransaction(
     userId: bigint,
     dto: AssignUserDepartmentDto,
   ) {
     await this.findOne(userId);
 
-    const departmentId = BigInt(
-      dto.department_id,
-    );
+    const departmentId = BigInt(dto.department_id);
 
-    const department =
-      await this.prisma.departments.findUnique({
-        where: {
-          id: departmentId,
-        },
-      });
+    const department = await this.prisma.departments.findUnique({
+      where: {
+        id: departmentId,
+      },
+    });
 
     if (!department) {
-      throw new BadRequestException(
-        'Department not found',
-      );
+      throw new BadRequestException('Department not found');
     }
 
     if (department.status !== 'ACTIVE') {
-      throw new BadRequestException(
-        'Cannot assign an inactive department',
-      );
+      throw new BadRequestException('Cannot assign an inactive department');
     }
 
     try {
-      return await this.prisma.$transaction(
-        async (tx) => {
-          if (dto.is_primary === true) {
-            await tx.user_departments
-              .updateMany({
-                where: {
-                  user_id: userId,
-                  is_primary: true,
-                },
+      return await this.prisma.$transaction(async (tx) => {
+        if (dto.is_primary === true) {
+          await tx.user_departments.updateMany({
+            where: {
+              user_id: userId,
+              is_primary: true,
+            },
 
-                data: {
-                  is_primary: false,
-                },
-              });
-          }
+            data: {
+              is_primary: false,
+            },
+          });
+        }
 
-          const assignment =
-            await tx.user_departments.upsert({
-              where: {
-                user_id_department_id: {
-                  user_id: userId,
-                  department_id:
-                    departmentId,
-                },
-              },
+        const assignment = await tx.user_departments.upsert({
+          where: {
+            user_id_department_id: {
+              user_id: userId,
+              department_id: departmentId,
+            },
+          },
 
-              update: {
-                is_primary:
-                  dto.is_primary ?? false,
-              },
+          update: {
+            is_primary: dto.is_primary ?? false,
+          },
 
-              create: {
-                user_id: userId,
-                department_id:
-                  departmentId,
-                is_primary:
-                  dto.is_primary ?? false,
-                created_at: new Date(),
-              },
+          create: {
+            user_id: userId,
+            department_id: departmentId,
+            is_primary: dto.is_primary ?? false,
+            created_at: new Date(),
+          },
 
+          select: {
+            department_id: true,
+            is_primary: true,
+            created_at: true,
+
+            departments: {
               select: {
-                department_id: true,
-                is_primary: true,
-                created_at: true,
-
-                departments: {
-                  select: {
-                    id: true,
-                    code: true,
-                    name: true,
-                    status: true,
-                  },
-                },
+                id: true,
+                code: true,
+                name: true,
+                status: true,
               },
-            });
+            },
+          },
+        });
 
-          return assignment;
-        },
-      );
+        return assignment;
+      });
     } catch (e: any) {
       if (e.code === 'P2003') {
-        throw new BadRequestException(
-          'Invalid user or department',
-        );
+        throw new BadRequestException('Invalid user or department');
       }
 
       throw e;
     }
   }
 
-  async removeDepartment(
-    userId: bigint,
-    departmentId: bigint,
-  ) {
+  async removeDepartment(userId: bigint, departmentId: bigint) {
     await this.findOne(userId);
 
-    const assignment =
-      await this.prisma.user_departments
-        .findUnique({
-          where: {
-            user_id_department_id: {
-              user_id: userId,
-              department_id:
-                departmentId,
-            },
-          },
-        });
+    const assignment = await this.prisma.user_departments.findUnique({
+      where: {
+        user_id_department_id: {
+          user_id: userId,
+          department_id: departmentId,
+        },
+      },
+    });
 
     if (!assignment) {
-      throw new NotFoundException(
-        'Department assignment not found',
-      );
+      throw new NotFoundException('Department assignment not found');
     }
 
     await this.prisma.user_departments.delete({
       where: {
         user_id_department_id: {
           user_id: userId,
-          department_id:
-            departmentId,
+          department_id: departmentId,
         },
       },
     });
 
     return {
-      message:
-        'Department removed from user',
+      message: 'Department removed from user',
     };
   }
 }

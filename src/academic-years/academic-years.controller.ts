@@ -40,9 +40,7 @@ const academicYearExample = {
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('academic-years')
 export class AcademicYearsController {
-  constructor(
-    private readonly academicYearsService: AcademicYearsService,
-  ) {}
+  constructor(private readonly academicYearsService: AcademicYearsService) {}
 
   @Get()
   @ApiOperation({ summary: 'List all academic years' })
@@ -85,7 +83,8 @@ export class AcademicYearsController {
   })
   @ApiResponse({
     status: 409,
-    description: 'Academic year already exists',
+    description:
+      'Academic year already exists or activation conflicts with another change',
   })
   create(@Body() dto: CreateAcademicYearDto) {
     return this.academicYearsService.create(dto);
@@ -110,7 +109,8 @@ export class AcademicYearsController {
   })
   @ApiResponse({
     status: 409,
-    description: 'Academic year already exists',
+    description:
+      'Academic year already exists, activation conflicts, or curriculum protects start_year',
   })
   update(
     @Param('id', ParseBigIntPipe) id: bigint,

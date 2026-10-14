@@ -117,6 +117,8 @@ export class SemestersController {
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'Update a semester',
+    description:
+      'A semester referenced by an offering with any evaluation keeps its academic_year_id. Create a new semester and offering for a changed year; identical year IDs and display/date metadata remain editable.',
   })
   @ApiParam({
     name: 'id',
@@ -141,7 +143,8 @@ export class SemestersController {
   })
   @ApiResponse({
     status: 409,
-    description: 'Semester already exists for that academic year',
+    description:
+      'Duplicate semester or SEMESTER_HISTORY_PROTECTED when moving an evaluated semester to another academic year',
   })
   update(
     @Param('id', ParseBigIntPipe) id: bigint,

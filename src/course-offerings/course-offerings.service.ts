@@ -383,6 +383,22 @@ export class CourseOfferingsService {
     const classType =
       dto.class_type !== undefined ? dto.class_type : existing.class_type;
 
+    if (
+      courseId !== existing.course_id ||
+      lecturerId !== existing.lecturer_id ||
+      semesterId !== existing.semester_id
+    ) {
+      const evaluationCount = await this.prisma.evaluations.count({
+        where: { course_offering_id: id },
+      });
+      if (evaluationCount > 0)
+        throw new ConflictException({
+          code: 'OFFERING_HISTORY_PROTECTED',
+          message:
+            'An offering with evaluations keeps its original course, lecturer and semester. Create a new offering for a changed teaching assignment.',
+        });
+    }
+
     await this.checkReferences(courseId, lecturerId, semesterId);
 
     await this.checkNotDuplicate(

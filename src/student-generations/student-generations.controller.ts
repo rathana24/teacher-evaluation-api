@@ -109,6 +109,7 @@ export class StudentGenerationsController {
       example: studentGenerationExample,
     },
   })
+  @ApiResponse({ status: 400, description: 'Invalid input; starting_year_level must be between 1 and 5' })
   @ApiResponse({
     status: 404,
     description: 'Academic year not found',
@@ -146,6 +147,7 @@ export class StudentGenerationsController {
       example: studentGenerationExample,
     },
   })
+  @ApiResponse({ status: 400, description: 'Invalid input; starting_year_level must be between 1 and 5' })
   @ApiResponse({
     status: 404,
     description:

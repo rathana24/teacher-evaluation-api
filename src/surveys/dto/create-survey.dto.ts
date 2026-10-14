@@ -16,7 +16,7 @@ export class CreateSurveyDto {
     example:
       'Teaching Quality Evaluation 2026-2027',
     description:
-      'Unique name of the question set. Leading and trailing whitespace is removed.',
+      'Globally unique case-insensitive question-set name, including archived sets. Leading/trailing whitespace is removed; %, _ and backslashes are literal characters.',
   })
   @Transform(({ value }) =>
     typeof value === 'string'

@@ -115,7 +115,7 @@ export class LecturerResultsController {
   @ApiOperation({
     summary: 'Get my anonymous evaluation results',
     description:
-      'Returns aggregated evaluation results for the authenticated lecturer without exposing student identities. ' +
+      'Returns only CLOSED evaluation results owned by the authenticated lecturer. OPEN/DRAFT evaluations have no released answers or comments here; an empty evaluations array is valid when none are closed. ' +
       targetLabelDescription,
   })
   @ApiResponse({

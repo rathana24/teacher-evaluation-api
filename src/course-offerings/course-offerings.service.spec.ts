@@ -29,6 +29,7 @@ describe('CourseOfferingsService', () => {
   let offeringDelete: AsyncMock;
   let groupScopeCreateMany: AsyncMock;
   let groupScopeDeleteMany: AsyncMock;
+  let evaluationCount: AsyncMock;
   let transactionResult: unknown;
 
   beforeEach(() => {
@@ -59,10 +60,14 @@ describe('CourseOfferingsService', () => {
     groupScopeCreateMany = jest.fn<(...args: any[]) => Promise<any>>();
 
     groupScopeDeleteMany = jest.fn<(...args: any[]) => Promise<any>>();
+    evaluationCount = jest
+      .fn<(...args: any[]) => Promise<any>>()
+      .mockResolvedValue(0);
 
     transactionResult = undefined;
 
     const prismaMock = {
+      evaluations: { count: evaluationCount },
       course_year_rules: { findMany: jest.fn<any>().mockResolvedValue([]) },
       courses: {
         findUnique: courseFindUnique,

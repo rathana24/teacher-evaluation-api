@@ -10,6 +10,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSurveyDto } from './dto/create-survey.dto';
 import { UpdateSurveyDto } from './dto/update-survey.dto';
+import { SURVEY_TITLE_TRIM_CHARACTERS } from '../common/utils/survey-title.util';
 
 /**
  * A survey represents a named question set.
@@ -172,20 +173,7 @@ export class SurveysService {
            * to be silently reused because that would make
            * historical result/report identification ambiguous.
            */
-          const duplicate =
-            await tx.surveys.findFirst({
-              where: {
-                title: {
-                  equals: title,
-                  mode: 'insensitive',
-                },
-              },
-
-              select: {
-                id: true,
-                archived_at: true,
-              },
-            });
+          const duplicate = await this.findDuplicateTitle(tx, title);
 
           if (duplicate) {
             throw new ConflictException(
@@ -366,23 +354,7 @@ export class SurveysService {
             );
           }
 
-          const duplicate =
-            await tx.surveys.findFirst({
-              where: {
-                id: {
-                  not: id,
-                },
-
-                title: {
-                  equals: title,
-                  mode: 'insensitive',
-                },
-              },
-
-              select: {
-                id: true,
-              },
-            });
+          const duplicate = await this.findDuplicateTitle(tx, title, id);
 
           if (duplicate) {
             throw new ConflictException(
@@ -862,13 +834,23 @@ export class SurveysService {
   // INTERNAL HELPERS
   // =========================================================
 
-  /**
-   * Titles:
-   *
-   * - trim surrounding whitespace
-   * - cannot be blank
-   * - maximum 200 characters
-   */
+  private async findDuplicateTitle(
+    db: Pick<Prisma.TransactionClient, '$queryRaw'>,
+    title: string,
+    excludeId?: bigint,
+  ) {
+    // Literal, parameterized identity; %, _ and backslashes have no pattern meaning.
+    // Equivalent to the SQL-owned key, and usable before its normal deployment.
+    const rows = await db.$queryRaw<{ id: bigint }[]>(Prisma.sql`
+      SELECT id FROM surveys
+      WHERE lower(btrim(title, ${SURVEY_TITLE_TRIM_CHARACTERS})) =
+        lower(btrim(${title}::text, ${SURVEY_TITLE_TRIM_CHARACTERS}))
+      ${excludeId === undefined ? Prisma.empty : Prisma.sql`AND id <> ${excludeId}`}
+      LIMIT 1`);
+    return rows[0];
+  }
+
+  /** Titles retain display case, trim surrounding whitespace and fit 200 UTF-16 units. */
   private normalizeTitle(
     value: string,
   ) {

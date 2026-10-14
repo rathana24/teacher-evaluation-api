@@ -8,9 +8,9 @@ Use this guide to evaluate every backend feature with repeatable steps and recor
 
 The project owner has no frontend UI or frontend project available. This delivery is a backend repository handoff. The frontend team can clone the delivered branch/commit, run the API locally, inspect Swagger and execute the included API/database tests before connecting their own UI. Actual browser integration remains NOT TESTED until that team runs it.
 
-Start with the [frontend handoff and acceptance checklist](docs/BACKEND_PROJECT_REPORT.md#88-frontend-team-handoff-and-acceptance-checklist): it provides all six reviewed request sequences, account/profile ID rules, error/retry handling and FE-01-FE-09 acceptance records. These changes are currently local and uncommitted; the team needs the published delivery commit after publication is authorized.
+Start with the [frontend handoff and acceptance checklist](docs/BACKEND_PROJECT_REPORT.md#88-frontend-team-handoff-and-acceptance-checklist): it provides all six reviewed request sequences, account/profile ID rules, error/retry handling and FE-01-FE-09 acceptance records. The owner authorized this delivery to master. Clone the commit containing this report and record its SHA; older commits may lack these safeguards.
 
-Install PostgreSQL, create a separate local database named teacher_evaluation_test, then run these commands from the cloned repository:
+Use a compatible Node.js runtime and PostgreSQL 15 or newer: the supplied offering index uses NULLS NOT DISTINCT. The recorded evaluation used Node.js 24.16.0 and PostgreSQL 18.4; older supported versions have not been evaluated here. Create a separate local database named teacher_evaluation_test, then run these commands from the cloned repository:
 
 ```powershell
 npm.cmd ci
@@ -36,7 +36,7 @@ Open http://localhost:3000/api/docs and http://localhost:3000/api/health. For a 
 
 Synthetic test logins use Password123: ADMIN admin@itc.edu.kh; LECTURER sokdara@itc.edu.kh; STUDENT student1@itc.edu.kh. Use POST /api/auth/login, copy the access_token into Swagger Authorize and follow the reviewed requests in the consolidated report. These accounts belong to the isolated seeded test database. The seed restores test passwords; run it only when other testers are not using the same database.
 
-Record the Git commit/branch, local test results and API acceptance cases. This procedure runs the backend; it does not supply a frontend UI. Publishing the current changes to GitHub remains a separate commit/push step.
+Record the Git commit/branch, local test results and API acceptance cases. This procedure runs the backend; it does not supply a frontend UI. Repository publication is owner-authorized; database deployment and actual frontend acceptance remain separate steps.
 
 Run commands from `D:\internship\teacher-evaluation-api` in PowerShell. Dependencies and PostgreSQL must be available. The test runner requires Node.js 20.12 or newer; use the project's installed compatible runtime.
 
@@ -46,6 +46,8 @@ Run commands from `D:\internship\teacher-evaluation-api` in PowerShell. Dependen
 | `teacher_evaluation` | Normal backend database. Do not use it for destructive test cases. |
 
 `.env.test.local` must contain `NODE_ENV=test`, `DB_NAME=teacher_evaluation_test`, and a `DATABASE_URL` pointing to that database on `localhost` or `127.0.0.1`. It also needs the app configuration, including JWT settings. Keep credentials private. `DB_NAME` and `DATABASE_URL` refer to the same database, not two databases.
+
+Initial local alignment brought both databases to 17 migrations after protected backup/restore and a 109-case rehearsal. The academic-integrity follow-up then passed full 514 unit/471 API tests, a fresh backup/restore, 160-case restored-copy rehearsal and 16 copied-data GET checks. Current state: normal teacher_evaluation and teacher_evaluation_test both have 28 application tables/199 columns/all 18 migrations. The owner-approved normal 17 -> 18 deployment used another fresh cutover backup/restore, preserved all original values/sequences/old migration records and passed 16 read-only normal checks. Four temporary validation copies remain; application/test configurations select none. Regular synthetic tests still use teacher_evaluation_test only. Report Section 11.12 records current alignment; frontend/production acceptance remains pending.
 
 Check configuration first:
 
@@ -101,7 +103,7 @@ npm run test:cov -- --runInBand
 
 Coverage opens at `coverage/lcov-report/index.html`. Review uncovered decision branches, particularly authorization, eligibility, history and error handling. Coverage percentage alone is not an acceptance result, and the current configuration has no enforced coverage threshold.
 
-Latest recorded follow-up results (8 October 2026): 41 unit suites / 500 tests and 18 API suites / 398 tests passed (23 curriculum/title and 10 historical-label cases included). The API total includes 64 consistency/recovery/progression/label tests (23 existing, 19 reviewed-workflow, 12 progression and 10 label cases); do not add those again. Build and schema validation passed; lint has five existing warnings and no errors. Six fresh built-server progression/OpenAPI checks passed; the twelve earlier reviewed-workflow startup/Swagger/authentication/CORS checks remain separate evidence. Record your own run and changed totals; backend checks are not actual frontend acceptance.
+Latest recorded follow-up results (14 October 2026, 18:34:24 Asia/Phnom_Penh): 43 unit suites / 514 tests and 19 API suites / 471 tests passed, with zero failed/pending cases. The API total includes 86 consistency, 23 curriculum, 16 integration and 51 new academic-integrity cases; do not add subsets again. Build and migration/catalog verification passed; lint has the same five existing warnings and no errors. Earlier six progression/OpenAPI and twelve reviewed-workflow startup/Swagger/authentication/CORS checks remain separate evidence. Record your actual run and changed totals; backend checks are not frontend UI acceptance.
 
 On this Windows environment, PowerShell's execution policy blocks `npm.ps1`. Use `npm.cmd` in place of `npm` in the commands below when that occurs; no system execution-policy change is needed.
 
@@ -132,7 +134,7 @@ Run the focused real PostgreSQL reviewed cases:
 node test/run-e2e.cjs test --runTestsByPath test/consistency.e2e-spec.ts -t "Reviewed frontend operations"
 ```
 
-The focused run has 19 cases; the other 45 consistency cases are skipped by this filter. Use the full API run to cover all 64. Full contract/examples and RV-01-RV-19 acceptance results are in the [consolidated report](docs/BACKEND_PROJECT_REPORT.md#95-reviewed-workflow-acceptance-results).
+The focused run has 19 cases; the other 67 consistency cases are skipped by this filter. Use the full API run to cover all 86. Full contract/examples and RV-01-RV-19 acceptance results are in the [consolidated report](docs/BACKEND_PROJECT_REPORT.md#95-reviewed-workflow-acceptance-results).
 
 ### Case record
 
@@ -246,7 +248,7 @@ Run the full suites and then review these demonstrations against [the implementa
 | 4. Progression exceptions | Approved and implemented: test repeat/transfer from last approved placement, persistent pause and explicit resume, missing/null/blank annual group, cross-API agreement, stale reviewed confirmation and preservation. Twelve PostgreSQL cases and sixteen resolver cases pass; actual frontend acceptance remains pending. |
 | 5. Apply to unfinished | ADMIN preview/confirm, exact proposed/committed counts and skipped reasons, protected drafts/completions/base versions, same-set latest, safe NULL movement, race rollback and original receipt replay without additional movement. |
 | 6. Historical metadata | Synthetic recovery scenarios and truthful unversioned counts. Passing them does not authorize school data recovery or prove official provenance/backup recovery. |
-| 7. Curriculum/title policy | Approved academic-year revisions and global titles are implemented; 23 PostgreSQL cases pass. Test saved bindings, withdrawals/reapproval, stale selections, chronology, concurrent approvals and global/archived title collisions. Frontend adoption and intended-database migration remain pending. |
+| 7. Curriculum/title policy | Approved academic-year revisions and global titles are implemented; 23 PostgreSQL cases pass. Test saved bindings, withdrawals/reapproval, stale selections, chronology, concurrent approvals and global/archived title collisions. Local normal migration is complete through 18 migrations; frontend adoption and another school target deployment remain pending. |
 | 8. Historical labels | Approved snapshots are implemented. Verify historical_labels/current_labels separation, UNKNOWN legacy names, rename-stale reviews, stable retry, unchanged drafts/answers and explicit rejection of anonymous query slicing. Ten PostgreSQL and eight unit cases pass. |
 
 A concurrent confirmation may serialize before a later placement/status change. A complete reviewed snapshot followed by that later change can be valid. Require consistent atomic history or a conflict; do not demand 409 for every overlap. Deterministic overlap tests in the consistency suite are stronger evidence than manually clicking Submit twice.
@@ -255,13 +257,13 @@ A concurrent confirmation may serialize before a later placement/status change. 
 
 Copy [the evaluation template in Appendix C](docs/BACKEND_PROJECT_REPORT.md#appendix-c-reusable-evaluation-record) for each test round. Capture timestamp, workspace revision/change summary, environment, commands, counts, case evidence and defects. Use synthetic evidence and omit passwords/tokens from screenshots and reports.
 
-Prioritize missing dedicated API coverage for students, academic structure, curriculum, import/export, lecturer offerings and full results/password authorization. Setup calls and mocked service tests do not replace those checks. Browser CORS, bootstrap wiring, load behavior and a backup/restore drill also need separate evaluation; the functional suite does not establish them. Agree school load targets before performance testing; record concurrent users, data volume, latency, errors and PostgreSQL behavior on a suitable test environment.
+Review the feature coverage matrix for gaps in dedicated HTTP authorization and edge cases, particularly students, import/export, lecturer offerings and results/password workflows. Existing curriculum and academic-integrity suites provide dedicated coverage; setup calls and mocked service tests do not replace missing endpoint checks. Backup/restore and isolated bootstrap/CORS checks have separate recorded evidence, while actual frontend browser acceptance and school-sized load evaluation remain pending; the functional suite alone does not establish them. Agree school load targets before performance testing; record concurrent users, data volume, latency, errors and PostgreSQL behavior on a suitable test environment.
 
 Accept a feature only when applicable cases pass, expected database effects are verified, and material defects are resolved. Record unresolved policy/contract items as BLOCKED. A passing test count is useful evidence, but does not make all eight frontend requirements complete.
 
 ## Approved progression evaluation
 
-The user approved repeat/transfer progression from the last approved placement, persistent pause until explicit RESUME, and a required yearly group. The progression migration has been applied only to teacher_evaluation_test. The earlier progression delivery passed 40 unit suites / 492 tests and 17 API suites / 365 tests; the later curriculum delivery passed 18 API suites / 388 tests. The API total includes 54 consistency cases, 12 specifically for progression. All passed. Lint has five existing warnings and no errors.
+The user approved repeat/transfer progression from the last approved placement, persistent pause until explicit RESUME, and a required yearly group. Progression and all later migrations are now applied to both configured local application databases (18 total; report Section 11.12). The following counts describe earlier evaluation rounds, rather than the current 514 unit/471 API totals. The earlier progression delivery passed 40 unit suites / 492 tests and 17 API suites / 365 tests; the later curriculum delivery passed 18 API suites / 388 tests. The API total includes 54 consistency cases, 12 specifically for progression. All passed. Lint has five existing warnings and no errors.
 
 Run the policy checks in PowerShell (use npm.cmd if execution policy blocks npm.ps1):
 
@@ -274,13 +276,13 @@ For manual testing, authenticate as ADMIN and use POST/PUT /api/student-academic
 
 Pause an assigned student and confirm questionnaire access, available evaluations, draft saving, submission, new enrollment and reassignment reject eligibility. A later NORMAL record or group edit must not resume the student. Explicitly RESUME and verify that a missing yearly group still blocks eligibility; assign a group and check access again. Compare exact frozen participant, original enrollment, saved draft/version and response rows before/after. Test invalid/null action, missing/conflicting chronology and resume without pause. Change progression after a reviewed preview and require 409 with no enrollment or completed receipt; completed retries must keep the original result.
 
-The 12 SP acceptance scenarios and requests/errors are recorded in Sections 8.5 and 9.6 of the consolidated report. Raw progression evidence is ignored under .tmp/progression-unit-final.json and .tmp/progression-api-final.json; the newer historical-label full runs include these regressions. Historical-label and curriculum policies are approved and implemented. Actual frontend integration and intended-database deployment remain separate acceptance work.
+The 12 SP acceptance scenarios and requests/errors are recorded in Sections 8.5 and 9.6 of the consolidated report. Raw progression evidence is ignored under .tmp/progression-unit-final.json and .tmp/progression-api-final.json; the newer historical-label full runs include these regressions. Historical-label and curriculum policies are approved and implemented. Local normal deployment is complete through 18 migrations. Actual frontend integration and deployment to any other school target remain separate acceptance work.
 
 The requested guided four-step walkthrough was executed against the built test API on 08 October 2026 at 01:13:16, Asia/Phnom_Penh. All four scenarios passed: repeat/transfer, pause/resume, missing yearly group and preservation of drafts/completed history. There were 87 HTTP assertions and 42 database assertions; these are separate from the Jest totals. The 16 resolver cases and 12 PostgreSQL progression cases also passed a focused rerun. Temporary fixtures were removed, the owned server was stopped and the normal database was unchanged. Section 9.7 of the consolidated report records the exact outcomes. Raw sanitized evidence is .tmp/four-progression-scenarios-result.json. The configured frontend at http://localhost:5173 was unavailable, so actual browser integration remains NOT TESTED.
 
 ## Approved curriculum revisions and retained global titles
 
-Requirement 7 is approved and implemented. Fresh full regression: 40 unit suites/492 tests and 18 API suites/388 tests passed. The new test/curriculum-revisions.e2e-spec.ts contributes 23 PostgreSQL cases, already included in 388. Nine built-server Swagger/JWT/cleanup checks also passed. The additive 20261008020000_add_curriculum_revisions migration was applied only to teacher_evaluation_test.
+Requirement 7 is approved and implemented. Fresh full regression: 40 unit suites/492 tests and 18 API suites/388 tests passed. The new test/curriculum-revisions.e2e-spec.ts contributes 23 PostgreSQL cases, already included in 388. Nine built-server Swagger/JWT/cleanup checks also passed. The additive 20261008020000_add_curriculum_revisions migration was initially test-only and is now included in the completed local normal alignment (18 total; report Section 11.12). These counts record the earlier feature evaluation; current full results are 514 unit/471 API tests.
 
 ```powershell
 npm.cmd run test:e2e:check
@@ -294,7 +296,7 @@ Create and rename titles under different ADMIN accounts/departments; case change
 
 ## Approved immutable historical target labels
 
-Requirement 8 is approved and implemented. Latest full results: 41 unit suites/500 tests and 18 API suites/398 tests. Ten new PostgreSQL cases are included in the 64 consistency cases; eight new helper cases are included in the unit total. The additive 20261008030000_add_historical_target_labels migration was applied only to teacher_evaluation_test. Older target names remain null and UNKNOWN; no current names were backfilled.
+Requirement 8 is approved and implemented. Latest full results: 41 unit suites/500 tests and 18 API suites/398 tests. Ten new PostgreSQL cases are included in the 64 consistency cases; eight new helper cases are included in the unit total. The additive 20261008030000_add_historical_target_labels migration was initially test-only and is now included in the completed local normal alignment (18 total; report Section 11.12). These counts record the earlier feature evaluation; current full results are 514 unit/471 API tests. Older target names remain null and UNKNOWN; no current names were backfilled.
 
 ```powershell
 npm.cmd run test:e2e -- --testPathPatterns consistency -t "Immutable historical target labels"
@@ -303,4 +305,58 @@ npm.cmd test -- --runInBand --testPathPatterns target-labels
 
 Preview/confirm a scoped evaluation and inspect target_labels, then saved historical_labels/capture time. Rename generation, major and year before first confirmation: expect 409/REVIEW_STALE and no partial rows; fresh review captures new names. Rename after confirmation: saved labels remain unchanged, current_labels reflect the rename, and drafts/completed answers retain their exact rows. Retry a completed review: its original result remains stable; reload for live current labels. Opening/closing/version application must not recapture names. Older targets show UNKNOWN/LEGACY_LABELS_NOT_CAPTURED and must never substitute today's name as historical proof.
 
-Use historical_labels for historical display. Existing name/relation fields retain current-name compatibility semantics. Inspect all canonical/lecturer/evaluation target readers. Anonymous reports reject query parameters with 400/UNSUPPORTED_ANONYMOUS_SCOPE, including mixed/unknown single-generation/group slices; unfiltered reports retain whole aggregates and expose no student-answer link. Detailed contract/case mapping is in Sections 8.7 and 9.9. Raw evidence is .tmp/labels-*.json. Actual frontend integration remains for the frontend team; commit/push requires the owner's explicit permission.
+Use historical_labels for historical display. Existing name/relation fields retain current-name compatibility semantics. Inspect all canonical/lecturer/evaluation target readers. Anonymous reports reject query parameters with 400/UNSUPPORTED_ANONYMOUS_SCOPE, including mixed/unknown single-generation/group slices; unfiltered reports retain whole aggregates and expose no student-answer link. Detailed contract/case mapping is in Sections 8.7 and 9.9. Raw evidence is .tmp/labels-*.json. Actual frontend integration remains for the frontend team; repository publication has the owner's explicit permission.
+
+
+## Approved lecturer release and teaching-history policies
+
+The two approved rules are included in this owner-authorized master delivery. No schema migration is required. Sections 8.9 and 9.11 of the consolidated report describe the contract and POL-01-POL-12 evidence.
+
+1. Submit synthetic feedback to an OPEN evaluation. As its lecturer, GET /api/lecturer/results must omit that evaluation and its answers/comments. Dashboard/comments return 409 before close. ADMIN monitoring still sees the OPEN evaluation. Close it; all three lecturer result surfaces then release owned results. Another lecturer cannot access it. A lecturer with no closed evaluations receives 200 with an empty evaluations array.
+2. For each DRAFT/OPEN/CLOSED evaluation, try changing its offering's course_id, lecturer_id and semester_id. Expect 409/OFFERING_HISTORY_PROTECTED and unchanged IDs, scopes, enrollments, drafts, participants and answers. Try moving its semester to another academic_year_id; expect 409/SEMESTER_HISTORY_PROTECTED. Unused contexts, identical IDs and permitted display edits still succeed.
+3. Run the real overlap cases proving evaluation creation and context updates serialize atomically. Guards execute in existing protected service transactions; this phase introduces no direct-SQL protection triggers.
+
+```powershell
+npm.cmd run test:e2e -- --runTestsByPath test/consistency.e2e-spec.ts -t "Closed lecturer results and teaching history"
+```
+
+The original policy run recorded 12 passed/64 skipped and full totals of 500 unit/410 API tests. With the subsequent primary-department cases present, this filter runs 12 and skips 74 of the 86 consistency cases; the primary-department-stage full totals were 502 unit/420 API tests; current full totals are 514 unit/471 API tests. Policy fixtures are owned synthetic data. No normal/school database changes, reset or publication occurred; the primary migration was initially test-only and later included in the approved normal alignment (report Section 11.8); academic integrity was first test-only (Section 11.10), then applied to local normal after backup/rehearsal and approval (Section 11.12). Actual frontend UI acceptance remains pending.
+
+
+## One primary department per user
+
+The additive migration 20261014010000_enforce_one_primary_department was initially applied to teacher_evaluation_test, then to local normal during the approved backup/rehearsal/alignment step in report Section 11.8. An audit found no duplicates and the three original membership counts remain. The SQL partial unique index restricts primary rows only; multiple non-primary memberships and zero primary remain valid. It blocks direct SQL duplicates as well as application races. Intended/school database deployment requires its own audit, approved corrections if needed, and restorable backup. The migration refuses duplicates and changes no data automatically.
+
+Use POST /api/users/:id/departments as ADMIN with numeric department_id and is_primary:true. Verify atomic switching, preserved secondary memberships/created_at values, consistent GET department/profile flags and 201. Omitted/false is_primary retains non-primary behavior; deleting a primary does not choose another. Wrong-role/invalid/inactive-reference requests leave existing assignments intact. Concurrent conflicts return 409/DEPARTMENT_ASSIGNMENT_CONFLICT; reload memberships before a deliberate retry.
+
+```powershell
+npm.cmd run test:e2e -- --runTestsByPath test/consistency.e2e-spec.ts -t "One primary department per user"
+```
+
+Focused result: 10 passed, 76 skipped. Primary-stage regression: 502 unit / 420 API tests; current full regression: 514 unit / 471 API tests, including all 86 consistency cases. Verify actual SQL enforcement and the exact migration on clean/duplicate temporary tables; no public index is dropped and no seed records are rewritten. Full contract/preflight SQL and PD-01-PD-10 evidence are in report Sections 8.10/9.12. Raw evidence is .tmp/primary-departments-*.json and .tmp/primary-departments-schema-diff.sql. UI evaluation remains pending; the owner subsequently authorized publication of this tested delivery to master.
+
+
+## Academic-integrity safeguards
+
+The 20261014020000_enforce_academic_integrity migration is applied to both teacher_evaluation_test and local normal after approved backup/restore/rehearsal/deployment. Both now have 18 migrations; synthetic fixture tests continue to target only teacher_evaluation_test. The guarded migrate command validates the test configuration and does not reset/seed data. API discovery is confined to test/**/*.e2e-spec.ts, excluding temporary rehearsal adapters.
+
+```powershell
+npm.cmd run test:e2e:check
+npm.cmd run test:e2e:migrate
+npm.cmd test -- --runInBand --runTestsByPath src/common/utils/calendar-date.util.spec.ts src/common/utils/database-constraint.util.spec.ts
+npm.cmd run test:e2e -- --runTestsByPath test/academic-integrity.e2e-spec.ts
+```
+
+The focused unit result is 12 cases and the focused PostgreSQL result is 51 cases. All are included in the latest 514 unit/471 API totals. Use ADMIN requests with owned fixtures to check these contracts:
+
+| Evaluation area | Expected behavior |
+| --- | --- |
+| Academic years | Zero active and many inactive remain valid. Activating another year demotes the old one atomically. Simultaneous activation preserves at most one active; a conflict returns 409 and can be deliberately retried. |
+| Questionnaire titles | Trimmed case-equivalent titles collide globally, including archived sets. Percent/underscore/backslash are literal. Distinct titles remain usable; a true collision returns 409. Whitespace-only titles return 400. |
+| Offerings | All six assignment-key fields determine identity. A repeated combination returns 409 even with optional NULL fields. Different case-sensitive sections, empty string and NULL remain distinct. |
+| Generation / other levels | Starting and other known year levels must be 1-5. Omitted generation starting level still defaults to 1. Invalid generation create/update returns 400 without changing the row. |
+| Calendar dates | Academic-year/semester ISO input resolves to a UTC calendar day; unqualified datetimes mean UTC. Compare dates after discarding time. Equal/reversed complete dates return 400. Optional null/partial endpoints remain valid. |
+| Evaluation timestamps | start_at/end_at retain time precision; an ordered same-day interval remains valid. Other lifecycle checks still apply. |
+| Direct SQL / migration refusal | Named CHECKs and unique indexes reject bypass attempts. Exact migration tests use temporary dirty tables and verify no winner-selection, row repair or partial index. Do not bypass constraints on school data. |
+
+The suite removes its owned accounts, academic structure, offerings and questionnaire versions. Existing consistency/curriculum/integration tests also pass with the stronger rules. Sections 9.1/11.10 record full regression, Section 11.11 records rehearsal, and Section 11.12 records approved normal alignment and preserved data. Browser UI acceptance and school-sized load remain separate pending steps; publication to master is owner-authorized. The 160 rehearsal cases and both sets of 16 read-only copied/normal GET checks are separate evidence, not extra cases to add to 514/471. Regular synthetic tests still select teacher_evaluation_test only; do not run write-based fixtures against normal.

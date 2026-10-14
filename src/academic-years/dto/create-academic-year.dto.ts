@@ -34,17 +34,25 @@ export class CreateAcademicYearDto {
 
   @ApiPropertyOptional({
     example: '2026-10-01',
+    type: String,
+    nullable: true,
+    description:
+      'Stored as a UTC calendar date. ISO datetimes without an offset also mean UTC; time of day is discarded.',
   })
   @IsOptional()
   @IsDateString()
-  start_date?: string;
+  start_date?: string | null;
 
   @ApiPropertyOptional({
     example: '2027-07-31',
+    type: String,
+    nullable: true,
+    description:
+      'Stored as a UTC calendar date; must follow start_date when both dates are supplied. Null clears this optional date.',
   })
   @IsOptional()
   @IsDateString()
-  end_date?: string;
+  end_date?: string | null;
 
   @ApiPropertyOptional({
     example: false,
