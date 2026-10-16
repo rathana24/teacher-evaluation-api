@@ -60,6 +60,7 @@ model academic_years {
   course_offering_group_scopes course_offering_group_scopes[]
   evaluation_group_targets     evaluation_group_targets[]
   curriculum_revisions         curriculum_revisions[]
+  cohort_assignment_events     student_cohort_assignment_events[]
 }
 
 model departments {
@@ -103,23 +104,39 @@ model majors {
   course_offering_group_scopes course_offering_group_scopes[]
   evaluation_group_targets     evaluation_group_targets[]
 
+  student_generations      student_generations[]
+  cohort_assignment_events student_cohort_assignment_events[]
+
   @@unique([department_id, name], map: "majors_department_id_name_idx")
 }
 
 model student_generations {
   // SQL owns starting_year_level BETWEEN 1 AND 5.
   id                     BigInt   @id @default(autoincrement())
-  name                   String   @unique @db.VarChar(100)
+  name                   String   @db.VarChar(100)
   entry_academic_year_id BigInt
   starting_year_level    Int      @default(1)
   created_at             DateTime @default(now()) @db.Timestamp(6)
   updated_at             DateTime @updatedAt @db.Timestamp(6)
+  ownership_state        String   @default("LEGACY_READ_ONLY") @db.VarChar(32)
+  major_id               BigInt?
+  generation_number      Int?
+  mapping_operation_id   String?  @db.Uuid
 
-  entry_academic_year          academic_years                  @relation(fields: [entry_academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  entry_academic_year          academic_years                     @relation(fields: [entry_academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   students                     students[]
   evaluation_targets           evaluation_generation_targets[]
   course_offering_group_scopes course_offering_group_scopes[]
   evaluation_group_targets     evaluation_group_targets[]
+  majors                       majors?                            @relation(fields: [major_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  mapping_operation            cohort_mapping_operations?         @relation(fields: [mapping_operation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  academic_records             student_academic_records[]
+  assignment_events            student_cohort_assignment_events[] @relation("AssignedCohort")
+  previous_assignment_events   student_cohort_assignment_events[] @relation("PriorCohort")
+
+  @@unique([major_id, generation_number], map: "cohort_major_number_unique")
+  @@unique([id, major_id], map: "cohort_id_major_unique")
+  @@index([name], map: "cohort_legacy_name_idx")
 }
 
 model students {
@@ -131,9 +148,10 @@ model students {
   created_at    DateTime @default(now()) @db.Timestamp(6)
   updated_at    DateTime @updatedAt @db.Timestamp(6)
 
-  users                    users                      @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  student_generations      student_generations        @relation(fields: [generation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                    users                              @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  student_generations      student_generations                @relation(fields: [generation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   student_academic_records student_academic_records[]
+  cohort_assignment_events student_cohort_assignment_events[]
 }
 
 model student_academic_records {
@@ -147,12 +165,16 @@ model student_academic_records {
   progression_action student_progression_action @default(NORMAL)
   created_at         DateTime                   @default(now()) @db.Timestamp(6)
   updated_at         DateTime                   @updatedAt @db.Timestamp(6)
+  generation_id      BigInt?
 
-  students       students       @relation(fields: [student_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  academic_years academic_years @relation(fields: [academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  majors         majors         @relation(fields: [major_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  students                students                          @relation(fields: [student_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  academic_years          academic_years                    @relation(fields: [academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  majors                  majors                            @relation(fields: [major_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  student_generations     student_generations?              @relation(fields: [generation_id, major_id], references: [id, major_id], onDelete: NoAction, onUpdate: NoAction, map: "academic_record_cohort_major_fk")
+  cohort_assignment_event student_cohort_assignment_events?
 
   @@unique([student_id, academic_year_id], map: "student_academic_records_student_id_academic_year_id_idx")
+  @@index([generation_id], map: "academic_record_cohort_idx")
 }
 
 model course_offerings {
@@ -457,6 +479,7 @@ model users {
   user_departments        user_departments[]
   student                 students?
   reviewed_operations     reviewed_operations[]
+  cohort_mapping_receipts cohort_mapping_receipts[]
 }
 
 // Administrative previews/results only; never anonymous response content.
@@ -476,6 +499,51 @@ model reviewed_operations {
   actor users @relation(fields: [actor_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([actor_id, operation_kind, created_at])
+}
+
+model cohort_mapping_operations {
+  id                 String                             @id @db.Uuid
+  manifest_sha256    String                             @db.VarChar(64)
+  source_fingerprint String                             @db.VarChar(64)
+  reviewer_label     String                             @db.VarChar(150)
+  reviewed_at        DateTime                           @db.Timestamp(6)
+  manifest           Json
+  created_at         DateTime                           @default(now()) @db.Timestamp(6)
+  generations        student_generations[]
+  assignment_events  student_cohort_assignment_events[]
+  receipt            cohort_mapping_receipts?
+}
+
+model student_cohort_assignment_events {
+  id                     BigInt                     @id @default(autoincrement())
+  academic_record_id     BigInt                     @unique
+  student_id             BigInt
+  academic_year_id       BigInt
+  major_id               BigInt
+  generation_id          BigInt
+  previous_generation_id BigInt?
+  action                 String                     @db.VarChar(16)
+  mapping_operation_id   String?                    @db.Uuid
+  created_at             DateTime                   @default(now()) @db.Timestamp(6)
+  academic_record        student_academic_records   @relation(fields: [academic_record_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  student                students                   @relation(fields: [student_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  academic_year          academic_years             @relation(fields: [academic_year_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  major                  majors                     @relation(fields: [major_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  generation             student_generations        @relation("AssignedCohort", fields: [generation_id, major_id], references: [id, major_id], onDelete: NoAction, onUpdate: NoAction, map: "assignment_cohort_major_fk")
+  previous_generation    student_generations?       @relation("PriorCohort", fields: [previous_generation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  mapping_operation      cohort_mapping_operations? @relation(fields: [mapping_operation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([student_id, academic_year_id], map: "cohort_assignment_timeline_idx")
+}
+
+model cohort_mapping_receipts {
+  operation_id        String                    @id @db.Uuid
+  actor_id            BigInt
+  request_fingerprint String                    @db.VarChar(64)
+  receipt_json        Json
+  created_at          DateTime                  @default(now()) @db.Timestamp(6)
+  operation           cohort_mapping_operations @relation(fields: [operation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  actor               users                     @relation(fields: [actor_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
 enum student_progression_action {

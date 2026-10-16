@@ -21,13 +21,14 @@ import {
 import { AcademicYearsService } from './academic-years.service';
 import { CreateAcademicYearDto } from './dto/create-academic-year.dto';
 import { UpdateAcademicYearDto } from './dto/update-academic-year.dto';
-import { ParseBigIntPipe } from '../common/pipes/parse-bigint.pipe';
+import { ParseAcademicYearIdPipe } from './pipes/parse-academic-year-id.pipe';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 
 const academicYearExample = {
   id: '1',
   name: '2026-2027',
+  start_year: 2026,
   start_date: '2026-10-01T00:00:00.000Z',
   end_date: '2027-07-31T00:00:00.000Z',
   is_active: true,
@@ -55,7 +56,13 @@ export class AcademicYearsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get an academic year by id' })
-  @ApiParam({ name: 'id', type: String, example: '1' })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    example: '1',
+    description: 'Integer ID from -9223372036854775808 to 9223372036854775807.',
+  })
+  @ApiResponse({ status: 400, description: 'Invalid or out-of-range id' })
   @ApiResponse({
     status: 200,
     description: 'Academic year',
@@ -65,7 +72,7 @@ export class AcademicYearsController {
     status: 404,
     description: 'Academic year not found',
   })
-  findOne(@Param('id', ParseBigIntPipe) id: bigint) {
+  findOne(@Param('id', ParseAcademicYearIdPipe) id: bigint) {
     return this.academicYearsService.findOne(id);
   }
 
@@ -79,7 +86,8 @@ export class AcademicYearsController {
   })
   @ApiResponse({
     status: 400,
-    description: 'Invalid input or end_date is not after start_date',
+    description:
+      'Invalid input, impossible calendar date, or invalid date order',
   })
   @ApiResponse({
     status: 409,
@@ -93,7 +101,12 @@ export class AcademicYearsController {
   @Put(':id')
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Update an academic year' })
-  @ApiParam({ name: 'id', type: String, example: '1' })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    example: '1',
+    description: 'Integer ID from -9223372036854775808 to 9223372036854775807.',
+  })
   @ApiResponse({
     status: 200,
     description: 'Academic year updated',
@@ -101,7 +114,8 @@ export class AcademicYearsController {
   })
   @ApiResponse({
     status: 400,
-    description: 'Invalid input or end_date is not after start_date',
+    description:
+      'Invalid input/id, null required update value, impossible calendar date, or invalid date order',
   })
   @ApiResponse({
     status: 404,
@@ -113,7 +127,7 @@ export class AcademicYearsController {
       'Academic year already exists, activation conflicts, or curriculum protects start_year',
   })
   update(
-    @Param('id', ParseBigIntPipe) id: bigint,
+    @Param('id', ParseAcademicYearIdPipe) id: bigint,
     @Body() dto: UpdateAcademicYearDto,
   ) {
     return this.academicYearsService.update(id, dto);
@@ -123,7 +137,13 @@ export class AcademicYearsController {
   @Roles('ADMIN')
   @HttpCode(204)
   @ApiOperation({ summary: 'Delete an academic year' })
-  @ApiParam({ name: 'id', type: String, example: '1' })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    example: '1',
+    description: 'Integer ID from -9223372036854775808 to 9223372036854775807.',
+  })
+  @ApiResponse({ status: 400, description: 'Invalid or out-of-range id' })
   @ApiResponse({
     status: 204,
     description: 'Academic year deleted',
@@ -136,7 +156,7 @@ export class AcademicYearsController {
     status: 409,
     description: 'Academic year is used by semesters',
   })
-  async remove(@Param('id', ParseBigIntPipe) id: bigint) {
+  async remove(@Param('id', ParseAcademicYearIdPipe) id: bigint) {
     await this.academicYearsService.remove(id);
   }
 }

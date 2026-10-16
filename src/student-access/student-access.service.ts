@@ -11,6 +11,12 @@ import {
 } from '../common/utils/student-placement.util';
 import { PrismaService } from '../prisma/prisma.service';
 
+// Display metadata only: list responses do not expose questionnaire internal IDs.
+const surveyDescriptorSelect = {
+  version_no: true,
+  surveys: { select: { title: true } },
+} satisfies Prisma.survey_versionsSelect;
+
 // Only what a student needs to see about an evaluation
 const contextSelect = {
   id: true,
@@ -23,6 +29,7 @@ const contextSelect = {
   course_offerings: {
     select: {
       section_code: true,
+      class_type: true,
 
       courses: {
         select: {
@@ -34,6 +41,7 @@ const contextSelect = {
       semesters: {
         select: {
           semester_name: true,
+          semester_number: true,
           academic_year_id: true,
 
           academic_years: {
@@ -41,6 +49,7 @@ const contextSelect = {
               id: true,
               name: true,
               start_year: true,
+              is_active: true,
             },
           },
         },
@@ -55,21 +64,36 @@ const contextSelect = {
   },
 
   survey_versions: {
-    select: {
-      version_no: true,
-
-      surveys: {
-        select: {
-          title: true,
-        },
-      },
-    },
+    select: surveyDescriptorSelect,
   },
 } satisfies Prisma.evaluationsSelect;
 
 type EvaluationContext = Prisma.evaluationsGetPayload<{
   select: typeof contextSelect;
 }>;
+
+type PlacementStudent = Prisma.studentsGetPayload<{
+  select: typeof progressionStudentSelect;
+}>;
+
+export const studentAnswerabilityReasons = [
+  'INACTIVE_STUDENT',
+  'PROGRESSION_CHRONOLOGY_UNAVAILABLE',
+  'COHORT_HISTORY_UNAVAILABLE',
+  'PAUSED',
+  'MISSING_YEARLY_GROUP',
+  'YEAR_LEVEL_UNAVAILABLE',
+  'EVALUATION_NOT_OPEN',
+  'EVALUATION_UNSCHEDULED',
+  'EVALUATION_NOT_STARTED',
+  'EVALUATION_ENDED',
+  'ALREADY_SUBMITTED',
+] as const;
+
+type AnswerabilityReason = (typeof studentAnswerabilityReasons)[number];
+type Answerability =
+  | { answerable: true; answerability_reason: null }
+  | { answerable: false; answerability_reason: AnswerabilityReason };
 
 // What the student needs to render each question.
 // question_options are used by MULTIPLE_CHOICE and CHECKBOX.
@@ -98,7 +122,7 @@ const questionSelect = {
 } satisfies Prisma.questionsSelect;
 
 // Build the clean object sent to the student
-function toSummary(e: EvaluationContext) {
+function toSummary(e: EvaluationContext, effectiveSurvey = e.survey_versions) {
   return {
     id: e.id,
     status: e.status,
@@ -111,13 +135,17 @@ function toSummary(e: EvaluationContext) {
     },
 
     section_code: e.course_offerings.section_code,
+    class_type: e.course_offerings.class_type,
 
     semester: {
       name: e.course_offerings.semesters.semester_name,
+      semester_number: e.course_offerings.semesters.semester_number,
 
       academic_year_id: e.course_offerings.semesters.academic_year_id,
 
       academic_year: e.course_offerings.semesters.academic_years.name,
+      start_year: e.course_offerings.semesters.academic_years.start_year,
+      is_active: e.course_offerings.semesters.academic_years.is_active,
     },
 
     lecturer: {
@@ -125,6 +153,11 @@ function toSummary(e: EvaluationContext) {
     },
 
     survey: {
+      title: effectiveSurvey.surveys.title,
+      version_no: effectiveSurvey.version_no,
+    },
+
+    assigned_survey: {
       title: e.survey_versions.surveys.title,
 
       version_no: e.survey_versions.version_no,
@@ -170,6 +203,8 @@ export class StudentAccessService {
       },
 
       select: {
+        has_submitted: true,
+        survey_versions: { select: surveyDescriptorSelect },
         evaluations: {
           select: contextSelect,
         },
@@ -184,16 +219,19 @@ export class StudentAccessService {
 
     const student = await this.findPlacementStudent(studentId, this.prisma);
     return rows
-      .filter(
-        (row) =>
-          student &&
-          resolveStudentPlacement(
-            student.student_generations,
-            student.student_academic_records,
-            row.evaluations.course_offerings.semesters.academic_years,
-          ).placement_eligible,
-      )
-      .map((row) => toSummary(row.evaluations));
+      .map((row) => ({
+        ...toSummary(
+          row.evaluations,
+          row.survey_versions ?? row.evaluations.survey_versions,
+        ),
+        ...this.answerabilityFor(
+          row.evaluations,
+          row.has_submitted,
+          student,
+          now,
+        ),
+      }))
+      .filter((row) => row.answerable);
   }
 
   // =========================================================
@@ -221,6 +259,7 @@ export class StudentAccessService {
       select: {
         has_submitted: true,
         submitted_at: true,
+        survey_versions: { select: surveyDescriptorSelect },
 
         evaluations: {
           select: contextSelect,
@@ -234,6 +273,8 @@ export class StudentAccessService {
       },
     });
 
+    // One placement lookup per request; never one access query per history item.
+    const student = await this.findPlacementStudent(studentId, this.prisma);
     return rows.map((row) => {
       const evaluation = row.evaluations;
 
@@ -267,7 +308,11 @@ export class StudentAccessService {
       }
 
       return {
-        ...toSummary(evaluation),
+        ...toSummary(
+          evaluation,
+          row.survey_versions ?? evaluation.survey_versions,
+        ),
+        ...this.answerabilityFor(evaluation, row.has_submitted, student, now),
 
         has_submitted: row.has_submitted,
 
@@ -299,7 +344,15 @@ export class StudentAccessService {
     });
 
     return {
-      evaluation: toSummary(evaluation),
+      evaluation: {
+        ...toSummary(
+          evaluation,
+          participant.survey_versions ?? evaluation.survey_versions,
+        ),
+        // The shared gate above authorizes this read; later writes recheck it.
+        answerable: true,
+        answerability_reason: null,
+      },
 
       survey_version_id: effectiveSurveyVersionId,
 
@@ -373,6 +426,7 @@ export class StudentAccessService {
           evaluation_id: true,
           student_id: true,
           survey_version_id: true,
+          survey_versions: { select: surveyDescriptorSelect },
           has_submitted: true,
           submitted_at: true,
           created_at: true,
@@ -397,28 +451,42 @@ export class StudentAccessService {
     }
 
     const student = await this.findPlacementStudent(studentId, database);
-    if (!student) throw new ForbiddenException('You are not an active student');
-    const placement = resolveStudentPlacement(
-      student.student_generations,
-      student.student_academic_records,
-      evaluation.course_offerings.semesters.academic_years,
+    const answerability = this.answerabilityFor(
+      evaluation,
+      participant.has_submitted,
+      student,
+      new Date(),
     );
-    if (!placement.placement_eligible) {
-      throw new ForbiddenException(
-        placement.progression_status === 'UNRESOLVED'
-          ? 'Student progression chronology requires administrator review'
-          : placement.progression_status === 'PAUSED'
-            ? 'Student is paused; explicit resumption is required'
-            : 'A class group assignment is required for this academic year',
-      );
-    }
-
-    if (!this.isOpenNow(evaluation)) {
-      throw new ConflictException('This evaluation is not open');
-    }
-
-    if (participant.has_submitted) {
-      throw new ConflictException('You have already submitted this evaluation');
+    if (!answerability.answerable) {
+      // Preserve existing HTTP statuses, messages and gate precedence.
+      switch (answerability.answerability_reason) {
+        case 'INACTIVE_STUDENT':
+          throw new ForbiddenException('You are not an active student');
+        case 'PROGRESSION_CHRONOLOGY_UNAVAILABLE':
+          throw new ForbiddenException(
+            'Student progression chronology requires administrator review',
+          );
+        case 'PAUSED':
+          throw new ForbiddenException(
+            'Student is paused; explicit resumption is required',
+          );
+        case 'COHORT_HISTORY_UNAVAILABLE':
+          throw new ForbiddenException({
+            code: 'COHORT_HISTORY_UNAVAILABLE',
+            message: 'Student yearly cohort history requires administrator review',
+          });
+        case 'MISSING_YEARLY_GROUP':
+        case 'YEAR_LEVEL_UNAVAILABLE':
+          throw new ForbiddenException(
+            'A class group assignment is required for this academic year',
+          );
+        case 'ALREADY_SUBMITTED':
+          throw new ConflictException(
+            'You have already submitted this evaluation',
+          );
+        default:
+          throw new ConflictException('This evaluation is not open');
+      }
     }
 
     // New participants are pinned to their own survey version.
@@ -471,15 +539,41 @@ export class StudentAccessService {
     });
   }
 
-  private isOpenNow(e: EvaluationContext) {
-    const now = new Date();
-
-    return (
-      e.status === 'OPEN' &&
-      e.start_at !== null &&
-      e.end_at !== null &&
-      e.start_at <= now &&
-      now < e.end_at
+  private answerabilityFor(
+    evaluation: EvaluationContext,
+    hasSubmitted: boolean,
+    student: PlacementStudent | null,
+    now: Date,
+  ): Answerability {
+    const blocked = (reason: AnswerabilityReason): Answerability => ({
+      answerable: false,
+      answerability_reason: reason,
+    });
+    if (!student) return blocked('INACTIVE_STUDENT');
+    const placement = resolveStudentPlacement(
+      student.student_generations,
+      student.student_academic_records,
+      evaluation.course_offerings.semesters.academic_years,
+      student.generation_id,
     );
+    if (!placement.placement_eligible) {
+      if (placement.progression_status === 'UNRESOLVED')
+        return blocked('PROGRESSION_CHRONOLOGY_UNAVAILABLE');
+      if (placement.progression_status === 'PAUSED') return blocked('PAUSED');
+      if (placement.cohort_context.availability === 'UNAVAILABLE')
+        return blocked('COHORT_HISTORY_UNAVAILABLE');
+      return blocked(
+        placement.ineligibility_reason === 'YEAR_LEVEL_UNAVAILABLE'
+          ? 'YEAR_LEVEL_UNAVAILABLE'
+          : 'MISSING_YEARLY_GROUP',
+      );
+    }
+    if (evaluation.status !== 'OPEN') return blocked('EVALUATION_NOT_OPEN');
+    if (evaluation.start_at === null || evaluation.end_at === null)
+      return blocked('EVALUATION_UNSCHEDULED');
+    if (now < evaluation.start_at) return blocked('EVALUATION_NOT_STARTED');
+    if (now >= evaluation.end_at) return blocked('EVALUATION_ENDED');
+    if (hasSubmitted) return blocked('ALREADY_SUBMITTED');
+    return { answerable: true, answerability_reason: null };
   }
 }

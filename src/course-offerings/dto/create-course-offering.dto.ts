@@ -1,21 +1,18 @@
-import {
-  ApiProperty,
-  ApiPropertyOptional,
-} from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { class_type } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsEnum,
   IsInt,
   IsNotEmpty,
   IsNumberString,
-  IsOptional,
   IsString,
   Max,
   MaxLength,
   Min,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator';
 import { CourseOfferingGroupScopeDto } from './course-offering-group-scope.dto';
 
@@ -41,25 +38,27 @@ export class CreateCourseOfferingDto {
   @IsNumberString({ no_symbols: true })
   semester_id!: string;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     example: 4,
+    type: 'integer',
+    nullable: false,
     minimum: 1,
     maximum: 5,
     description:
-      'Student year level intended for this course offering',
+      'Required student year 1–5, approved by an enabled applicable curriculum revision in the selected semester academic year, including offerings without group_scopes. Numeric-string compatibility is retained; null/boolean values are invalid.',
   })
-  @IsOptional()
-  @Type(() => Number)
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' && value.trim() !== '' ? Number(value) : value,
+  )
   @IsInt()
   @Min(1)
   @Max(5)
-  year_level?: number;
+  year_level!: number;
 
   @ApiProperty({
     example: class_type.COURSE,
     enum: class_type,
-    description:
-      'Required class type for a new course offering',
+    description: 'Required class type for a new course offering',
   })
   @IsEnum(class_type)
   class_type!: class_type;
@@ -67,9 +66,9 @@ export class CreateCourseOfferingDto {
   @ApiPropertyOptional({
     maxLength: 50,
     example: 'A',
-    description: 'Optional section or class code',
+    description: 'Optional display class label. It is not part of assignment identity and cannot distinguish otherwise duplicate course/lecturer/semester/year/class_type rows or prove student group membership.',
   })
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsNotEmpty()
   @IsString()
   @MaxLength(50)
@@ -77,8 +76,7 @@ export class CreateCourseOfferingDto {
 
   @ApiPropertyOptional({
     type: [CourseOfferingGroupScopeDto],
-    description:
-      'Explicit student group scopes served by this offering',
+    description: 'Explicit student group scopes served by this offering',
     example: [
       {
         academic_year_id: '1',
@@ -89,7 +87,7 @@ export class CreateCourseOfferingDto {
       },
     ],
   })
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CourseOfferingGroupScopeDto)

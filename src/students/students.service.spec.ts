@@ -473,6 +473,9 @@ describe('StudentsService', () => {
         },
         select: {
           id: true,
+          ownership_state: true,
+          major_id: true,
+          entry_academic_year: { select: { start_year: true } },
         },
       });
 
@@ -482,6 +485,7 @@ describe('StudentsService', () => {
         },
         select: {
           id: true,
+          start_year: true,
         },
       });
 
@@ -491,6 +495,7 @@ describe('StudentsService', () => {
         },
         select: {
           id: true,
+          departments: { select: { status: true } },
         },
       });
 
@@ -749,8 +754,6 @@ describe('StudentsService', () => {
       expect(studentsFindManyMock).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
-            generation_id: BigInt(1),
-
             users: {
               is: {
                 role: 'STUDENT',
@@ -807,6 +810,7 @@ describe('StudentsService', () => {
 
       expect(result[0].academic_context.placement).toEqual({
         academic_year_id: BigInt(1),
+        generation_id: BigInt(1),
         source: 'ACADEMIC_RECORD',
         year_level: 2,
         major_id: BigInt(1),
@@ -1110,9 +1114,14 @@ describe('StudentsService', () => {
         academic_year_id: 1n,
         major_id: 2n,
 
-        students: {
-          generation_id: 5n,
-        },
+        OR: [
+          { generation_id: 5n },
+          { generation_id: null, students: {
+            generation_id: 5n,
+            student_generations: { ownership_state: 'LEGACY_READ_ONLY' },
+            student_academic_records: { none: { generation_id: { not: null } } },
+          } },
+        ],
 
         class_group: {
           not: null,

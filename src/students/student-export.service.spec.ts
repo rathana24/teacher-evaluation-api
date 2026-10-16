@@ -409,7 +409,7 @@ describe('StudentExportService', () => {
 
     const studentQuery = prisma.students.findMany.mock.calls[0][0];
 
-    expect(studentQuery.where.generation_id).toBe(1n);
+    expect(studentQuery.where).not.toHaveProperty('generation_id');
 
     expect(studentQuery.where.student_academic_records).toEqual({
       some: {

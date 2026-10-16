@@ -18,7 +18,7 @@ export class CourseOfferingGroupScopeDto {
   @ApiPropertyOptional({
     example: '1',
     description:
-      'Expected applicable curriculum revision. Omit to resolve automatically. An explicit obsolete, disabled, or mismatched revision is rejected; legacy scopes may have no revision.',
+      'Expected latest applicable enabled curriculum revision for this course/major/student year in the selected semester academic year. Omit to resolve automatically on new contexts. Obsolete, disabled, future or wrong-owner IDs are rejected. Historical legacy nulls remain unknown on unchanged-context edits; a new scope always requires an actual enabled revision.',
   })
   @ValidateIf((_object, value) => value !== undefined)
   @Matches(/^[1-9]\d*$/)

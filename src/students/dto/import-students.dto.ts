@@ -1,9 +1,6 @@
-import {
-  ApiProperty,
-  ApiPropertyOptional,
-} from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { gender } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -18,8 +15,10 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import { IsCohortDatabaseId } from '../../student-generations/validation/cohort-fields';
 
 /**
  * One student row parsed by the frontend from CSV/XLSX.
@@ -36,8 +35,7 @@ import {
 export class ImportStudentRowDto {
   @ApiProperty({
     example: 'e20221111',
-    description:
-      'Student ID/code from the imported spreadsheet',
+    description: 'Student ID/code from the imported spreadsheet',
     maxLength: 50,
   })
   @IsString()
@@ -59,8 +57,7 @@ export class ImportStudentRowDto {
   @ApiPropertyOptional({
     enum: gender,
     example: 'MALE',
-    description:
-      'Optional student gender. When omitted, gender remains null.',
+    description: 'Optional student gender. When omitted, gender remains null.',
   })
   @IsOptional()
   @IsEnum(gender)
@@ -68,8 +65,7 @@ export class ImportStudentRowDto {
 
   @ApiProperty({
     example: 'AMS',
-    description:
-      'Existing major code or exact major name',
+    description: 'Existing major code or exact major name',
     maxLength: 150,
   })
   @IsString()
@@ -79,25 +75,65 @@ export class ImportStudentRowDto {
 
   @ApiPropertyOptional({
     example: 'Imported from 2026 student list',
-    description:
-      'Optional value from the spreadsheet Other column',
+    description: 'Optional value from the spreadsheet Other column',
   })
   @IsOptional()
   @IsString()
   notes?: string;
 }
 
+export const IMPORT_GENERATION_NAME_MAX_LENGTH = 100;
+
 export class ImportStudentsDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
+    example: '2',
+    type: String,
+    description:
+      'Explicit cohort owner for major-aware import. Required with generation_number; each spreadsheet major must resolve to this ID.',
+  })
+  @ValidateIf(
+    (row: ImportStudentsDto, value: unknown) =>
+      value !== undefined || row.generation_number !== undefined,
+  )
+  @IsCohortDatabaseId()
+  major_id?: string;
+
+  @ApiPropertyOptional({
+    example: 1,
+    type: Number,
+    minimum: 1,
+    maximum: 2147483647,
+    description:
+      'Cohort number within major_id. Required unless generation supplies a numeric compatibility alias in the same explicit major.',
+  })
+  @ValidateIf(
+    (row: ImportStudentsDto, value: unknown) =>
+      value !== undefined ||
+      (row.major_id !== undefined && row.generation === undefined),
+  )
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  generation_number?: number;
+
+  @ApiPropertyOptional({
     example: 'Gen 43',
     description:
-      'Generation name applied to every student in this import',
-    maxLength: 150,
+      'With major_id, a numeric alias such as 01 or Gen 1; must agree with generation_number. Unscoped legacy label import remains transitional only and cannot select canonical cohorts.',
+    maxLength: IMPORT_GENERATION_NAME_MAX_LENGTH,
   })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : value,
+  )
+  @ValidateIf(
+    (row: ImportStudentsDto, value: unknown) =>
+      value !== undefined ||
+      (row.major_id === undefined && row.generation_number === undefined),
+  )
   @IsString()
   @IsNotEmpty()
-  @MaxLength(150)
-  generation!: string;
+  @MaxLength(IMPORT_GENERATION_NAME_MAX_LENGTH)
+  generation?: string;
 
   @ApiPropertyOptional({
     example: '1',
@@ -108,8 +144,7 @@ export class ImportStudentsDto {
   @IsOptional()
   @IsString()
   @Matches(/^[1-9]\d*$/, {
-    message:
-      'entry_academic_year_id must be a positive integer',
+    message: 'entry_academic_year_id must be a positive integer',
   })
   entry_academic_year_id?: string;
 
@@ -136,8 +171,7 @@ export class ImportStudentsDto {
   @IsString()
   @IsNotEmpty()
   @Matches(/^[1-9]\d*$/, {
-    message:
-      'academic_year_id must be a positive integer',
+    message: 'academic_year_id must be a positive integer',
   })
   academic_year_id!: string;
 
@@ -145,8 +179,7 @@ export class ImportStudentsDto {
     example: 1,
     minimum: 1,
     maximum: 5,
-    description:
-      'Initial year level applied to imported students',
+    description: 'Initial year level applied to imported students',
   })
   @IsInt()
   @Min(1)

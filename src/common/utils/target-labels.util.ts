@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { cohortMetadataSelect } from './student-cohort.util';
 
 export const targetLabelSelect = {
   historical_labels: true,
@@ -18,6 +19,38 @@ type LabelClient = Pick<
   'student_generations' | 'academic_years' | 'majors'
 >;
 
+function generationLabel(generation: {
+  id: bigint;
+  name: string;
+  ownership_state?: string;
+  major_id?: bigint | null;
+  generation_number?: number | null;
+  majors?: {
+    id: bigint;
+    code: string;
+    name: string;
+    department_id: bigint;
+  } | null;
+}) {
+  return {
+    id: String(generation.id),
+    name: generation.name,
+    ...(generation.ownership_state === 'MAJOR_SCOPED' && {
+      ownership_state: generation.ownership_state,
+      major_id: String(generation.major_id),
+      generation_number: generation.generation_number,
+      major: generation.majors
+        ? {
+            id: String(generation.majors.id),
+            code: generation.majors.code,
+            name: generation.majors.name,
+            department_id: String(generation.majors.department_id),
+          }
+        : null,
+    }),
+  };
+}
+
 /** Called on the same serializable snapshot as targeting validation and writes. */
 export async function loadTargetLabels(
   db: LabelClient,
@@ -31,14 +64,7 @@ export async function loadTargetLabels(
     ? await db.student_generations.findMany({
         where: { id: { in: ids } },
         orderBy: { id: 'asc' },
-        select: {
-          id: true,
-          name: true,
-          starting_year_level: true,
-          entry_academic_year: {
-            select: { id: true, name: true, start_year: true },
-          },
-        },
+        select: cohortMetadataSelect,
       })
     : [];
   if (generations.length !== ids.length)
@@ -50,7 +76,7 @@ export async function loadTargetLabels(
       generation_id: String(generation.id),
       historical_labels: {
         schema_version: 1,
-        generation: { id: String(generation.id), name: generation.name },
+        generation: generationLabel(generation),
         entry_academic_year: {
           id: String(generation.entry_academic_year.id),
           name: generation.entry_academic_year.name,
@@ -81,6 +107,13 @@ export async function loadTargetLabels(
       throw new BadRequestException(
         'Target label academic year, major or generation is unavailable',
       );
+    if (
+      generation.ownership_state === 'MAJOR_SCOPED' &&
+      generation.major_id !== scope.major_id
+    )
+      throw new BadRequestException(
+        'Target cohort must belong to the selected major',
+      );
     for (const classGroup of [...scope.class_groups].sort())
       groups.push({
         class_group: classGroup,
@@ -91,7 +124,7 @@ export async function loadTargetLabels(
             name: year.name,
             start_year: year.start_year,
           },
-          generation: { id: String(generation.id), name: generation.name },
+          generation: generationLabel(generation),
           major: { id: String(major.id), code: major.code, name: major.name },
           year_level: scope.year_level,
           class_group: classGroup,

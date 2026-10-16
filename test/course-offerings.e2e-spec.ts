@@ -4,6 +4,7 @@ import { class_type } from '@prisma/client';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { createTestOfferingApproval, removeTestOfferingApproval } from './helpers/offering-approval';
 
 // Same fix as main.ts — BigInt IDs can't be JSON-serialised by default
 (BigInt.prototype as any).toJSON = function () {
@@ -23,11 +24,14 @@ describe('Course Offerings (e2e)', () => {
   let courseId: bigint | undefined;
   let semesterId: bigint | undefined;
   let academicYearId: bigint | undefined;
+  let approvalRuleId: bigint | undefined;
+  let approvalMajorId: bigint | undefined;
 
   const testSection = `E2E-${Date.now()}`;
   const testCourseCode = `E2E-CO-${Date.now()}`;
 
   let validBody: {
+    year_level: number;
     course_id: string;
     lecturer_id: string;
     semester_id: string;
@@ -107,6 +111,9 @@ describe('Course Offerings (e2e)', () => {
         },
       });
 
+      const major = await tx.majors.create({data:{code:`CO-${Date.now()}`,name:`CO approval ${Date.now()}`,department_id:department.id}});
+      approvalMajorId = major.id;
+      approvalRuleId = (await createTestOfferingApproval(tx,course.id,major.id,academicYear.id,1)).id;
       const protectedOffering = await tx.course_offerings.create({
         data: {
           course_id: course.id,
@@ -141,6 +148,7 @@ describe('Course Offerings (e2e)', () => {
     protectedOfferingId = fixtures.protectedOfferingId;
 
     validBody = {
+      year_level: 1,
       course_id: courseId.toString(),
       lecturer_id: lecturer.id.toString(),
       semester_id: semesterId.toString(),
@@ -168,9 +176,11 @@ describe('Course Offerings (e2e)', () => {
           await tx.course_offerings.deleteMany({
             where: { id: { in: offeringIds } },
           });
+          if (approvalRuleId) await removeTestOfferingApproval(tx,approvalRuleId);
           await tx.courses.delete({
             where: { id: courseId! },
           });
+          if (approvalMajorId) await tx.majors.delete({where:{id:approvalMajorId}});
           await tx.semesters.delete({
             where: { id: semesterId! },
           });
@@ -282,10 +292,11 @@ describe('Course Offerings (e2e)', () => {
   describe('Duplicate check when section_code is empty', () => {
     let noSectionId: string;
     const noSectionBody = () => ({
+      year_level: validBody.year_level,
       course_id: validBody.course_id,
       lecturer_id: validBody.lecturer_id,
       semester_id: validBody.semester_id,
-      class_type: class_type.COURSE,
+      class_type: class_type.TD,
     });
 
     it('first offering without a section -> 201', async () => {

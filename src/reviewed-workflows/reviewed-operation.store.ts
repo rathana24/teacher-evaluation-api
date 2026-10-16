@@ -11,6 +11,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 
 export type ReviewedOperationKind =
+  | 'CREATE_ASSIGNMENTS'
+  | 'COHORT_MAPPING'
   | 'ENROLL_GROUP'
   | 'CREATE_EVALUATION'
   | 'REASSIGN_ENROLLMENT'
@@ -58,9 +60,13 @@ export function requireReviewAtCutover(): void {
 
 /** A finite set of reviewed administrative operations, bound to one transaction. */
 export class ReviewedOperationStore {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authenticate?: (db: PrismaService) => Promise<void>,
+  ) {}
 
   private async assertAdmin(db: PrismaService, actorId: bigint) {
+    if (this.authenticate) await this.authenticate(db);
     if (!actorId) throw new UnauthorizedException();
     const actor = await db.users.findUnique({
       where: { id: actorId },

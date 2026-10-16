@@ -79,7 +79,9 @@ describe('AuthService', () => {
     (...args: unknown[]) => Promise<string>
   >();
 
+  const schemaQueryMock = jest.fn<(...args: unknown[]) => Promise<unknown>>();
   const prismaMock = {
+    $queryRaw: schemaQueryMock,
     users: {
       findFirst: usersFindFirstMock,
       findUnique: usersFindUniqueMock,
@@ -159,6 +161,7 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    schemaQueryMock.mockResolvedValue([{ ready: false }]);
 
     jwtSignAsyncMock.mockResolvedValue(
       'test-access-token',
@@ -607,6 +610,12 @@ describe('AuthService', () => {
             name: 'Generation 43',
           },
 
+          academic_context: expect.objectContaining({
+            academic_year: activeAcademicYear,
+            effective_year_level: 3,
+            placement_eligible: null,
+          }),
+
           effective_placement: {
             major: {
               id: BigInt(1),
@@ -955,6 +964,12 @@ describe('AuthService', () => {
             name: 'Generation 43',
           },
 
+          academic_context: expect.objectContaining({
+            academic_year: null,
+            academic_record: null,
+            placement_eligible: null,
+          }),
+
           effective_placement: {
             major: null,
             year_level: null,
@@ -1062,6 +1077,12 @@ describe('AuthService', () => {
             id: BigInt(10),
             name: 'Generation 43',
           },
+
+          academic_context: expect.objectContaining({
+            academic_year: activeAcademicYear,
+            academic_record: null,
+            placement_eligible: null,
+          }),
 
           effective_placement: {
             major: null,

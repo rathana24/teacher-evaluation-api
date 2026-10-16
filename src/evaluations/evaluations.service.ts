@@ -2,6 +2,7 @@ import {
   resolveStudentPlacement,
   progressionRecordSelect,
 } from '../common/utils/student-placement.util';
+import { cohortMetadataSelect } from '../common/utils/student-cohort.util';
 import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import {
   attachTargetLabelViews,
@@ -25,6 +26,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateEvaluationDto } from './dto/create-evaluation.dto';
 import { EvaluationGroupScopeDto } from './dto/evaluation-group-scope.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
+import { activeDeadlineExtension } from './active-deadline.util';
 
 import { ListEvaluationsQueryDto } from './dto/list-evaluations-query.dto';
 
@@ -184,6 +186,7 @@ type EligibleStudent = {
   full_name: string;
   generation_id: bigint;
   generation_name: string;
+  cohort_context: ReturnType<typeof resolveStudentPlacement>['cohort_context'];
   effective_year_level: number | null;
   year_level_source:
     | 'ACADEMIC_RECORD'
@@ -224,6 +227,7 @@ type EligibilityResult = {
     paused_student: number;
     missing_yearly_group: number;
     progression_unresolved: number;
+    cohort_unavailable: number;
   };
 };
 
@@ -345,6 +349,7 @@ export class EvaluationsService {
         missing_yearly_group: result.ineligible_reasons.missing_yearly_group,
         progression_unresolved:
           result.ineligible_reasons.progression_unresolved,
+        cohort_unavailable: result.ineligible_reasons.cohort_unavailable,
       },
 
       eligible_students: result.eligible_students.map((student) => ({
@@ -359,6 +364,7 @@ export class EvaluationsService {
         generation_id: student.generation_id.toString(),
 
         generation_name: student.generation_name,
+        cohort_context: student.cohort_context,
 
         effective_year_level: student.effective_year_level,
 
@@ -682,9 +688,13 @@ export class EvaluationsService {
     const evaluation = await this.findOne(id);
 
     if (evaluation.status !== 'DRAFT') {
-      throw new ConflictException(
-        'The schedule can only be changed while the evaluation is a DRAFT',
-      );
+      const now = new Date();
+      const endAt = activeDeadlineExtension(evaluation, dto, now);
+      return this.prisma.evaluations.update({
+        where: { id },
+        data: { end_at: endAt, updated_at: now },
+        include: evaluationInclude,
+      });
     }
 
     const startAt =
@@ -1183,21 +1193,7 @@ export class EvaluationsService {
                 generation_id: true,
 
                 student_generations: {
-                  select: {
-                    id: true,
-
-                    name: true,
-
-                    starting_year_level: true,
-
-                    entry_academic_year: {
-                      select: {
-                        id: true,
-
-                        start_year: true,
-                      },
-                    },
-                  },
+                  select: cohortMetadataSelect,
                 },
 
                 student_academic_records: { select: progressionRecordSelect },
@@ -1239,6 +1235,7 @@ export class EvaluationsService {
       paused_student: 0,
       missing_yearly_group: 0,
       progression_unresolved: 0,
+      cohort_unavailable: 0,
     };
 
     const eligibleStudents: EligibleStudent[] = [];
@@ -1260,20 +1257,24 @@ export class EvaluationsService {
         continue;
       }
 
-      if (
-        scope === evaluation_participant_scope.SELECTED_GENERATIONS &&
-        !selectedGenerationSet.has(student.generation_id.toString())
-      ) {
-        reasons.generation_not_selected += 1;
-
-        continue;
-      }
-
       const placement = resolveStudentPlacement(
         student.student_generations,
         student.student_academic_records,
         offering.semesters.academic_years,
+        student.generation_id,
       );
+      const cohort = placement.cohort_context;
+      if (cohort.availability === 'UNAVAILABLE' || cohort.generation_id === null) {
+        reasons.cohort_unavailable += 1;
+        continue;
+      }
+      if (
+        scope === evaluation_participant_scope.SELECTED_GENERATIONS &&
+        !selectedGenerationSet.has(cohort.generation_id.toString())
+      ) {
+        reasons.generation_not_selected += 1;
+        continue;
+      }
       const academicRecord = placement.academic_record;
       if (placement.progression_status === 'UNRESOLVED') {
         reasons.progression_unresolved += 1;
@@ -1290,7 +1291,7 @@ export class EvaluationsService {
       }
 
       if (groupScope !== null) {
-        if (student.generation_id !== groupScope.generation_id) {
+        if (cohort.generation_id !== groupScope.generation_id) {
           reasons.group_generation_mismatch += 1;
           continue;
         }
@@ -1360,9 +1361,10 @@ export class EvaluationsService {
 
         full_name: user.full_name,
 
-        generation_id: student.generation_id,
+        generation_id: cohort.generation_id,
 
-        generation_name: student.student_generations.name,
+        generation_name: cohort.generation!.name ?? '',
+        cohort_context: cohort,
 
         effective_year_level: effectiveYearLevel,
 

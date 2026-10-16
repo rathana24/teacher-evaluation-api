@@ -594,12 +594,13 @@ describe('Evaluations (e2e)', () => {
       expect(res.status).toBe(409);
     });
 
-    it('schedule can no longer change -> 409', async () => {
+    it('equal active deadline is rejected -> 400', async () => {
       const res = await request(app.getHttpServer())
         .put(`/api/evaluations/${evalId}/schedule`)
         .set(auth())
         .send({ end_at: nextWeek });
-      expect(res.status).toBe(409);
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('ACTIVE_DEADLINE_MUST_INCREASE');
     });
 
     it('cannot be deleted -> 409', async () => {

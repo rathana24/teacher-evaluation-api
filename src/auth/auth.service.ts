@@ -12,33 +12,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StudentsService } from '../students/students.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
-
-/*
- * This describes only the part of StudentsService.findOne()
- * that AuthService needs after requesting an academic-year
- * context.
- *
- * It avoids duplicating the placement calculation itself.
- */
-type StudentAcademicContext = {
-  academic_year: {
-    id: bigint;
-    name: string;
-    start_year: number | null;
-    is_active: boolean;
-  };
-
-  effective_year_level: number | null;
-
-  academic_record: {
-    majors: {
-      id: bigint;
-      code: string;
-      name: string;
-      department_id: bigint;
-    };
-  } | null;
-};
+import { cohortWriteCapabilities } from '../common/utils/cohort-write-policy';
+import { courseCreationSchemaReady } from '../courses/course-code.util';
+import { assignmentCreationSchemaReady } from '../course-offerings/assignment-creation.util';
+import {
+  studentSelfContext,
+  type ResolvedStudentAcademicContext,
+} from './student-self-context';
 
 @Injectable()
 export class AuthService {
@@ -150,6 +130,9 @@ export class AuthService {
 
     const capabilities = {
       change_password: true,
+      ...((await assignmentCreationSchemaReady(this.prisma)) ? { reviewed_assignment_enrollment_v1: true } : {}),
+      ...(await cohortWriteCapabilities(this.prisma)),
+      ...((await courseCreationSchemaReady(this.prisma)) ? { automatic_course_codes_v1: true } : {}),
     };
 
     /*
@@ -320,6 +303,8 @@ export class AuthService {
                 .student_generations.name,
           },
 
+          academic_context: studentSelfContext(null, null),
+
           effective_placement: {
             major: null,
             year_level: null,
@@ -353,7 +338,7 @@ export class AuthService {
      * Keep a defensive fallback rather than inventing
      * placement information.
      */
-    if (!('academic_context' in studentProfile)) {
+    if (!('academic_context' in studentProfile) || !studentProfile.academic_context) {
       return {
         id: user.id,
         full_name: user.full_name,
@@ -375,6 +360,8 @@ export class AuthService {
               studentProfile
                 .student_generations.name,
           },
+
+          academic_context: studentSelfContext(null, profileAcademicYear),
 
           effective_placement: {
             major: null,
@@ -402,13 +389,13 @@ export class AuthService {
      * inferred return shapes, the property is otherwise
      * narrowed to unknown.
      *
-     * This assertion describes the already-existing
-     * StudentsService response. It does NOT change runtime
-     * behavior or placement calculation.
+     * Project only safe self-profile fields from the existing
+     * resolver response; do not repeat its placement calculation.
      */
-    const academicContext =
-      studentProfile.academic_context as
-        StudentAcademicContext;
+    const academicContext = studentSelfContext(
+      studentProfile.academic_context as ResolvedStudentAcademicContext,
+      profileAcademicYear,
+    );
 
     /*
      * Major comes only from the explicit academic placement
@@ -433,15 +420,19 @@ export class AuthService {
         student_code:
           studentProfile.student_code,
 
-        generation: {
-          id:
-            studentProfile
-              .student_generations.id,
+        generation: academicContext.cohort_context
+          ? academicContext.cohort_context.generation
+            ? {
+                id: academicContext.cohort_context.generation.id,
+                name: academicContext.cohort_context.generation.name,
+              }
+            : null
+          : {
+              id: studentProfile.student_generations.id,
+              name: studentProfile.student_generations.name,
+            },
 
-          name:
-            studentProfile
-              .student_generations.name,
-        },
+        academic_context: academicContext,
 
         effective_placement: {
           major:
@@ -459,12 +450,10 @@ export class AuthService {
 
           academic_year: {
             id:
-              academicContext
-                .academic_year.id,
+              profileAcademicYear.id,
 
             name:
-              academicContext
-                .academic_year.name,
+              profileAcademicYear.name,
           },
         },
       },

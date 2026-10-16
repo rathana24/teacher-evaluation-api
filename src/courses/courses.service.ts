@@ -7,6 +7,10 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
+import {
+  CourseCreationService,
+  lockCourseCodes,
+} from './course-creation.service';
 
 @Injectable()
 export class CoursesService {
@@ -38,64 +42,44 @@ export class CoursesService {
     return course;
   }
 
-  async create(dto: CreateCourseDto) {
-    await this.checkDepartment(BigInt(dto.department_id));
+  async create(dto: CreateCourseDto, actorId: bigint, key?: string) {
+    return new CourseCreationService(this.prisma).create(dto, actorId, key);
+  }
 
-    const now = new Date();
-
-    try {
-      return await this.prisma.courses.create({
-        data: {
-          course_code: dto.course_code,
-          course_name: dto.course_name,
-          description: dto.description,
-          department_id: BigInt(dto.department_id),
-          created_at: now,
-          updated_at: now,
-        },
-        include: {
-          departments: true,
-        },
-      });
-    } catch (e: any) {
-      if (e.code === 'P2002') {
-        throw new ConflictException('course_code already exists');
-      }
-
-      if (e.code === 'P2003') {
-        throw new BadRequestException('Invalid department_id');
-      }
-
-      throw e;
-    }
+  async creationReceipt(actorId: bigint, key: string) {
+    return new CourseCreationService(this.prisma).receipt(actorId, key);
   }
 
   async update(id: bigint, dto: UpdateCourseDto) {
-    await this.findOne(id);
-
-    if (dto.department_id !== undefined) {
-      await this.checkDepartment(BigInt(dto.department_id));
-    }
-
     try {
-      return await this.prisma.courses.update({
-        where: { id },
-        data: {
-          course_code: dto.course_code,
-          course_name: dto.course_name,
-          description: dto.description,
+      return await this.prisma.$transaction(
+        async (db) => {
+          await lockCourseCodes(db);
+          const service = new CoursesService(db as PrismaService);
+          await service.findOne(id);
+          if (dto.department_id !== undefined)
+            await service.checkDepartment(BigInt(dto.department_id));
+          return db.courses.update({
+            where: { id },
+            data: {
+              course_code: dto.course_code,
+              course_name: dto.course_name,
+              description: dto.description,
 
-          department_id:
-            dto.department_id !== undefined
-              ? BigInt(dto.department_id)
-              : undefined,
+              department_id:
+                dto.department_id !== undefined
+                  ? BigInt(dto.department_id)
+                  : undefined,
 
-          updated_at: new Date(),
+              updated_at: new Date(),
+            },
+            include: {
+              departments: true,
+            },
+          });
         },
-        include: {
-          departments: true,
-        },
-      });
+        { maxWait: 5000, timeout: 20000 },
+      );
     } catch (e: any) {
       if (e.code === 'P2002') {
         throw new ConflictException('course_code already exists');

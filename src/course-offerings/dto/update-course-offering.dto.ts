@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { class_type } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsEnum,
@@ -13,6 +13,7 @@ import {
   MaxLength,
   Min,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator';
 import { CourseOfferingGroupScopeDto } from './course-offering-group-scope.dto';
 
@@ -43,17 +44,21 @@ export class UpdateCourseOfferingDto {
 
   @ApiPropertyOptional({
     example: 4,
+    type: 'integer',
+    nullable: true,
     minimum: 1,
     maximum: 5,
     description:
-      'Student year level intended for this course offering',
+      'Omit to preserve the saved year, including a legacy null. Every changed course/semester/year/group context requires year 1–5 and applicable enabled curriculum approval; a resolved year cannot be cleared. Unchanged-context lecturer/display edits do not require a later approval.',
   })
   @IsOptional()
-  @Type(() => Number)
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' && value.trim() !== '' ? Number(value) : value,
+  )
   @IsInt()
   @Min(1)
   @Max(5)
-  year_level?: number;
+  year_level?: number | null;
 
   @ApiPropertyOptional({
     example: class_type.COURSE,
@@ -67,9 +72,9 @@ export class UpdateCourseOfferingDto {
   @ApiPropertyOptional({
     maxLength: 50,
     example: 'A',
-    description: 'Optional section or class code',
+    description: 'Optional display class label; changing it never creates another assignment identity. Omit to preserve it. Identity excludes labels and groups; existing legacy duplicate conflicts require separate review without merging history.',
   })
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsNotEmpty()
   @IsString()
   @MaxLength(50)
@@ -89,7 +94,7 @@ export class UpdateCourseOfferingDto {
       },
     ],
   })
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CourseOfferingGroupScopeDto)

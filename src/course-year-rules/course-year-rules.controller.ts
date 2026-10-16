@@ -64,7 +64,7 @@ export class CourseYearRulesController {
   @ApiOperation({
     summary: 'Resolve a curriculum rule for an offering academic year',
     description:
-      'Use the returned revision id as group_scopes[].curriculum_revision_id. LEGACY_UNVERSIONED returns enabled:null; a revisioned rule without an applicable approval returns enabled:false. Offering confirmation independently rechecks applicability.',
+      'Use the selected semester academic_year_id, not the active year. Use an enabled returned revision id as group_scopes[].curriculum_revision_id. LEGACY_UNVERSIONED returns enabled:null and does not approve new contexts; an inapplicable/withdrawn revision returns enabled:false. New/context-changing offerings independently recheck applicability, including without scopes. Unchanged historical lecturer/display edits retain saved bindings and legacy unknowns.',
   })
   @ApiQuery({ name: 'academic_year_id', required: true, example: '1' })
   @ApiResponse({

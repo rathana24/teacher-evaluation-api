@@ -113,12 +113,12 @@ describe('EvaluationsService', () => {
     },
     academic_years: {
       findUnique: jest
-        .fn<any>()
+        .fn<() => Promise<{ id: bigint; name: string; start_year: number }>>()
         .mockResolvedValue({ id: 10n, name: '2026-2027', start_year: 2026 }),
     },
     majors: {
       findUnique: jest
-        .fn<any>()
+        .fn<() => Promise<{ id: bigint; name: string; code: string }>>()
         .mockResolvedValue({ id: 2n, name: 'AMS', code: 'AMS' }),
     },
 
@@ -1637,7 +1637,15 @@ describe('EvaluationsService', () => {
       );
     });
 
-    it('should reject schedule changes after the evaluation leaves DRAFT', async () => {
+    it('extends an active deadline without writing the start, status or questionnaire', async () => {
+      const now = Date.now();
+      evaluationFindUniqueMock.mockResolvedValue({ ...evaluationResult, status: 'OPEN', start_at: new Date(now - 60000), end_at: new Date(now + 60000) });
+      const deadline = new Date(now + 120000).toISOString();
+      await service.updateSchedule(50n, { end_at: deadline });
+      expect(evaluationUpdateMock).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 50n }, data: { end_at: new Date(deadline), updated_at: expect.any(Date) } }));
+    });
+
+    it('should reject schedule changes on an OPEN evaluation without an active window', async () => {
       evaluationFindUniqueMock.mockResolvedValue({
         ...evaluationResult,
         status: 'OPEN',
@@ -1649,7 +1657,7 @@ describe('EvaluationsService', () => {
         }),
       ).rejects.toThrow(
         new ConflictException(
-          'The schedule can only be changed while the evaluation is a DRAFT',
+          'Only DRAFT schedules or currently active OPEN deadlines can be changed. Upcoming, expired and CLOSED evaluations cannot be extended.',
         ),
       );
 

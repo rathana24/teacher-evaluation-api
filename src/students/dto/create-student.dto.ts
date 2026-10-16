@@ -7,12 +7,12 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  Matches,
   Max,
   MaxLength,
   Min,
   MinLength,
 } from 'class-validator';
+import { IsCohortDatabaseId } from '../../student-generations/validation/cohort-fields';
 
 export class CreateStudentDto {
   @ApiProperty({
@@ -70,30 +70,20 @@ export class CreateStudentDto {
     description: 'Student generation ID',
     type: String,
   })
-  @IsString()
-  @IsNotEmpty()
-  @Matches(/^[1-9]\d*$/, {
-    message: 'generation_id must be a positive integer',
-  })
+  @IsCohortDatabaseId()
   generation_id!: string;
 
   @ApiProperty({
     example: '1',
-    description:
-      'Academic year ID for the initial academic placement',
+    description: 'Academic year ID for the initial academic placement',
     type: String,
   })
-  @IsString()
-  @IsNotEmpty()
-  @Matches(/^[1-9]\d*$/, {
-    message: 'academic_year_id must be a positive integer',
-  })
+  @IsCohortDatabaseId()
   academic_year_id!: string;
 
   @ApiProperty({
     example: 1,
-    description:
-      'Student year level for the initial academic placement',
+    description: 'Student year level for the initial academic placement',
     minimum: 1,
     maximum: 5,
   })
@@ -107,17 +97,12 @@ export class CreateStudentDto {
     description: 'Major ID for the initial academic placement',
     type: String,
   })
-  @IsString()
-  @IsNotEmpty()
-  @Matches(/^[1-9]\d*$/, {
-    message: 'major_id must be a positive integer',
-  })
+  @IsCohortDatabaseId()
   major_id!: string;
 
   @ApiPropertyOptional({
     example: 'AMS1-A',
-    description:
-      'Optional class/group for the initial academic placement',
+    description: 'Optional class/group for the initial academic placement',
     maxLength: 50,
   })
   @IsOptional()

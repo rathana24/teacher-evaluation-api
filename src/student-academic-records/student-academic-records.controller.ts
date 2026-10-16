@@ -19,7 +19,7 @@ import { AuthGuard } from '@nestjs/passport';
 
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { ParseBigIntPipe } from '../common/pipes/parse-bigint.pipe';
+import { ParseAcademicRecordIdPipe } from './pipes/parse-academic-record-id.pipe';
 
 import { CreateStudentAcademicRecordDto } from './dto/create-student-academic-record.dto';
 import { UpdateStudentAcademicRecordDto } from './dto/update-student-academic-record.dto';
@@ -39,7 +39,7 @@ export class StudentAcademicRecordsController {
   @ApiOperation({
     summary: 'Create a student academic record',
     description:
-      'Approve a selected-year placement. progression_action defaults to NORMAL; REPEAT/TRANSFER anchor later progression, PAUSE blocks eligibility until explicit RESUME. A yearly group is required for eligibility. Exception actions require structured start_year chronology.',
+      'For cohort-tracked students, supply generation_id and append after the latest unambiguous resolved year. TRANSFER requires an explicit different destination cohort belonging to major_id; placement, immutable evidence and compatibility profile pointer commit atomically. NORMAL/REPEAT/PAUSE/RESUME retain the latest cohort. PAUSE persists until explicit RESUME and yearly groups never carry forward. Unresolved/backdated history requires review. REQUIRE_MAJOR_SCOPED_COHORTS=true rejects new unresolved placements with 400/MAJOR_SCOPED_COHORT_REQUIRED, and returns 503/COHORT_SCHEMA_NOT_READY if the connected deployment is incomplete. Existing unresolved history is never automatically backfilled.',
   })
   @ApiBody({
     type: CreateStudentAcademicRecordDto,
@@ -51,6 +51,7 @@ export class StudentAcademicRecordsController {
           academic_year_id: '7',
           year_level: 2,
           major_id: '3',
+          generation_id: '5',
           class_group: 'A',
           progression_action: 'REPEAT',
         },
@@ -62,6 +63,7 @@ export class StudentAcademicRecordsController {
           academic_year_id: '8',
           year_level: 3,
           major_id: '4',
+          generation_id: '9',
           class_group: 'B',
           progression_action: 'TRANSFER',
         },
@@ -119,7 +121,7 @@ export class StudentAcademicRecordsController {
     status: 404,
     description: 'Student academic record not found',
   })
-  findOne(@Param('id', ParseBigIntPipe) id: bigint) {
+  findOne(@Param('id', ParseAcademicRecordIdPipe) id: bigint) {
     return this.studentAcademicRecordsService.findOne(id);
   }
 
@@ -127,7 +129,7 @@ export class StudentAcademicRecordsController {
   @ApiOperation({
     summary: 'Update a student academic record',
     description:
-      'Only explicit progression_action=RESUME clears a pause. Omitting the action preserves it. Progression records cannot be moved to another student/year or reset to NORMAL. Placement corrections do not rewrite enrollment, participant, draft or response history.',
+      'Resolved student/year/major/cohort identity is immutable; repeating the same generation_id is allowed. Legacy links require reviewed mapping rather than a PUT backfill. TRANSFER requires a new yearly placement, not a changed label on an INITIAL assignment. Strict cohort mode also rejects identity moves or TRANSFER labels on unresolved legacy records. Non-identity group/year-level/progression corrections retain their earlier guards. Only explicit RESUME clears a pause; enrollment, participant, draft and response history are not rewritten.',
   })
   @ApiBody({
     type: UpdateStudentAcademicRecordDto,
@@ -167,7 +169,7 @@ export class StudentAcademicRecordsController {
       'Academic record already exists for this student and academic year',
   })
   update(
-    @Param('id', ParseBigIntPipe) id: bigint,
+    @Param('id', ParseAcademicRecordIdPipe) id: bigint,
     @Body()
     updateStudentAcademicRecordDto: UpdateStudentAcademicRecordDto,
   ) {
@@ -194,7 +196,7 @@ export class StudentAcademicRecordsController {
     description:
       'Student academic record cannot be deleted because related records exist',
   })
-  remove(@Param('id', ParseBigIntPipe) id: bigint) {
+  remove(@Param('id', ParseAcademicRecordIdPipe) id: bigint) {
     return this.studentAcademicRecordsService.remove(id);
   }
 }

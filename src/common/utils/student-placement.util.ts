@@ -1,4 +1,8 @@
 import { normalizeClassGroup } from './class-group.util';
+import {
+  cohortMetadataSelect,
+  resolveStudentCohort,
+} from './student-cohort.util';
 
 export type ProgressionAction =
   'NORMAL' | 'REPEAT' | 'TRANSFER' | 'PAUSE' | 'RESUME';
@@ -10,9 +14,13 @@ type RecordPlacement = {
   major_id: bigint;
   class_group: string | null;
   progression_action?: ProgressionAction;
+  generation_id?: bigint | null;
+  student_generations?: Parameters<typeof resolveStudentCohort>[0] | null;
   academic_years?: { start_year: number | null };
 };
 type Generation = {
+  id?: bigint;
+  ownership_state?: string;
   starting_year_level: number;
   entry_academic_year: { start_year: number | null };
 };
@@ -25,7 +33,14 @@ export function resolveStudentPlacement<T extends RecordPlacement>(
   generation: Generation,
   records: T[],
   year: Year,
+  profileGenerationId?: bigint,
 ) {
+  const cohort = resolveStudentCohort(
+    generation,
+    records,
+    year,
+    profileGenerationId,
+  );
   const current = records.find((r) => r.academic_year_id === year.id) ?? null;
   const unknownExceptionChronology = records.some(
     (r) =>
@@ -73,12 +88,12 @@ export function resolveStudentPlacement<T extends RecordPlacement>(
     if (record.progression_action === 'RESUME') paused = false;
   }
   const anchor = dated.at(-1) ?? null;
-  const entry = generation.entry_academic_year?.start_year ?? null;
+  const entry = cohort.generation?.entry_academic_year.start_year ?? null;
   const difference =
     year.start_year != null && entry != null ? year.start_year - entry : null;
   const candidate =
     difference != null && difference >= 0
-      ? generation.starting_year_level + difference
+      ? cohort.generation!.starting_year_level + difference
       : null;
   const calculated =
     candidate != null && candidate >= 1 && candidate <= 5 ? candidate : null;
@@ -112,12 +127,15 @@ export function resolveStudentPlacement<T extends RecordPlacement>(
     ? 'PROGRESSION_CHRONOLOGY_UNAVAILABLE'
     : paused
       ? 'PAUSED'
-      : !current || classGroup == null
-        ? 'MISSING_YEARLY_GROUP'
-        : bounded == null
-          ? 'YEAR_LEVEL_UNAVAILABLE'
-          : null;
+      : cohort.availability === 'UNAVAILABLE'
+        ? cohort.reason
+        : !current || classGroup == null
+          ? 'MISSING_YEARLY_GROUP'
+          : bounded == null
+            ? 'YEAR_LEVEL_UNAVAILABLE'
+            : null;
   return {
+    cohort_context: cohort,
     academic_record: current,
     calculated_year_level: calculated,
     calculation_status: calculationStatus,
@@ -133,6 +151,7 @@ export function resolveStudentPlacement<T extends RecordPlacement>(
     ineligibility_reason: eligibilityReason,
     placement: {
       academic_year_id: year.id,
+      generation_id: cohort.generation_id,
       source,
       year_level: bounded,
       major_id: current?.major_id ?? anchor?.major_id ?? null,
@@ -148,16 +167,15 @@ export const progressionRecordSelect = {
   major_id: true,
   class_group: true,
   progression_action: true,
+  generation_id: true,
+  student_generations: { select: cohortMetadataSelect },
   academic_years: { select: { start_year: true } },
 } as const;
 
 export const progressionStudentSelect = {
   generation_id: true,
   student_generations: {
-    select: {
-      starting_year_level: true,
-      entry_academic_year: { select: { start_year: true } },
-    },
+    select: cohortMetadataSelect,
   },
   student_academic_records: { select: progressionRecordSelect },
 } as const;

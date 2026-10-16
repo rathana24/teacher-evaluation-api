@@ -15,6 +15,22 @@ import { normalizeClassGroup } from '../common/utils/class-group.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStudentAcademicRecordDto } from './dto/create-student-academic-record.dto';
 import { UpdateStudentAcademicRecordDto } from './dto/update-student-academic-record.dto';
+import { StudentCohortPlacementService } from './student-cohort-placement.service';
+import {
+  rejectUnscopedCohortWrite,
+  requireCohortWriteSchema,
+} from '../common/utils/cohort-write-policy';
+
+const cohortMetadataSelect = {
+  id: true,
+  name: true,
+  ownership_state: true,
+  major_id: true,
+  generation_number: true,
+  entry_academic_year_id: true,
+  starting_year_level: true,
+  majors: { select: { id: true, code: true, name: true, department_id: true } },
+} satisfies Prisma.student_generationsSelect;
 
 const academicRecordSelect = {
   id: true,
@@ -24,6 +40,8 @@ const academicRecordSelect = {
   major_id: true,
   class_group: true,
   progression_action: true,
+  generation_id: true,
+  student_generations: { select: cohortMetadataSelect },
   created_at: true,
   updated_at: true,
 
@@ -45,12 +63,7 @@ const academicRecordSelect = {
       },
 
       student_generations: {
-        select: {
-          id: true,
-          name: true,
-          entry_academic_year_id: true,
-          starting_year_level: true,
-        },
+        select: cohortMetadataSelect,
       },
     },
   },
@@ -184,12 +197,27 @@ export class StudentAcademicRecordsService {
   }
 
   private async createInTransaction(dto: CreateStudentAcademicRecordDto) {
+    await requireCohortWriteSchema(this.prisma);
     const studentId = BigInt(dto.student_id);
     const academicYearId = BigInt(dto.academic_year_id);
     const majorId = BigInt(dto.major_id);
 
     await this.ensureReferencesExist(studentId, academicYearId, majorId);
 
+    const cohorts = new StudentCohortPlacementService(this.prisma);
+    const student = await cohorts.context(studentId);
+    if (dto.generation_id !== undefined || cohorts.tracked(student)) {
+      const id = await cohorts.create(dto, student, () =>
+        this.validateProgression(
+          studentId,
+          academicYearId,
+          dto.progression_action,
+        ),
+      );
+      return this.findOne(id);
+    }
+
+    rejectUnscopedCohortWrite();
     await this.validateProgression(
       studentId,
       academicYearId,
@@ -241,12 +269,19 @@ export class StudentAcademicRecordsService {
           academic_year_id: true,
           major_id: true,
           progression_action: true,
+          generation_id: true,
+          cohort_assignment_event: { select: { action: true } },
         },
       });
 
     if (!existingRecord) {
       throw new NotFoundException('Student academic record not found');
     }
+
+    await new StudentCohortPlacementService(this.prisma).validateUpdate(
+      existingRecord,
+      dto,
+    );
 
     const studentId =
       dto.student_id !== undefined
@@ -351,12 +386,18 @@ export class StudentAcademicRecordsService {
         select: {
           id: true,
           progression_action: true,
+          student_id: true,
+          generation_id: true,
         },
       });
 
     if (!existingRecord) {
       throw new NotFoundException('Student academic record not found');
     }
+
+    await new StudentCohortPlacementService(this.prisma).protectRemoval(
+      existingRecord,
+    );
 
     if (
       existingRecord.progression_action &&
@@ -422,6 +463,7 @@ export class StudentAcademicRecordsService {
         student.student_generations,
         student.student_academic_records.filter((r) => r.id !== recordId),
         year,
+        student.generation_id,
       );
       if (
         current?.progression_action !== 'PAUSE' &&

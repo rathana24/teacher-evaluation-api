@@ -3,4 +3,5 @@ import { CreateStudentGenerationDto } from './create-student-generation.dto';
 
 export class UpdateStudentGenerationDto extends PartialType(
   CreateStudentGenerationDto,
+  { skipNullProperties: false },
 ) {}

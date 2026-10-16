@@ -174,6 +174,7 @@ describe('StudentImportService', () => {
       prisma.student_generations.findMany,
     ).toHaveBeenCalledWith({
       where: {
+        ownership_state: 'LEGACY_READ_ONLY',
         name: {
           equals: 'Gen 43',
           mode: 'insensitive',
@@ -582,6 +583,46 @@ describe('StudentImportService', () => {
       starting_year_level: 1,
     });
   });
+
+  it.each(['x'.repeat(101), '🎓'.repeat(101)])(
+    'rejects an oversized generation name before database access: %s',
+    async (generation) => {
+      await expect(
+        service.importStudents(makeDto({ generation })),
+      ).rejects.toThrow('Generation must not exceed 100 characters');
+
+      expect(prisma.academic_years.findUnique).not.toHaveBeenCalled();
+      expect(prisma.student_generations.findMany).not.toHaveBeenCalled();
+      expect(prisma.student_generations.create).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['ASCII', `${'a'.repeat(50)} ${'b'.repeat(49)}`],
+    ['Unicode', '🎓'.repeat(100)],
+  ])(
+    'accepts a normalized generation name of 100 %s characters',
+    async (_kind, name) => {
+      prisma.student_generations.findMany.mockResolvedValue([
+        { ...existingGeneration, name },
+      ] as never);
+      const generation = `  ${name.replace(/ /g, '   ')}  `;
+      const result = await service.importStudents(makeDto({ generation }));
+
+      expect(prisma.student_generations.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            ownership_state: 'LEGACY_READ_ONLY',
+            name: { equals: name, mode: 'insensitive' },
+          },
+        }),
+      );
+      expect(result.generation.name).toBe(name);
+      expect(result.summary.created).toBe(1);
+      expect(prisma.student_generations.create).not.toHaveBeenCalled();
+    },
+  );
 
   it('requires entry_academic_year_id when creating a new generation', async () => {
     prisma.student_generations.findMany.mockResolvedValue(

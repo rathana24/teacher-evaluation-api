@@ -3,17 +3,26 @@ import { student_progression_action } from '@prisma/client';
 import {
   IsInt,
   IsEnum,
-  IsNotEmpty,
   IsOptional,
   IsString,
-  Matches,
   Max,
   MaxLength,
   Min,
   ValidateIf,
 } from 'class-validator';
+import { IsCohortDatabaseId } from '../../student-generations/validation/cohort-fields';
 
 export class CreateStudentAcademicRecordDto {
+  @ApiPropertyOptional({
+    type: String,
+    example: '5',
+    description:
+      'Explicit destination cohort ID for major-owned yearly assignments. Required for cohort-tracked students, including TRANSFER. Legacy omission remains transitional; unresolved history needs reviewed mapping.',
+  })
+  @ValidateIf((_row, value: unknown) => value !== undefined)
+  @IsCohortDatabaseId()
+  generation_id?: string;
+
   @ApiPropertyOptional({
     enum: student_progression_action,
     default: 'NORMAL',
@@ -29,11 +38,7 @@ export class CreateStudentAcademicRecordDto {
     description: 'Student profile ID from the students table',
     type: String,
   })
-  @IsString()
-  @IsNotEmpty()
-  @Matches(/^[1-9]\d*$/, {
-    message: 'student_id must be a positive integer',
-  })
+  @IsCohortDatabaseId()
   student_id!: string;
 
   @ApiProperty({
@@ -41,11 +46,7 @@ export class CreateStudentAcademicRecordDto {
     description: 'Academic year ID',
     type: String,
   })
-  @IsString()
-  @IsNotEmpty()
-  @Matches(/^[1-9]\d*$/, {
-    message: 'academic_year_id must be a positive integer',
-  })
+  @IsCohortDatabaseId()
   academic_year_id!: string;
 
   @ApiProperty({
@@ -64,11 +65,7 @@ export class CreateStudentAcademicRecordDto {
     description: 'Major ID',
     type: String,
   })
-  @IsString()
-  @IsNotEmpty()
-  @Matches(/^[1-9]\d*$/, {
-    message: 'major_id must be a positive integer',
-  })
+  @IsCohortDatabaseId()
   major_id!: string;
 
   @ApiPropertyOptional({

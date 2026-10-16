@@ -55,6 +55,7 @@ export class StudentsController {
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'Create a student',
+    description: 'Use a saved generation_id, not its number. Major-owned cohorts must match the initial major and structured chronology; account/profile/placement/INITIAL evidence commit atomically. REQUIRE_MAJOR_SCOPED_COHORTS=true rejects legacy cohort creation with 400/MAJOR_SCOPED_COHORT_REQUIRED. Strict writes against an incomplete deployment return 503/COHORT_SCHEMA_NOT_READY. Student profile and yearly records expose explicit cohort metadata; unresolved historical links stay null.',
   })
   @ApiResponse({
     status: 201,
@@ -69,7 +70,7 @@ export class StudentsController {
   @ApiOperation({
     summary: 'Import students',
     description:
-      'Creates new student accounts from validated row data. Existing student codes are skipped.',
+      'Major-aware mode accepts major_id plus generation_number (or a numeric generation alias), validates every spreadsheet major before writes and records an INITIAL yearly cohort assignment atomically per new student. New cohorts require entry_academic_year_id; existing cohorts retain their entry metadata. Existing student codes are skipped without editing accounts/history. Runtime row failures remain partial results. REQUIRE_MAJOR_SCOPED_COHORTS=true rejects every unscoped legacy import before writes with 400/MAJOR_SCOPED_COHORT_REQUIRED, including skip-only retries. No automatic major inference or compatibility fallback. Strict mode requires deployed cohort schema; see /auth/me capabilities.',
   })
   @ApiResponse({
     status: 201,
@@ -83,6 +84,7 @@ export class StudentsController {
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'List students',
+    description: 'With academic_year_id, generation_id filters the cohort resolved from that exact yearly record or an earlier approved anchor, before pagination. academic_context.cohort_context exposes safe major/number metadata and RESOLVED, LEGACY_UNVERIFIED or UNAVAILABLE status. Unknown tracked history never borrows the latest profile cohort. Without a year, generation_id retains compatibility-profile filtering.',
   })
   @ApiResponse({
     status: 200,
@@ -103,7 +105,7 @@ export class StudentsController {
   @ApiOperation({
     summary: 'Get student progress export data',
     description:
-      'Returns the complete authorized student progress dataset for frontend Excel/CSV generation. This endpoint contains identifiable participation data and does not expose anonymous evaluation answers.',
+      'Returns the complete authorized student progress dataset for frontend Excel/CSV generation. With an academic year, generation filtering and row labels use selected-year cohort history; unresolved tracked history returns generation:null and an explicit cohort_context reason. Without a year, generation remains compatibility-profile metadata. This endpoint contains identifiable participation data and does not expose anonymous evaluation answers.',
   })
   @ApiResponse({
     status: 200,
@@ -126,7 +128,7 @@ export class StudentsController {
   @ApiOperation({
     summary: 'List class group options for a student placement scope',
     description:
-      'Returns normalized class groups found in existing student academic records for the selected academic year, generation, and major.',
+      'Returns normalized class groups found in existing student academic records for the selected academic year, generation, and major. Uses each record cohort link, preserving old options after a future transfer. Only wholly legacy histories use the transitional profile fallback. Canonical selections additionally return safe generation ownership/major/number metadata. No group is copied into another year.',
   })
   @ApiResponse({
     status: 200,
@@ -218,6 +220,7 @@ export class StudentsController {
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'Update a student',
+    description: 'Personal edits preserve cohort and academic history. Omit generation_id or repeat its existing ID; changing it returns 409 COHORT_CHANGE_REQUIRES_TRANSFER. No cohort change, major transfer or resume is performed here. Empty or cohort-only unchanged updates write nothing.',
   })
   @ApiParam({
     name: 'id',

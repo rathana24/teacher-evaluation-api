@@ -194,12 +194,10 @@ describe('Academic-year curriculum revisions and global titles (PostgreSQL)', ()
       })
     ).id;
     // The migration does not invent a past revision for existing assignments.
-    const legacy = await request(app.getHttpServer())
-      .post('/api/course-offerings')
-      .set(auth())
-      .send({ ...offering(0), section_code: `LEGACY-${stamp}` });
-    expect(legacy.status).toBe(201);
-    legacyOfferingId = legacy.body.id;
+    // A stored pre-H assignment remains readable/editable; new API writes cannot invent this history.
+    const legacy = await db.course_offerings.create({data:{course_id:courseId,lecturer_id:lecturerId,semester_id:semesters[0],year_level:2,class_type:'COURSE',section_code:`LEGACY-${stamp}`,created_at:now,updated_at:now,
+      group_scopes:{create:{academic_year_id:years[0],generation_id:generationId,major_id:majorId,year_level:2,class_group:'A'}}}});
+    legacyOfferingId = String(legacy.id);
     const created = await request(app.getHttpServer())
       .post('/api/course-year-rules')
       .set(auth())
@@ -657,17 +655,20 @@ describe('Academic-year curriculum revisions and global titles (PostgreSQL)', ()
     ).toBe(true);
   });
 
-  it('does not invent revisions for untracked major assignments', async () => {
+  it('rejects new untracked-major assignments rather than inventing a revision', async () => {
+    const before = await db.course_offerings.count({where:{course_id:courseId}});
     const result = await request(app.getHttpServer())
       .post('/api/course-offerings')
       .set(auth())
       .send({
         ...offering(2),
+        class_type: 'TD',
         section_code: `UNTRACKED-${stamp}`,
         group_scopes: [scope(2, 2, otherMajorId)],
       })
-      .expect(201);
-    expect(result.body.group_scopes[0].curriculum_revision_id).toBeNull();
+      .expect(409);
+    expect(result.body.code).toBe('OFFERING_CURRICULUM_APPROVAL_REQUIRED');
+    expect(await db.course_offerings.count({where:{course_id:courseId}})).toBe(before);
   });
 
   it('requires a new rule identity when moving a course to another year level', async () => {

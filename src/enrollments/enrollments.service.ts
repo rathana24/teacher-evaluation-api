@@ -133,7 +133,7 @@ export class EnrollmentsService {
             !matchesOfferingScope(
               offering.group_scopes,
               offering.semesters.academic_year_id,
-              student.generation_id,
+              context.cohort_context.generation_id,
               context.academic_record!,
             )
           ) {
@@ -420,6 +420,7 @@ export class EnrollmentsService {
       student.student_generations,
       student.student_academic_records,
       year,
+      student.generation_id,
     );
     if (!context.placement_eligible)
       throw new Exception(
@@ -427,6 +428,8 @@ export class EnrollmentsService {
           ? 'Student progression chronology requires administrator review'
           : context.progression_status === 'PAUSED'
             ? 'Student is paused; explicitly resume before enrollment'
+            : context.cohort_context.availability === 'UNAVAILABLE'
+              ? 'Student yearly cohort history requires administrator review'
             : 'Student must have a class group assigned for the offering academic year',
       );
     return { ...student, context };
@@ -507,7 +510,12 @@ export class EnrollmentsService {
       return matchesOfferingScope(
         offering.group_scopes,
         academicYearId,
-        student.generation_id,
+        resolveStudentPlacement(
+          student.student_generations,
+          student.student_academic_records,
+          student.academic_context.academic_year,
+          student.generation_id,
+        ).cohort_context.generation_id,
         placement,
       );
     });
@@ -622,7 +630,7 @@ export class EnrollmentsService {
       );
     }
 
-    await this.requireYearlyPlacement(
+    const yearly = await this.requireYearlyPlacement(
       studentId,
       targetOffering.semesters.academic_year_id,
       this.prisma,
@@ -668,7 +676,7 @@ export class EnrollmentsService {
     const matchesTargetScope = matchesOfferingScope(
       targetOffering.group_scopes,
       targetOffering.semesters.academic_year_id,
-      student.generation_id,
+      yearly.context.cohort_context.generation_id,
       placement,
     );
 
@@ -738,7 +746,8 @@ export class EnrollmentsService {
       placement: {
         academic_year_id: placement.academic_year_id.toString(),
 
-        generation_id: student.generation_id.toString(),
+        generation_id: yearly.context.cohort_context.generation_id?.toString() ?? null,
+        cohort_context: yearly.context.cohort_context,
 
         major_id: placement.major_id.toString(),
 
@@ -904,7 +913,7 @@ export class EnrollmentsService {
            * Re-read placement transactionally. Reassignment
            * never creates or changes academic placements.
            */
-          await this.requireYearlyPlacement(
+          const yearly = await this.requireYearlyPlacement(
             studentId,
             targetOffering.semesters.academic_year_id,
             tx,
@@ -947,7 +956,7 @@ export class EnrollmentsService {
           const matchesTargetScope = matchesOfferingScope(
             targetOffering.group_scopes,
             targetOffering.semesters.academic_year_id,
-            student.generation_id,
+            yearly.context.cohort_context.generation_id,
             placement,
           );
 

@@ -81,11 +81,27 @@ export class AuthController {
   @ApiOperation({
     summary:
       'Get the authenticated user profile and student academic context when applicable',
+    description:
+      'Self-only profile selected by the authenticated account. ' +
+      'student.academic_context exposes the authoritative selected-year record, group, major, ' +
+      'effective year, progression, placement_eligible (boolean or null when unavailable) ' +
+      'and ineligibility_reason. No previous-year group fallback. ' +
+      'cohort_context uses the selected year, including cohort ID, major/number metadata, source, availability and reason. student.generation follows that context and is null for unresolved tracked history. The latest compatibility pointer does not relabel an earlier year. Placement eligibility ' +
+      'is separate from evaluation access. Existing effective_placement and ' +
+      'profile_academic_year are preserved; absent profiles stay student:null. ' +
+      'Staff profiles do not gain student data. ' +
+      'capabilities.reviewed_assignment_enrollment_v1 is true only with the connected reviewed assignment receipt kind and complete-identity index installed, including empty catalogs. Use /course-offerings/create-with-enrollments/preview, /confirm and /receipts/:reviewId; never sequentially create rows as an atomic fallback. ' +
+      'capabilities.automatic_course_codes_v1 is true only with installed atomic course allocation/receipt prerequisites, including an empty catalog. Omitted course_code requires an Idempotency-Key UUID v4; official-code compatibility remains. Login does not advertise this capability. ' +
+      'capabilities.major_scoped_generations is true only when REQUIRE_MAJOR_SCOPED_COHORTS=true and the connected schema passes cohort deployment checks, including on an empty catalog. Otherwise the capability is absent. It describes supported write contracts, not reviewed legacy ownership, UI acceptance or production readiness. Refresh this profile after an operator cutover; login does not advertise this capability.',
   })
   @ApiResponse({
     status: 200,
     description:
-      'Current authenticated user profile. Student accounts also include student and academic context information.',
+      'Current authenticated user profile. student.academic_context contains year-specific ' +
+      'group/progression and placement_eligible as true/false, or null when unavailable. ' +
+      'An absent current-year placement is academic_record:null, with no older group fallback; ' +
+      'a resolved missing-group context is explicitly false. No private notes, account ' +
+      'secrets or administrative student list are returned.',
   })
   @ApiResponse({
     status: 401,

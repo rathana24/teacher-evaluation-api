@@ -24,7 +24,7 @@ import { UpdateMajorDto } from './dto/update-major.dto';
 
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { ParseBigIntPipe } from '../common/pipes/parse-bigint.pipe';
+import { ParseMajorIdPipe } from './pipes/parse-major-id.pipe';
 
 const majorExample = {
   id: '1',
@@ -49,9 +49,7 @@ const majorExample = {
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('majors')
 export class MajorsController {
-  constructor(
-    private readonly majorsService: MajorsService,
-  ) {}
+  constructor(private readonly majorsService: MajorsService) {}
 
   @Get()
   @ApiOperation({
@@ -69,13 +67,19 @@ export class MajorsController {
   }
 
   @Get(':id')
+  @ApiResponse({
+    status: 400,
+    description: 'Malformed major ID or ID outside signed 64-bit storage range',
+  })
   @ApiOperation({
     summary: 'Get a major by ID',
   })
   @ApiParam({
     name: 'id',
     example: '1',
-    description: 'Major ID',
+    type: String,
+    description:
+      'Major ID; must fit signed 64-bit storage (-9223372036854775808 to 9223372036854775807).',
   })
   @ApiResponse({
     status: 200,
@@ -88,13 +92,16 @@ export class MajorsController {
     status: 404,
     description: 'Major not found',
   })
-  findOne(
-    @Param('id', ParseBigIntPipe) id: bigint,
-  ) {
+  findOne(@Param('id', ParseMajorIdPipe) id: bigint) {
     return this.majorsService.findOne(id);
   }
 
   @Post()
+  @ApiResponse({
+    status: 400,
+    description:
+      'Invalid major fields; name must be nonblank after trimming and department_id must fit storage range',
+  })
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'Create a major',
@@ -117,13 +124,16 @@ export class MajorsController {
     status: 409,
     description: 'Major code or name already exists',
   })
-  create(
-    @Body() createMajorDto: CreateMajorDto,
-  ) {
+  create(@Body() createMajorDto: CreateMajorDto) {
     return this.majorsService.create(createMajorDto);
   }
 
   @Put(':id')
+  @ApiResponse({
+    status: 400,
+    description:
+      'Invalid major ID or fields; supplied values must be non-null, name nonblank and IDs within storage range',
+  })
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'Update a major',
@@ -131,7 +141,9 @@ export class MajorsController {
   @ApiParam({
     name: 'id',
     example: '1',
-    description: 'Major ID',
+    type: String,
+    description:
+      'Major ID; must fit signed 64-bit storage (-9223372036854775808 to 9223372036854775807).',
   })
   @ApiBody({
     type: UpdateMajorDto,
@@ -152,16 +164,17 @@ export class MajorsController {
     description: 'Major code or name already exists',
   })
   update(
-    @Param('id', ParseBigIntPipe) id: bigint,
+    @Param('id', ParseMajorIdPipe) id: bigint,
     @Body() updateMajorDto: UpdateMajorDto,
   ) {
-    return this.majorsService.update(
-      id,
-      updateMajorDto,
-    );
+    return this.majorsService.update(id, updateMajorDto);
   }
 
   @Delete(':id')
+  @ApiResponse({
+    status: 400,
+    description: 'Malformed major ID or ID outside signed 64-bit storage range',
+  })
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'Delete a major',
@@ -169,7 +182,9 @@ export class MajorsController {
   @ApiParam({
     name: 'id',
     example: '1',
-    description: 'Major ID',
+    type: String,
+    description:
+      'Major ID; must fit signed 64-bit storage (-9223372036854775808 to 9223372036854775807).',
   })
   @ApiResponse({
     status: 200,
@@ -181,12 +196,9 @@ export class MajorsController {
   })
   @ApiResponse({
     status: 409,
-    description:
-      'Major is currently in use and cannot be deleted',
+    description: 'Major is currently in use and cannot be deleted',
   })
-  remove(
-    @Param('id', ParseBigIntPipe) id: bigint,
-  ) {
+  remove(@Param('id', ParseMajorIdPipe) id: bigint) {
     return this.majorsService.remove(id);
   }
 }

@@ -27,15 +27,81 @@ import { LecturerDashboardService } from '../src/lecturer-dashboard/lecturer-das
 import { ResultsService } from '../src/results/results.service';
 import { ReviewedWorkflowsService } from '../src/reviewed-workflows/reviewed-workflows.service';
 import { CourseOfferingsService } from '../src/course-offerings/course-offerings.service';
+import { createTestOfferingApproval, removeTestOfferingApproval } from './helpers/offering-approval';
 import { SemestersService } from '../src/semesters/semesters.service';
 
-const historical = createRequire(`${process.cwd()}/package.json`)(
+type HistoricalRecord = {
+  kind: 'response' | 'draft';
+  id: string;
+  survey_id: string;
+  current_version_id: string | null;
+  candidate_version_id: string | null;
+  fingerprint: string;
+  question_ids: string[];
+  status:
+    'AMBIGUOUS_REQUIRES_REVIEW' | 'CANDIDATE_REQUIRES_VERIFIED_PROVENANCE';
+  issues: string[];
+};
+type VerifiedHistoricalRecord = HistoricalRecord & {
+  verified_version_id: string;
+  verified_by: string;
+  evidence_reference: string;
+};
+type HistoricalOptions = { dryRun?: boolean; rollback?: boolean };
+
+// Describe the existing CommonJS boundary without weakening transaction result types.
+const historical: {
+  inspectRecord: (
+    db: Prisma.TransactionClient,
+    kind: HistoricalRecord['kind'],
+    id: string,
+  ) => Promise<HistoricalRecord>;
+  validateManifest: (manifest: unknown) => void;
+  reconcile: (
+    db: Prisma.TransactionClient,
+    manifest: { schema_version: number; records: VerifiedHistoricalRecord[] },
+    options?: HistoricalOptions,
+  ) => Promise<
+    Array<{
+      kind: HistoricalRecord['kind'];
+      id: string;
+      outcome: 'WOULD_CHANGE' | 'CHANGED' | 'ALREADY_APPLIED';
+    }>
+  >;
+} = createRequire(`${process.cwd()}/package.json`)(
   './scripts/historical-metadata.cjs',
 );
 
 (BigInt.prototype as any).toJSON = function () {
   return this.toString();
 };
+
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item: unknown) => typeof item === 'string')
+  );
+}
+
+function requireEnrollmentReview<
+  T extends { review_id: string; expires_at: string },
+>(value: T) {
+  const ids =
+    'confirmed_student_ids' in value ? value.confirmed_student_ids : undefined;
+  const count =
+    'new_enrollment_count' in value ? value.new_enrollment_count : undefined;
+  if (
+    !isStringArray(ids) ||
+    typeof count !== 'number' ||
+    !Number.isSafeInteger(count) ||
+    count < 0
+  ) {
+    throw new Error(
+      'Enrollment review must contain string account IDs and a nonnegative enrollment count',
+    );
+  }
+  return { ...value, confirmed_student_ids: ids, new_enrollment_count: count };
+}
 
 /** Pause one real SQL operation. All delegates still execute against PostgreSQL. */
 function gateTransaction(prisma: PrismaService, model: string, method: string) {
@@ -132,6 +198,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
     extraYearIds: bigint[] = [];
   const extraSemesterIds: bigint[] = [];
   const extraDepartmentIds: bigint[] = [];
+  const offeringApprovalIds: bigint[] = [];
   const students: {
     account: bigint;
     profile: bigint;
@@ -435,6 +502,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
             await tx.course_offerings.deleteMany({
               where: { id: { in: offeringIds } },
             });
+            for (const ruleId of offeringApprovalIds) await removeTestOfferingApproval(tx,ruleId);
             await tx.courses.deleteMany({ where: { id: { in: courseIds } } });
             await tx.question_options.deleteMany({
               where: { questions: questionFilter },
@@ -991,7 +1059,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
         records: [{ ...manifest.records[0], evidence_reference: '' }],
       }),
     ).toThrow('evidence');
-    const operation = (options: any) =>
+    const operation = (options: HistoricalOptions) =>
       prisma.$transaction((tx) => historical.reconcile(tx, manifest, options), {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       });
@@ -1195,6 +1263,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
       where: { id: target.id },
       data: {
         course_id: e.assignment.course_id,
+        class_type: 'TD',
         section_code: 'Reassignment target',
       },
     });
@@ -1303,7 +1372,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
         group.survey_version_id === e.v1.id ? e.v1 : v2
       ).questions.map((question) => question.id);
       expect(
-        group.questions.every((question) =>
+        group.questions.every((question: { question_id: bigint }) =>
           ownIds.includes(question.question_id),
         ),
       ).toBe(true);
@@ -1344,7 +1413,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
       where: { evaluation_id: e.id },
       data: { survey_version_id: null },
     });
-    const records = [];
+    const records: VerifiedHistoricalRecord[] = [];
     for (const response of responses)
       records.push({
         ...(await historical.inspectRecord(
@@ -1979,6 +2048,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
         .set(authorization())
         .send({ academic_year_id: Number(targetYear) });
       expect(semesterEdit.status).toBe(200);
+      offeringApprovalIds.push((await createTestOfferingApproval(prisma,alternate.course_id,major,year,unused.year_level!)).id);
       const result = await api()
         .put(`/api/course-offerings/${unused.id}`)
         .set(authorization())
@@ -2043,7 +2113,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
       const gate = gateTransaction(prisma, 'course_offerings', 'update');
       const updating = new CourseOfferingsService(gate.db).update(unused.id, {
         lecturer_id: String(alternateLecturer),
-      });
+      }, admin);
       const outcome = updating.then(
         () => null,
         (error) => error,
@@ -2126,8 +2196,17 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
     });
     const recordUrl = (id?: bigint) =>
       `/api/student-academic-records${id ? `/${id}` : ''}`;
-    const context = async (profile: bigint, y = year) =>
-      (await app.get(StudentsService).findOne(profile, y)).academic_context;
+    const context = async (profile: bigint, y = year) => {
+      const student = await app
+        .get(StudentsService)
+        .findOne(profile, y.toString());
+      if (!('academic_context' in student)) {
+        throw new Error(
+          'A selected academic year must return academic_context',
+        );
+      }
+      return student.academic_context;
+    };
     async function approve(
       s: { profile: bigint },
       y: bigint,
@@ -2665,7 +2744,9 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
         major_id: major.toString(),
         class_groups: ['A'],
       };
-      const review = await workflow.previewGroup(assignment.id, dto, admin);
+      const review = requireEnrollmentReview(
+        await workflow.previewGroup(assignment.id, dto, admin),
+      );
       expect(review.confirmed_student_ids).toContain(s.account.toString());
       expect(
         (
@@ -2706,7 +2787,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
           lecturer_id: lecturer,
           semester_id: semester,
           year_level: 1,
-          class_type: 'TD',
+          class_type: 'TP',
           created_at: new Date(),
           updated_at: new Date(),
           group_scopes: {
@@ -2832,7 +2913,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
   });
 
   describe('Immutable historical target labels', () => {
-    const post = (url: string, body: unknown = {}) =>
+    const post = (url: string, body: Record<string, unknown> = {}) =>
       api().post(url).set(authorization()).send(body);
     async function prepared(groups = ['A']) {
       const target = await offering(groups);
@@ -3269,7 +3350,11 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
             ).completed_at,
           ).toBeNull();
         } else {
-          const rows = await frozen(BigInt(result.value!.id));
+          const evaluationId = result.value?.id;
+          if (typeof evaluationId !== 'string') {
+            throw new Error('Confirmed evaluation must return a string ID');
+          }
+          const rows = await frozen(BigInt(evaluationId));
           expect(rows.generation_targets[0].historical_labels).toEqual(
             e.preview.body.target_labels.generations[0].historical_labels,
           );
@@ -3288,7 +3373,7 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
     const groupUrl = (o: bigint) => `/api/course-offerings/${o}/enrollments`;
     const applyUrl = (s: bigint, v: bigint) =>
       `/api/surveys/${s}/versions/${v}/apply-to-unfinished`;
-    const post = (url: string, body: unknown = {}) =>
+    const post = (url: string, body: Record<string, unknown> = {}) =>
       api().post(url).set(authorization()).send(body);
     async function fixture(status: 'DRAFT' | 'OPEN' = 'OPEN', count = 3) {
       const assignment = await offering(['A', 'B']);
@@ -4086,13 +4171,15 @@ describe('School consistency acceptance (real PostgreSQL)', () => {
       const target = await offering(['A', 'B']);
       const input = selection(['A', 'B']);
       const workflows = app.get(ReviewedWorkflowsService);
-      const preview = await workflows.previewGroup(target.id, input, admin);
+      const preview = requireEnrollmentReview(
+        await workflows.previewGroup(target.id, input, admin),
+      );
       const gate = gateTransaction(prisma, 'enrollments', 'createMany');
       const confirm = new ReviewedWorkflowsService(gate.db).confirmGroup(
         target.id,
         {
           ...input,
-          confirmed_student_ids: preview.confirmed_student_ids as string[],
+          confirmed_student_ids: preview.confirmed_student_ids,
           review_id: preview.review_id,
         },
         admin,

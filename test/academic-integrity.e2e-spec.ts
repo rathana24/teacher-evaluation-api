@@ -12,6 +12,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { StudentGenerationsService } from '../src/student-generations/student-generations.service';
 import { AcademicYearsService } from '../src/academic-years/academic-years.service';
 import { SURVEY_TITLE_TRIM_CHARACTERS } from '../src/common/utils/survey-title.util';
+import { createTestOfferingApproval, removeTestOfferingApproval } from './helpers/offering-approval';
 
 (BigInt.prototype as any).toJSON = function () {
   return this.toString();
@@ -21,6 +22,7 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
   let app: INestApplication;
   let db: PrismaService;
   let token: string;
+  let approvalRuleId: bigint | undefined;
   let owner: bigint,
     lecturer: bigint,
     department: bigint,
@@ -213,6 +215,8 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
         data: { course_id: course, major_id: major, year_level: 1 },
       })
     ).id;
+    // Keep the approval's immutable effective-year identity separate from the calendar bounds fixture.
+    approvalRuleId = (await createTestOfferingApproval(db,course,major,await newYear(),2)).id;
     const set = await db.surveys.create({
       data: surveyData(`Integrity fixture ${stamp}`),
     });
@@ -277,6 +281,7 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
       await db.student_generations.deleteMany({
         where: { id: { in: generations } },
       });
+      if (approvalRuleId) await removeTestOfferingApproval(db,approvalRuleId);
       if (rule) await db.course_year_rules.delete({ where: { id: rule } });
       if (course) await db.courses.delete({ where: { id: course } });
       if (major) await db.majors.delete({ where: { id: major } });
@@ -506,22 +511,25 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
             })
           ).year_level,
         ).toBe(key.year_level);
+        // Each mask is independent; labels no longer separate complete identities.
+        await db.course_offerings.delete({ where: { id: first.id } });
       },
     );
-    it('keeps case-sensitive sections and empty versus unknown sections distinct', async () => {
+    it('preserves distinct original labels on incomplete legacy contexts without guessing a year', async () => {
       const rows = await Promise.all(
         ['Distinct', 'distinct', '', null].map((section_code) =>
-          directOffering({ year_level: 5, class_type: 'TD', section_code }),
+          directOffering({ year_level: null, class_type: 'TD', section_code }),
         ),
       );
       expect(new Set(rows.map((r) => String(r.id))).size).toBe(4);
     });
-    it('API rejects duplicate nullable levels and concurrent creation returns a useful conflict', async () => {
+    it('API rejects duplicate approved levels and concurrent creation returns a useful conflict', async () => {
       const input = {
         course_id: String(course),
         lecturer_id: String(lecturer),
         semester_id: String(semester),
         class_type: 'COURSE',
+        year_level: 2,
         section_code: `API-${stamp}`,
       };
       const outcomes = await Promise.all(
@@ -573,7 +581,8 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
     );
     it('generation create/update reject level 6, accept level 5 and default to level 1', async () => {
       const input = {
-        name: `Boundary ${stamp}`,
+        major_id: String(major),
+        generation_number: 2000000001,
         entry_academic_year_id: String(year),
         starting_year_level: 6,
       };
@@ -599,7 +608,8 @@ describe('Academic integrity safeguards (real PostgreSQL)', () => {
         .post('/api/student-generations')
         .set(auth())
         .send({
-          name: `Default ${stamp}`,
+          major_id: String(major),
+          generation_number: 2000000002,
           entry_academic_year_id: String(year),
         });
       expect(defaulted.status).toBe(201);

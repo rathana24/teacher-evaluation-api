@@ -3,6 +3,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { createTestOfferingApproval, removeTestOfferingApproval } from './helpers/offering-approval';
 
 // Same fix as main.ts — BigInt IDs can't be JSON-serialised by default
 (BigInt.prototype as any).toJSON = function () {
@@ -23,6 +24,7 @@ describe('Enrollments (e2e)', () => {
   let courseId: bigint | undefined;
   let semesterId: bigint | undefined;
   let academicYearId: bigint | undefined;
+  let approvalRuleId: bigint | undefined;
 
   const enrollUrl = () => {
     if (!testOfferingId) {
@@ -124,6 +126,7 @@ describe('Enrollments (e2e)', () => {
       },
     });
     courseId = course.id;
+    approvalRuleId = (await createTestOfferingApproval(prisma, course.id, placement.major_id, academicYear.id, placement.year_level)).id;
 
     const offering = await request(app.getHttpServer())
       .post('/api/course-offerings')
@@ -132,6 +135,7 @@ describe('Enrollments (e2e)', () => {
         course_id: course.id.toString(),
         lecturer_id: lecturerId,
         semester_id: semester.id.toString(),
+        year_level: placement.year_level,
         class_type: 'COURSE',
         section_code: `E2E-ENR-${stamp}`,
       });
@@ -161,6 +165,7 @@ describe('Enrollments (e2e)', () => {
           }
 
           if (courseId !== undefined) {
+            if (approvalRuleId) await removeTestOfferingApproval(tx,approvalRuleId);
             await tx.courses.deleteMany({
               where: { id: courseId },
             });
@@ -383,7 +388,7 @@ describe('Enrollments (e2e)', () => {
             lecturer_id: BigInt(lecturerId),
             semester_id: semesterId!,
             year_level: 1,
-            class_type: 'COURSE',
+            class_type: 'TD',
             section_code: `SCOPE-${stamp}`,
             created_at: now,
             updated_at: now,

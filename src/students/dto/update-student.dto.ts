@@ -6,9 +6,10 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  Matches,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
+import { IsCohortDatabaseId } from '../../student-generations/validation/cohort-fields';
 
 export class UpdateStudentDto {
   @ApiPropertyOptional({
@@ -16,7 +17,7 @@ export class UpdateStudentDto {
     description: 'Unique student code',
     maxLength: 50,
   })
-  @IsOptional()
+  @ValidateIf((_row, value: unknown) => value !== undefined)
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
@@ -27,7 +28,7 @@ export class UpdateStudentDto {
     description: 'Student full name',
     maxLength: 150,
   })
-  @IsOptional()
+  @ValidateIf((_row, value: unknown) => value !== undefined)
   @IsString()
   @IsNotEmpty()
   @MaxLength(150)
@@ -48,8 +49,7 @@ export class UpdateStudentDto {
   @ApiPropertyOptional({
     enum: gender,
     example: 'MALE',
-    description:
-      'Student gender. Send null to clear the existing gender.',
+    description: 'Student gender. Send null to clear the existing gender.',
     nullable: true,
   })
   @IsOptional()
@@ -58,14 +58,12 @@ export class UpdateStudentDto {
 
   @ApiPropertyOptional({
     example: '1',
-    description: 'Student generation ID',
+    description:
+      'Existing cohort ID may be repeated unchanged. Cohort changes require an explicit academic transfer or reviewed mapping, not a personal edit.',
     type: String,
   })
-  @IsOptional()
-  @IsString()
-  @Matches(/^[1-9]\d*$/, {
-    message: 'generation_id must be a positive integer',
-  })
+  @ValidateIf((_row, value: unknown) => value !== undefined)
+  @IsCohortDatabaseId()
   generation_id?: string;
 
   @ApiPropertyOptional({
@@ -83,7 +81,7 @@ export class UpdateStudentDto {
     example: 'ACTIVE',
     description: 'Student account status',
   })
-  @IsOptional()
+  @ValidateIf((_row, value: unknown) => value !== undefined)
   @IsEnum(user_status)
   status?: user_status;
 }

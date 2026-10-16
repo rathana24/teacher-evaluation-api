@@ -1,4 +1,4 @@
-import { progressionRecordSelect } from '../common/utils/student-placement.util';
+import { progressionStudentSelect, resolveStudentPlacement } from '../common/utils/student-placement.util';
 import {
   BadRequestException,
   ConflictException,
@@ -147,33 +147,27 @@ export class ReviewedWorkflowsService {
       where: { user_id: { in: accountIds.map(BigInt) } },
       orderBy: { user_id: 'asc' },
       select: {
+        ...progressionStudentSelect,
         id: true,
         user_id: true,
-        generation_id: true,
         users: { select: { role: true, status: true } },
-        student_generations: {
-          select: {
-            starting_year_level: true,
-            entry_academic_year_id: true,
-            entry_academic_year: { select: { start_year: true } },
-          },
-        },
-        student_academic_records: {
-          // Include prior anchors and pause/resume states, not just this year's group.
-          where: {
-            OR: [
-              { academic_year_id: yearId },
-              {
-                academic_years: { start_year: { lte: year?.start_year ?? -1 } },
-              },
-            ],
-          },
-          orderBy: { id: 'asc' },
-          select: progressionRecordSelect,
-        },
       },
     });
-    return { year, students };
+    return { year, students: students.map(student => ({
+      id: student.id,
+      user_id: student.user_id,
+      users: student.users,
+      context: year ? resolveStudentPlacement(
+        student.student_generations, student.student_academic_records,
+        year, student.generation_id,
+      ) : null,
+      records: student.student_academic_records.filter(record =>
+        record.academic_year_id === yearId ||
+        record.academic_years.start_year == null ||
+        year?.start_year == null ||
+        record.academic_years.start_year <= year.start_year,
+      ).sort((a,b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    })) };
   }
 
   private async versionState(db: PrismaService, versionId: bigint) {

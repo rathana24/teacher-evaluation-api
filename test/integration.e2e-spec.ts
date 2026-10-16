@@ -6,6 +6,7 @@ import {
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { createTestOfferingApproval, removeTestOfferingApproval } from './helpers/offering-approval';
 
 // Same fix as main.ts — BigInt IDs can't be JSON-serialised by default
 (BigInt.prototype as any).toJSON = function () {
@@ -217,6 +218,7 @@ describe(
       }
 
       if (big('course')) {
+        if (big('approvalRule')) await removeTestOfferingApproval(prisma,big('approvalRule')!);
         await prisma.courses.deleteMany({
           where: {
             id: big('course'),
@@ -358,11 +360,13 @@ describe(
     });
 
     it('4. Admin assigns the lecturer and enrolls both students', async () => {
+      ids.approvalRule = String((await createTestOfferingApproval(prisma,BigInt(ids.course),BigInt(ids.major),BigInt(ids.academicYear),1)).id);
       const offering = await api()
         .post('/api/course-offerings')
         .set(as('admin'))
         .send({
           course_id: ids.course,
+          year_level: 1,
           lecturer_id:
             ids.lecturer,
           semester_id:

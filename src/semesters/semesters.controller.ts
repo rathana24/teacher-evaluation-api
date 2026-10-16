@@ -21,13 +21,14 @@ import {
 import { SemestersService } from './semesters.service';
 import { CreateSemesterDto } from './dto/create-semester.dto';
 import { UpdateSemesterDto } from './dto/update-semester.dto';
-import { ParseBigIntPipe } from '../common/pipes/parse-bigint.pipe';
+import { ParseSemesterIdPipe } from './pipes/parse-semester-id.pipe';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 
 const semesterExample = {
   id: '1',
   semester_name: 'Semester 1',
+  semester_number: 1,
   academic_year_id: '1',
   start_date: '2026-10-01T00:00:00.000Z',
   end_date: '2027-02-28T00:00:00.000Z',
@@ -36,9 +37,12 @@ const semesterExample = {
   academic_years: {
     id: '1',
     name: '2026-2027',
+    start_year: 2026,
     start_date: '2026-10-01T00:00:00.000Z',
     end_date: '2027-07-31T00:00:00.000Z',
     is_active: true,
+    created_at: '2026-09-29T10:00:00.000Z',
+    updated_at: '2026-09-29T10:00:00.000Z',
   },
 };
 
@@ -72,7 +76,9 @@ export class SemestersController {
     name: 'id',
     type: String,
     example: '1',
+    description: 'Integer ID from -9223372036854775808 to 9223372036854775807.',
   })
+  @ApiResponse({ status: 400, description: 'Invalid or out-of-range id' })
   @ApiResponse({
     status: 200,
     description: 'Semester with academic year information',
@@ -84,7 +90,7 @@ export class SemestersController {
     status: 404,
     description: 'Semester not found',
   })
-  findOne(@Param('id', ParseBigIntPipe) id: bigint) {
+  findOne(@Param('id', ParseSemesterIdPipe) id: bigint) {
     return this.semestersService.findOne(id);
   }
 
@@ -103,7 +109,7 @@ export class SemestersController {
   @ApiResponse({
     status: 400,
     description:
-      'Invalid input, academic year not found, or end_date is not after start_date',
+      'Invalid input, unsafe academic year ID, academic year not found, impossible calendar date, or invalid date order',
   })
   @ApiResponse({
     status: 409,
@@ -124,6 +130,7 @@ export class SemestersController {
     name: 'id',
     type: String,
     example: '1',
+    description: 'Integer ID from -9223372036854775808 to 9223372036854775807.',
   })
   @ApiResponse({
     status: 200,
@@ -135,7 +142,7 @@ export class SemestersController {
   @ApiResponse({
     status: 400,
     description:
-      'Invalid input, academic year not found, or end_date is not after start_date',
+      'Invalid input/id, null required update value, unsafe academic year ID, academic year not found, impossible calendar date, or invalid date order',
   })
   @ApiResponse({
     status: 404,
@@ -147,7 +154,7 @@ export class SemestersController {
       'Duplicate semester or SEMESTER_HISTORY_PROTECTED when moving an evaluated semester to another academic year',
   })
   update(
-    @Param('id', ParseBigIntPipe) id: bigint,
+    @Param('id', ParseSemesterIdPipe) id: bigint,
     @Body() dto: UpdateSemesterDto,
   ) {
     return this.semestersService.update(id, dto);
@@ -163,7 +170,9 @@ export class SemestersController {
     name: 'id',
     type: String,
     example: '1',
+    description: 'Integer ID from -9223372036854775808 to 9223372036854775807.',
   })
+  @ApiResponse({ status: 400, description: 'Invalid or out-of-range id' })
   @ApiResponse({
     status: 204,
     description: 'Semester deleted',
@@ -176,7 +185,7 @@ export class SemestersController {
     status: 409,
     description: 'Semester is used by course offerings',
   })
-  async remove(@Param('id', ParseBigIntPipe) id: bigint) {
+  async remove(@Param('id', ParseSemesterIdPipe) id: bigint) {
     await this.semestersService.remove(id);
   }
 }

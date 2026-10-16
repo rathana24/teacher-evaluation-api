@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { resolveStudentPlacement } from '../common/utils/student-placement.util';
+import { cohortMetadataSelect } from '../common/utils/student-cohort.util';
 
 import { normalizeClassGroup } from '../common/utils/class-group.util';
 import { PrismaService } from '../prisma/prisma.service';
@@ -50,12 +51,7 @@ const exportStudentSelect = {
   },
 
   student_generations: {
-    select: {
-      id: true,
-      name: true,
-      starting_year_level: true,
-      entry_academic_year: { select: { start_year: true } },
-    },
+    select: cohortMetadataSelect,
   },
 
   student_academic_records: {
@@ -66,6 +62,8 @@ const exportStudentSelect = {
       year_level: true,
       class_group: true,
       progression_action: true,
+      generation_id: true,
+      student_generations: { select: cohortMetadataSelect },
 
       academic_years: {
         select: {
@@ -259,13 +257,19 @@ export class StudentExportService {
      * explicitly assigned published evaluation
      * in the selected period.
      */
-    const students = await this.findStudentsForScope(
+    const candidates = await this.findStudentsForScope(
       generationId,
       academicYearId,
       semester?.id,
       majorId,
       classGroup,
     );
+    const students = academicYear && generationId !== undefined
+      ? candidates.filter(student => resolveStudentPlacement(
+          student.student_generations, student.student_academic_records,
+          academicYear, student.generation_id,
+        ).cohort_context.generation_id === generationId)
+      : candidates;
 
     const progressByUserId = await this.getScopedProgress(
       students.map((student) => student.user_id),
@@ -289,6 +293,7 @@ export class StudentExportService {
             student.student_generations,
             student.student_academic_records,
             contextYear,
+            student.generation_id,
           )
         : null;
 
@@ -307,6 +312,7 @@ export class StudentExportService {
         academic_context: placementContext
           ? {
               academic_year: contextYear,
+              cohort_context: placementContext.cohort_context,
               calculated_year_level: placementContext.calculated_year_level,
               effective_year_level: placementContext.effective_year_level,
               year_level_source: placementContext.year_level_source,
@@ -353,11 +359,9 @@ export class StudentExportService {
             }
           : null,
 
-        generation: {
-          id: student.student_generations.id.toString(),
-
-          name: student.student_generations.name,
-        },
+        generation: academicYearId === undefined
+          ? { id: student.student_generations.id.toString(), name: student.student_generations.name }
+          : placementContext?.cohort_context.generation ?? null,
 
         account_status: student.users.status,
 
@@ -416,7 +420,7 @@ export class StudentExportService {
     classGroup: string | null,
   ): Promise<ExportStudent[]> {
     const where: Prisma.studentsWhereInput = {
-      ...(generationId !== undefined && {
+      ...(generationId !== undefined && academicYearId === undefined && {
         generation_id: generationId,
       }),
 

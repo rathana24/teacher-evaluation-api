@@ -1,4 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsDateString,
   IsNotEmpty,
@@ -8,46 +9,66 @@ import {
   IsInt,
   Min,
   Max,
+  ValidateIf,
 } from 'class-validator';
 
 export class UpdateSemesterDto {
-  @ApiPropertyOptional({ maxLength: 50, example: 'Semester 1' })
-  @IsOptional()
+  @ApiPropertyOptional({
+    minLength: 1,
+    maxLength: 50,
+    nullable: false,
+    example: 'Semester 1',
+    description:
+      'Trimmed nonblank display name. Omit to retain; null is invalid.',
+  })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsNotEmpty()
   @IsString()
   @MaxLength(50)
   semester_name?: string;
 
   @ApiPropertyOptional({
+    type: 'integer',
     example: 1,
-    description: 'Academic year ID',
+    minimum: 1,
+    maximum: Number.MAX_SAFE_INTEGER,
+    nullable: false,
+    description:
+      'Numeric academic year ID; safe integer from 1 to 9007199254740991. Omit to retain; null is invalid.',
   })
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsInt()
   @Min(1)
+  @Max(Number.MAX_SAFE_INTEGER)
   academic_year_id?: number;
 
   @ApiPropertyOptional({
+    type: 'integer',
     example: 1,
     minimum: 1,
     maximum: 2,
-    description: 'Semester number within the academic year',
+    nullable: true,
+    description:
+      'Semester number within the academic year. Omit to retain; null preserves the supported unknown classification.',
   })
   @IsOptional()
   @IsInt()
   @Min(1)
   @Max(2)
-  semester_number?: number;
+  semester_number?: number | null;
 
   @ApiPropertyOptional({
     example: '2026-10-01',
     type: String,
     nullable: true,
     description:
-      'Stored as a UTC calendar date. ISO datetimes without an offset also mean UTC; time of day is discarded. Null clears this optional date.',
+      'Must be a real ISO calendar date. Stored as a UTC calendar date. ISO datetimes without an offset also mean UTC; time of day is discarded. Null clears this optional date.',
   })
   @IsOptional()
-  @IsDateString()
+  @IsDateString({ strict: true })
   start_date?: string | null;
 
   @ApiPropertyOptional({
@@ -55,9 +76,9 @@ export class UpdateSemesterDto {
     type: String,
     nullable: true,
     description:
-      'Stored as a UTC calendar date; must follow start_date when both dates are supplied. Null clears this optional date.',
+      'Must be a real ISO calendar date. Stored as a UTC calendar date; must follow start_date when both dates are known, including a stored endpoint. Null clears this optional date.',
   })
   @IsOptional()
-  @IsDateString()
+  @IsDateString({ strict: true })
   end_date?: string | null;
 }

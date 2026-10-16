@@ -9,9 +9,12 @@ import * as bcrypt from 'bcrypt';
 
 import { normalizeClassGroup } from '../common/utils/class-group.util';
 import { PrismaService } from '../prisma/prisma.service';
+import { StudentCohortImportService } from './student-cohort-import.service';
+import { rejectUnscopedCohortWrite } from '../common/utils/cohort-write-policy';
 import {
   ImportStudentRowDto,
   ImportStudentsDto,
+  IMPORT_GENERATION_NAME_MAX_LENGTH,
 } from './dto/import-students.dto';
 
 const BCRYPT_ROUNDS = 10;
@@ -39,13 +42,23 @@ export class StudentImportService {
   constructor(private readonly prisma: PrismaService) {}
 
   async importStudents(dto: ImportStudentsDto) {
+    if (dto.major_id !== undefined || dto.generation_number !== undefined) {
+      return new StudentCohortImportService(this.prisma).importStudents(dto);
+    }
+    rejectUnscopedCohortWrite();
     const generationName = this.normalizeGenerationName(
-      dto.generation,
+      dto.generation ?? '',
     );
 
     if (!generationName) {
       throw new BadRequestException(
         'Generation is required',
+      );
+    }
+
+    if (Array.from(generationName).length > IMPORT_GENERATION_NAME_MAX_LENGTH) {
+      throw new BadRequestException(
+        `Generation must not exceed ${IMPORT_GENERATION_NAME_MAX_LENGTH} characters`,
       );
     }
 
@@ -458,13 +471,14 @@ export class StudentImportService {
     dto: ImportStudentsDto,
   ) {
     /*
-     * Generation names are unique in the current schema, but
-     * we resolve case-insensitively so "Gen 43" and "gen 43"
-     * do not accidentally become separate logical groups.
+     * This compatibility path resolves unresolved legacy labels only.
+     * Canonical names can repeat across majors and cannot identify an
+     * import destination. The coordinated major-aware import is separate.
      */
     const matches =
       await this.prisma.student_generations.findMany({
         where: {
+          ownership_state: 'LEGACY_READ_ONLY',
           name: {
             equals: normalizedName,
             mode: 'insensitive',
@@ -549,6 +563,7 @@ export class StudentImportService {
         const concurrentMatches =
           await this.prisma.student_generations.findMany({
             where: {
+              ownership_state: 'LEGACY_READ_ONLY',
               name: {
                 equals: normalizedName,
                 mode: 'insensitive',

@@ -1,5 +1,7 @@
 import { resolveStudentPlacement } from '../common/utils/student-placement.util';
+import { cohortMetadataSelect, yearlyCohortWhere } from '../common/utils/student-cohort.util';
 import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
+import { rejectUnscopedCohortWrite, requireCohortWriteSchema } from '../common/utils/cohort-write-policy';
 import {
   BadRequestException,
   ConflictException,
@@ -20,6 +22,8 @@ import { StudentQueryDto } from './dto/student-query.dto';
 import { StudentEvaluationProgressService } from './student-evaluation-progress.service';
 
 const BCRYPT_ROUNDS = 10;
+
+const studentCohortSelect = cohortMetadataSelect;
 
 const studentSelect = {
   id: true,
@@ -44,21 +48,7 @@ const studentSelect = {
   },
 
   student_generations: {
-    select: {
-      id: true,
-      name: true,
-      entry_academic_year_id: true,
-      starting_year_level: true,
-
-      entry_academic_year: {
-        select: {
-          id: true,
-          name: true,
-          start_year: true,
-          is_active: true,
-        },
-      },
-    },
+    select: studentCohortSelect,
   },
 
   student_academic_records: {
@@ -69,6 +59,8 @@ const studentSelect = {
       major_id: true,
       class_group: true,
       progression_action: true,
+      generation_id: true,
+      student_generations: { select: studentCohortSelect },
       created_at: true,
       updated_at: true,
 
@@ -208,7 +200,7 @@ export class StudentsService {
     const search = query.search?.trim();
 
     const where: Prisma.studentsWhereInput = {
-      ...(generationId !== undefined && {
+      ...(generationId !== undefined && academicYearId === undefined && {
         generation_id: generationId,
       }),
 
@@ -264,6 +256,9 @@ export class StudentsService {
 
       filteredStudents = studentsWithContext.filter((student) => {
         const context = student.academic_context;
+
+        if (generationId !== undefined && context.cohort_context.generation_id !== generationId)
+          return false;
 
         /*
          * Effective year level may come from the explicit
@@ -445,16 +440,11 @@ export class StudentsService {
      * Only ACTIVE student accounts can be selected for a
      * new course-offering enrollment.
      *
-     * Generation is applied directly at database level.
-     * Academic placement filters are applied after the
-     * shared academic-context calculation below.
+     * Selected-year cohort and placement filters are applied after resolution;
+     * a future transfer's compatibility pointer must not hide earlier history.
      */
     const students = await prisma.students.findMany({
       where: {
-        ...(generationId !== undefined && {
-          generation_id: generationId,
-        }),
-
         users: {
           is: {
             role: 'STUDENT',
@@ -481,6 +471,9 @@ export class StudentsService {
 
     return studentsWithContext.filter((student) => {
       const context = student.academic_context;
+
+      if (generationId !== undefined && context.cohort_context.generation_id !== generationId)
+        return false;
 
       if (!context.placement_eligible) return false;
 
@@ -532,14 +525,15 @@ export class StudentsService {
     generationId: bigint,
     majorId: bigint,
   ) {
+    const cohort = await this.prisma.student_generations.findUnique({
+      where: { id: generationId }, select: cohortMetadataSelect,
+    });
     const records = await this.prisma.student_academic_records.findMany({
       where: {
         academic_year_id: academicYearId,
         major_id: majorId,
 
-        students: {
-          generation_id: generationId,
-        },
+        ...yearlyCohortWhere(generationId),
 
         class_group: {
           not: null,
@@ -563,6 +557,8 @@ export class StudentsService {
       academic_year_id: academicYearId.toString(),
 
       generation_id: generationId.toString(),
+
+      ...(cohort?.ownership_state === 'MAJOR_SCOPED' && { generation: cohort }),
 
       major_id: majorId.toString(),
 
@@ -742,35 +738,22 @@ export class StudentsService {
     student: StudentWithRelations,
     selectedAcademicYear: AcademicYearContext,
   ) {
+    const placement = resolveStudentPlacement(
+      student.student_generations,
+      student.student_academic_records,
+      selectedAcademicYear,
+      student.generation_id,
+    );
     return {
       ...student,
       academic_context: {
         academic_year: selectedAcademicYear,
         generation_entry_academic_year:
-          student.student_generations.entry_academic_year,
-        starting_year_level: student.student_generations.starting_year_level,
-        ...resolveStudentPlacement(
-          student.student_generations,
-          student.student_academic_records,
-          selectedAcademicYear,
-        ),
+          placement.cohort_context.generation?.entry_academic_year ?? null,
+        starting_year_level: placement.cohort_context.generation?.starting_year_level ?? null,
+        ...placement,
       },
     };
-  }
-
-  private async ensureGenerationExists(generationId: bigint) {
-    const generation = await this.prisma.student_generations.findUnique({
-      where: {
-        id: generationId,
-      },
-      select: {
-        id: true,
-      },
-    });
-
-    if (!generation) {
-      throw new NotFoundException('Student generation not found');
-    }
   }
 
   async create(dto: CreateStudentDto) {
@@ -788,9 +771,16 @@ export class StudentsService {
   }
 
   private async createInTransaction(dto: CreateStudentDto) {
+    await requireCohortWriteSchema(this.prisma);
     const studentCode = normalizeStudentCode(dto.student_code);
+    if (!studentCode || !dto.full_name.trim())
+      throw new BadRequestException(
+        'Student code and full name must be nonblank',
+      );
+    if (Buffer.byteLength(dto.password, 'utf8') > 72)
+      throw new BadRequestException('Password must not exceed 72 UTF-8 bytes');
 
-    const email = dto.email === undefined ? null : normalizeEmail(dto.email);
+    const email = dto.email == null ? null : normalizeEmail(dto.email);
 
     const generationId = BigInt(dto.generation_id);
 
@@ -801,7 +791,17 @@ export class StudentsService {
     /*
      * Validate all references before writing anything.
      */
-    await this.ensureGenerationExists(generationId);
+    const generation = await this.prisma.student_generations.findUnique({
+      where: { id: generationId },
+      select: {
+        id: true,
+        ownership_state: true,
+        major_id: true,
+        entry_academic_year: { select: { start_year: true } },
+      },
+    });
+    if (!generation)
+      throw new NotFoundException('Student generation not found');
 
     const [academicYear, major] = await Promise.all([
       this.prisma.academic_years.findUnique({
@@ -810,6 +810,7 @@ export class StudentsService {
         },
         select: {
           id: true,
+          start_year: true,
         },
       }),
 
@@ -819,6 +820,7 @@ export class StudentsService {
         },
         select: {
           id: true,
+          departments: { select: { status: true } },
         },
       }),
     ]);
@@ -831,9 +833,30 @@ export class StudentsService {
       throw new NotFoundException('Major not found');
     }
 
+    const canonical = generation.ownership_state === 'MAJOR_SCOPED';
+    if (!canonical) rejectUnscopedCohortWrite();
+    if (canonical) {
+      if (generation.major_id !== majorId)
+        throw new BadRequestException(
+          'Cohort ownership must match the initial major',
+        );
+      if (major.departments.status !== 'ACTIVE')
+        throw new BadRequestException(
+          'Initial placement requires an active major department',
+        );
+      if (
+        academicYear.start_year == null ||
+        generation.entry_academic_year.start_year == null ||
+        generation.entry_academic_year.start_year > academicYear.start_year
+      )
+        throw new BadRequestException(
+          'Cohort entry year must be structured and no later than the placement year',
+        );
+    }
+
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
 
-    const classGroup = dto.class_group?.trim() || null;
+    const classGroup = normalizeClassGroup(dto.class_group);
 
     try {
       const student = await this.prisma.$transaction(async (tx) => {
@@ -874,19 +897,30 @@ export class StudentsService {
         /*
          * 3. Initial academic placement.
          *
-         * All three writes are inside the same
-         * transaction. If this fails, the user and
-         * student profile are rolled back too.
+         * Account, profile, placement and canonical cohort evidence
+         * share this transaction; any failure rolls them back together.
          */
-        await tx.student_academic_records.create({
+        const placement = await tx.student_academic_records.create({
           data: {
             student_id: createdStudent.id,
             academic_year_id: academicYearId,
             year_level: dto.year_level,
             major_id: majorId,
             class_group: classGroup,
+            ...(canonical && { generation_id: generationId }),
           },
         });
+        if (canonical)
+          await tx.student_cohort_assignment_events.create({
+            data: {
+              academic_record_id: placement.id,
+              student_id: createdStudent.id,
+              academic_year_id: academicYearId,
+              major_id: majorId,
+              generation_id: generationId,
+              action: 'INITIAL',
+            },
+          });
 
         /*
          * 4. Return the complete student.
@@ -925,6 +959,7 @@ export class StudentsService {
       select: {
         id: true,
         user_id: true,
+        generation_id: true,
       },
     });
 
@@ -932,13 +967,40 @@ export class StudentsService {
       throw new NotFoundException('Student not found');
     }
 
-    let generationId: bigint | undefined;
-
     if (dto.generation_id !== undefined) {
-      generationId = BigInt(dto.generation_id);
-
-      await this.ensureGenerationExists(generationId);
+      if (BigInt(dto.generation_id) !== existingStudent.generation_id)
+        throw new ConflictException({
+          code: 'COHORT_CHANGE_REQUIRES_TRANSFER',
+          message:
+            'Personal edits cannot change cohort; use an explicit approved academic transfer or reviewed legacy mapping',
+        });
     }
+
+    if (
+      (dto.student_code !== undefined &&
+        !normalizeStudentCode(dto.student_code)) ||
+      (dto.full_name !== undefined && !dto.full_name.trim())
+    )
+      throw new BadRequestException(
+        'Student code and full name must be nonblank',
+      );
+
+    if (
+      !(
+        [
+          'student_code',
+          'full_name',
+          'email',
+          'gender',
+          'notes',
+          'status',
+        ] as const
+      ).some((field) => dto[field] !== undefined)
+    )
+      return this.prisma.students.findUniqueOrThrow({
+        where: { id },
+        select: studentSelect,
+      });
 
     const normalizedStudentCode =
       dto.student_code !== undefined
@@ -986,10 +1048,6 @@ export class StudentsService {
           data: {
             ...(normalizedStudentCode !== undefined && {
               student_code: normalizedStudentCode,
-            }),
-
-            ...(generationId !== undefined && {
-              generation_id: generationId,
             }),
 
             ...(dto.notes !== undefined && {

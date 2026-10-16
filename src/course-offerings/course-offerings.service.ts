@@ -14,6 +14,7 @@ import { CreateCourseOfferingDto } from './dto/create-course-offering.dto';
 import { CourseOfferingGroupScopeDto } from './dto/course-offering-group-scope.dto';
 import { LecturerCourseOfferingsQueryDto } from './dto/lecturer-course-offerings-query.dto';
 import { UpdateCourseOfferingDto } from './dto/update-course-offering.dto';
+import { OfferingCurriculumPolicy, offeringScopeKeys } from './offering-curriculum.policy';
 
 const groupScopeInclude = {
   curriculum_revision: true,
@@ -70,6 +71,7 @@ const evaluationGroupTargetInclude = {
 // section_code remains a display label and is not used
 // as proof of student class-group assignment.
 const offeringInclude = {
+  _count: { select: { enrollments: true } },
   courses: true,
   semesters: {
     include: {
@@ -269,17 +271,20 @@ export class CourseOfferingsService {
     return offering;
   }
 
-  async create(dto: CreateCourseOfferingDto) {
+  async create(dto: CreateCourseOfferingDto, actorId: bigint) {
     return inSerializableTransaction(
       this.prisma,
-      (db) => new CourseOfferingsService(db).createInTransaction(dto),
+      (db) => new CourseOfferingsService(db).createInTransaction(dto, actorId),
       (e: any) => {
         this.handleWriteError(e);
       },
     );
   }
 
-  private async createInTransaction(dto: CreateCourseOfferingDto) {
+  /** Called by standalone creation and by pre-creation review on a bound transaction. */
+  async validateCreation(dto: CreateCourseOfferingDto, actorId: bigint) {
+    const policy = new OfferingCurriculumPolicy(this.prisma);
+    await policy.requireAdmin(actorId);
     const courseId = BigInt(dto.course_id);
     const lecturerId = BigInt(dto.lecturer_id);
     const semesterId = BigInt(dto.semester_id);
@@ -297,16 +302,23 @@ export class CourseOfferingsService {
       courseId,
       lecturerId,
       semesterId,
-      sectionCode,
       yearLevel,
       classType ?? null,
     );
 
     await this.validateGroupScopes(semesterId, yearLevel, dto.group_scopes);
-    const curriculumBindings = await this.resolveCurriculumScopes(
+    const curriculumBindings = await policy.resolve(
       courseId,
+      semesterId,
+      yearLevel,
       dto.group_scopes,
     );
+
+    return { courseId, lecturerId, semesterId, sectionCode, yearLevel, classType, curriculumBindings };
+  }
+
+  private async createInTransaction(dto: CreateCourseOfferingDto, actorId: bigint) {
+    const { courseId, lecturerId, semesterId, sectionCode, yearLevel, classType, curriculumBindings } = await this.validateCreation(dto, actorId);
 
     const now = new Date();
 
@@ -346,17 +358,19 @@ export class CourseOfferingsService {
     }
   }
 
-  async update(id: bigint, dto: UpdateCourseOfferingDto) {
+  async update(id: bigint, dto: UpdateCourseOfferingDto, actorId: bigint) {
     return inSerializableTransaction(
       this.prisma,
-      (db) => new CourseOfferingsService(db).updateInTransaction(id, dto),
+      (db) => new CourseOfferingsService(db).updateInTransaction(id, dto, actorId),
       (e: any) => {
         this.handleWriteError(e);
       },
     );
   }
 
-  private async updateInTransaction(id: bigint, dto: UpdateCourseOfferingDto) {
+  private async updateInTransaction(id: bigint, dto: UpdateCourseOfferingDto, actorId: bigint) {
+    const policy = new OfferingCurriculumPolicy(this.prisma);
+    await policy.requireAdmin(actorId);
     const existing = await this.findOne(id);
 
     const courseId =
@@ -383,6 +397,9 @@ export class CourseOfferingsService {
     const classType =
       dto.class_type !== undefined ? dto.class_type : existing.class_type;
 
+    if (classType === null && existing.class_type !== null)
+      throw new BadRequestException({ code: 'OFFERING_CLASS_TYPE_REQUIRED', message: 'A known class type cannot be cleared into a legacy unknown context.' });
+
     if (
       courseId !== existing.course_id ||
       lecturerId !== existing.lecturer_id ||
@@ -405,7 +422,6 @@ export class CourseOfferingsService {
       courseId,
       lecturerId,
       semesterId,
-      sectionCode,
       yearLevel,
       classType,
       id,
@@ -433,36 +449,17 @@ export class CourseOfferingsService {
         scope.curriculum_revision_id !== null &&
         scope.curriculum_revision_id !== undefined,
     );
+    const originalScopes = existing.group_scopes.map((scope) => ({
+      academic_year_id: String(scope.academic_year_id),
+      generation_id: String(scope.generation_id),
+      major_id: String(scope.major_id), year_level: scope.year_level,
+      class_groups: [scope.class_group],
+    }));
+    const scopesChanged = JSON.stringify(offeringScopeKeys(scopesForValidation)) !== JSON.stringify(offeringScopeKeys(originalScopes));
+    const contextChanged = courseId !== existing.course_id || semesterId !== existing.semester_id || yearLevel !== existing.year_level || scopesChanged;
     let curriculumBindings = new Map<string, bigint | null>();
     if (pinnedScopes.length) {
-      const scopeKeys = (scopes: CourseOfferingGroupScopeDto[]) =>
-        scopes
-          .flatMap((scope) =>
-            normalizeClassGroups(scope.class_groups).map((group) =>
-              [
-                BigInt(scope.academic_year_id),
-                BigInt(scope.generation_id),
-                BigInt(scope.major_id),
-                scope.year_level,
-                group,
-              ].join(':'),
-            ),
-          )
-          .sort();
-      const originalScopes = existing.group_scopes.map((scope) => ({
-        academic_year_id: String(scope.academic_year_id),
-        generation_id: String(scope.generation_id),
-        major_id: String(scope.major_id),
-        year_level: scope.year_level,
-        class_groups: [scope.class_group],
-      }));
-      if (
-        courseId !== existing.course_id ||
-        semesterId !== existing.semester_id ||
-        yearLevel !== existing.year_level ||
-        JSON.stringify(scopeKeys(scopesForValidation)) !==
-          JSON.stringify(scopeKeys(originalScopes))
-      ) {
+      if (contextChanged) {
         throw new ConflictException(
           'A curriculum-bound offering keeps its original course, semester, year level and group assignments. Create another offering for changed curriculum context.',
         );
@@ -484,24 +481,10 @@ export class CourseOfferingsService {
             'Existing curriculum bindings cannot be replaced',
           );
       }
-    } else if (dto.group_scopes !== undefined) {
-      curriculumBindings = await this.resolveCurriculumScopes(
-        courseId,
-        dto.group_scopes,
-      );
-    } else if (
-      existing.group_scopes.length &&
-      courseId !== existing.course_id
-    ) {
-      // A changed course is a new assignment even when scopes were omitted.
-      curriculumBindings = await this.resolveCurriculumScopes(
-        courseId,
-        scopesForValidation,
-      );
-      if ([...curriculumBindings.values()].some((id) => id !== null))
-        throw new ConflictException(
-          'Changing to a revisioned course requires explicit group_scopes to save curriculum bindings',
-        );
+    } else if (contextChanged) {
+      curriculumBindings = await policy.resolve(courseId, semesterId, yearLevel, scopesForValidation);
+      if (existing.group_scopes.length && dto.group_scopes === undefined)
+        throw new ConflictException({ code: 'OFFERING_GROUP_SCOPES_REQUIRED', message: 'Changing a legacy scoped academic context requires explicit group_scopes to save applicable curriculum bindings. Unchanged history is not backfilled.' });
     }
 
     try {
@@ -521,7 +504,7 @@ export class CourseOfferingsService {
           },
         });
 
-        if (dto.group_scopes !== undefined && pinnedScopes.length === 0) {
+        if (dto.group_scopes !== undefined && pinnedScopes.length === 0 && contextChanged) {
           await tx.course_offering_group_scopes.deleteMany({
             where: {
               course_offering_id: id,
@@ -664,6 +647,8 @@ export class CourseOfferingsService {
           },
           select: {
             id: true,
+            ownership_state: true,
+            major_id: true,
           },
         }),
 
@@ -688,6 +673,9 @@ export class CourseOfferingsService {
           'Group scope generation_id does not match any student generation',
         );
       }
+
+      if (generation.ownership_state === 'MAJOR_SCOPED' && generation.major_id !== majorId)
+        throw new BadRequestException('Group scope cohort must belong to the selected major');
 
       if (!major) {
         throw new BadRequestException(
@@ -747,52 +735,6 @@ export class CourseOfferingsService {
     });
   }
 
-  private async resolveCurriculumScopes(
-    courseId: bigint,
-    scopes: CourseOfferingGroupScopeDto[] | undefined,
-  ) {
-    const bindings = new Map<string, bigint | null>();
-    for (const scope of scopes ?? []) {
-      const rules = await this.prisma.course_year_rules.findMany({
-        where: { course_id: courseId, major_id: BigInt(scope.major_id) },
-        include: { revisions: { orderBy: { effective_start_year: 'asc' } } },
-      });
-      const tracked = rules.some((rule) => rule.revisions.length > 0);
-      const rule = rules.find(
-        (candidate) => candidate.year_level === scope.year_level,
-      );
-      let revisionId: bigint | null = null;
-      if (tracked) {
-        const year = await this.prisma.academic_years.findUnique({
-          where: { id: BigInt(scope.academic_year_id) },
-        });
-        if (!year || year.start_year === null)
-          throw new BadRequestException(
-            'Revisioned curriculum assignment requires an academic year with structured start_year',
-          );
-        const applicable = rule?.revisions
-          .filter(
-            (revision) => revision.effective_start_year <= year.start_year!,
-          )
-          .at(-1);
-        if (!applicable?.enabled)
-          throw new ConflictException(
-            'No enabled curriculum revision permits this course, major and year level in the offering academic year',
-          );
-        revisionId = applicable.id;
-      }
-      if (
-        scope.curriculum_revision_id !== undefined &&
-        String(revisionId) !== scope.curriculum_revision_id
-      )
-        throw new ConflictException(
-          'Selected curriculum revision is obsolete, inapplicable or does not match the assignment. Reload curriculum history.',
-        );
-      bindings.set(`${BigInt(scope.major_id)}:${scope.year_level}`, revisionId);
-    }
-    return bindings;
-  }
-
   private async checkReferences(
     courseId: bigint,
     lecturerId: bigint,
@@ -847,7 +789,6 @@ export class CourseOfferingsService {
     courseId: bigint,
     lecturerId: bigint,
     semesterId: bigint,
-    sectionCode: string | null,
     yearLevel: number | null,
     classType: class_type | null,
     excludeId?: bigint,
@@ -857,7 +798,6 @@ export class CourseOfferingsService {
         course_id: courseId,
         lecturer_id: lecturerId,
         semester_id: semesterId,
-        section_code: sectionCode,
         year_level: yearLevel,
         class_type: classType,
 
@@ -868,16 +808,33 @@ export class CourseOfferingsService {
               }
             : undefined,
       },
+      orderBy: { id: 'asc' },
+      select: { id: true },
     });
 
     if (duplicate) {
-      throw new ConflictException(DUPLICATE_MESSAGE);
+      throw new ConflictException({
+        code: 'OFFERING_ALREADY_EXISTS',
+        message: `${DUPLICATE_MESSAGE}. Open the existing assignment to manage enrollment; changing its class label or groups does not create another identity.`,
+        existing_course_offering_id: String(duplicate.id),
+      });
     }
   }
 
   private handleWriteError(e: any): never {
     if (e.code === 'P2002') {
-      throw new ConflictException(DUPLICATE_MESSAGE);
+      throw new ConflictException({
+        code: 'OFFERING_ALREADY_EXISTS',
+        message: `${DUPLICATE_MESSAGE}. Refresh authorized assignments to locate the existing identity.`,
+      });
+    }
+
+    if (e.code === 'P2034' || e.code === 'P2028') {
+      throw new ConflictException({
+        code: 'OFFERING_WRITE_CONFLICT',
+        message:
+          'The assignment conflicted with another change or could not finish atomically. Refresh authorized assignments and review the exact identity before retrying. A class label is not a new identity.',
+      });
     }
 
     if (e.code === 'P2003') {
