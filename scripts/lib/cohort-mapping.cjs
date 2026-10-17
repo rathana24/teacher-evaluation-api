@@ -1,3 +1,4 @@
+const { selectedTestDatabase } = require('./test-database.cjs');
 const { createHash } = require('node:crypto');
 const { Prisma } = require('@prisma/client');
 
@@ -10,6 +11,26 @@ const tables = [
     'cohort_mapping_receipts',
   ]),
 ].sort();
+const optionalAlignmentTables = new Set([
+  'evaluation_activity',
+  'operation_receipts',
+  'setup_audit',
+]);
+async function presentTables(tx) {
+  const found = (
+    await tx.$queryRaw`SELECT table_name FROM information_schema.tables WHERE table_schema=current_schema() AND table_type='BASE TABLE' ORDER BY table_name`
+  ).map((row) => row.table_name);
+  const required = tables.filter((name) => !optionalAlignmentTables.has(name));
+  if (
+    required.some((name) => !found.includes(name)) ||
+    found.some((name) => !tables.includes(name))
+  )
+    fail(
+      'MAPPING_SCHEMA_MISMATCH',
+      'The candidate mapping schema does not match this executor.',
+    );
+  return found;
+}
 const idPattern = /^[1-9]\d{0,18}$/;
 const uuidPattern =
   /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -111,7 +132,7 @@ function validateManifest(input, adapter = false) {
   if (
     input.schema_version !== 1 ||
     !uuidPattern.test(input.operation_id) ||
-    input.database !== 'teacher_evaluation_test' ||
+    input.database !== selectedTestDatabase() ||
     !(adapter
       ? adapterSchema(input.schema)
       : /^cohort_test_[a-f0-9]{32}$/.test(input.schema))
@@ -203,7 +224,7 @@ async function context(tx, adapter = false) {
   const [ctx] =
     await tx.$queryRaw`SELECT current_database() AS database,current_schema() AS schema`;
   if (
-    ctx.database !== 'teacher_evaluation_test' ||
+    ctx.database !== selectedTestDatabase() ||
     !(adapter
       ? adapterSchema(ctx.schema)
       : /^cohort_test_[a-f0-9]{32}$/.test(ctx.schema))
@@ -239,8 +260,9 @@ const sqlHash = Prisma.raw(
   "encode(sha256(convert_to(to_jsonb(t)::text,'UTF8')),'hex')",
 );
 async function state(tx, adapter = false) {
+  const activeTables = await presentTables(tx);
   const hashes = {};
-  for (const name of tables)
+  for (const name of activeTables)
     hashes[name] = await tx.$queryRaw(
       Prisma.sql`SELECT ${sqlHash} AS hash FROM ${Prisma.raw(`"${name}"`)} t ORDER BY 1`,
     );
@@ -256,7 +278,7 @@ async function state(tx, adapter = false) {
     await tx.$queryRaw`SELECT t.tgname,pg_get_triggerdef(t.oid) AS definition FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON c.relnamespace=n.oid WHERE n.nspname=current_schema() AND NOT t.tgisinternal ORDER BY t.tgname,t.oid`;
   if (
     [...new Set(columns.map((row) => row.table_name))].sort().join('|') !==
-    tables.join('|')
+    activeTables.join('|')
   )
     fail(
       'MAPPING_SCHEMA_MISMATCH',
@@ -276,6 +298,7 @@ async function state(tx, adapter = false) {
       'Apply the reviewed cohort-mapping migration in the isolated test environment before enabling this workflow.',
     );
   return {
+    table_names: activeTables,
     hashes,
     schema_fingerprint: digest(metadata),
     // Review storage is not school data. Exclude it from adapter staleness so
@@ -646,7 +669,7 @@ async function verifyPreservation(
   const after = await state(tx);
   if (after.schema_fingerprint !== before.schema_fingerprint)
     fail('PRESERVATION_FAILED', 'Schema changed during mapping.');
-  for (const name of tables)
+  for (const name of before.table_names)
     if (
       ![
         'student_generations',
@@ -849,7 +872,7 @@ async function applyMapping(
           );
         await tx.$executeRaw`SET LOCAL lock_timeout='5s'`;
         await tx.$executeRaw(
-          Prisma.sql`LOCK TABLE ${Prisma.join(tables.map((name) => Prisma.raw(`"${ctx.schema}"."${name}"`)))} IN SHARE ROW EXCLUSIVE MODE`,
+          Prisma.sql`LOCK TABLE ${Prisma.join((await presentTables(tx)).map((name) => Prisma.raw(`"${ctx.schema}"."${name}"`)))} IN SHARE ROW EXCLUSIVE MODE`,
         );
         const actor = await authorize(tx, principal);
         const [previous] =

@@ -1,3 +1,5 @@
+import { legacyEvaluationFixture } from './utils/legacy-evaluation-fixture';
+import { selectedTestDatabase } from './utils/test-database';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -184,7 +186,7 @@ describe('Lecturer owned course offerings (e2e)', () => {
     const [database] = await prisma.$queryRaw<
       Array<{ name: string }>
     >`SELECT current_database() AS name`;
-    expect(database.name).toBe('teacher_evaluation_test');
+    expect(database.name).toBe(selectedTestDatabase());
     confirmed = true;
     passwordHash = await bcrypt.hash('Password123', 10);
     const lecturer = await actor('LECTURER', 'owner');
@@ -344,21 +346,23 @@ describe('Lecturer owned course offerings (e2e)', () => {
           { offering: 3, status: 'DRAFT' as const, version: 0 },
           { offering: 0, status: 'DRAFT' as const, version: 1 },
         ];
-        for (const [index, spec] of evaluationSpecs.entries()) {
-          const evaluation = await tx.evaluations.create({
-            data: {
-              course_offering_id: offerings[spec.offering],
-              survey_version_id: versions[spec.version],
-              status: spec.status,
-              start_at: now,
-              end_at: new Date('2026-10-31T00:00:00.000Z'),
-              created_by: admin.id,
-              created_at: new Date(now.getTime() + index * 1000),
-              updated_at: now,
-            },
-          });
-          evaluations.push(evaluation.id);
-        }
+        await legacyEvaluationFixture(tx, async () => {
+          for (const [index, spec] of evaluationSpecs.entries()) {
+            const evaluation = await tx.evaluations.create({
+              data: {
+                course_offering_id: offerings[spec.offering],
+                survey_version_id: versions[spec.version],
+                status: spec.status,
+                start_at: now,
+                end_at: new Date('2026-10-31T00:00:00.000Z'),
+                created_by: admin.id,
+                created_at: new Date(now.getTime() + index * 1000),
+                updated_at: now,
+              },
+            });
+            evaluations.push(evaluation.id);
+          }
+        });
         const target = await tx.evaluation_group_targets.create({
           data: {
             evaluation_id: evaluations[0],

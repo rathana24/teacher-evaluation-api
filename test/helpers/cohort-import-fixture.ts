@@ -1,3 +1,4 @@
+import { selectedTestDatabase } from '../utils/test-database';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -52,7 +53,7 @@ export class CohortImportFixture {
       Array<{ database: string; schema: string }>
     >`SELECT current_database() AS database,current_schema() AS schema`;
     expect(context).toEqual({
-      database: 'teacher_evaluation_test',
+      database: selectedTestDatabase(),
       schema: 'public',
     });
     expect(this.schema).toMatch(/^cohort_import_test_[a-f0-9]{32}$/);
@@ -77,7 +78,7 @@ export class CohortImportFixture {
     const migrations = fs
       .readdirSync('prisma/migrations', { withFileTypes: true })
       .filter((entry) => entry.isDirectory());
-    expect(migrations).toHaveLength(23);
+    expect(migrations).toHaveLength(28);
     for (const entry of migrations) {
       const sql = fs.readFileSync(
         `prisma/migrations/${entry.name}/migration.sql`,
@@ -128,7 +129,7 @@ export class CohortImportFixture {
       Array<{ database: string; schema: string }>
     >`SELECT current_database() AS database,current_schema() AS schema`;
     expect(owned).toEqual({
-      database: 'teacher_evaluation_test',
+      database: selectedTestDatabase(),
       schema: this.schema,
     });
   }
@@ -140,7 +141,7 @@ export class CohortImportFixture {
           Array<{ database: string }>
         >`SELECT current_database() AS database`;
         if (
-          context.database !== 'teacher_evaluation_test' ||
+          context.database !== selectedTestDatabase() ||
           !/^cohort_import_test_[a-f0-9]{32}$/.test(this.schema)
         )
           throw new Error('Unsafe fixture cleanup');

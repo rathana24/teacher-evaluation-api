@@ -62,14 +62,16 @@ async function main() {
       update: {},
       create: { name: 'E2E BASE 2026', start_year: 2026, is_active: false },
     });
-    const generation = await tx.student_generations.upsert({
-      where: { name: 'E2E BASE GENERATION' },
-      update: {},
-      create: {
-        name: 'E2E BASE GENERATION',
-        entry_academic_year_id: academicYear.id,
-      },
-    });
+    const generation =
+      (await tx.student_generations.findFirst({
+        where: { name: 'E2E BASE GENERATION' },
+      })) ??
+      (await tx.student_generations.create({
+        data: {
+          name: 'E2E BASE GENERATION',
+          entry_academic_year_id: academicYear.id,
+        },
+      }));
     const major = await tx.majors.upsert({
       where: { code: 'E2E-BASE' },
       update: {},

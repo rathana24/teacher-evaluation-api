@@ -1,3 +1,4 @@
+import { selectedTestDatabase } from './utils/test-database';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -172,7 +173,7 @@ describe('Course catalog CRUD boundaries and permissions (e2e)', () => {
     const [database] = await prisma.$queryRaw<
       Array<{ name: string }>
     >`SELECT current_database() AS name`;
-    expect(database.name).toBe('teacher_evaluation_test');
+    expect(database.name).toBe(selectedTestDatabase());
     const courses = await prisma.courses.findMany({ orderBy: { id: 'asc' } });
     const departments = await prisma.departments.findMany({
       orderBy: { id: 'asc' },
@@ -830,10 +831,7 @@ describe('Course catalog CRUD boundaries and permissions (e2e)', () => {
     );
     const schemas = document.components!.schemas!;
     expect(schemas.CreateCourseDto).toMatchObject({
-      required: expect.arrayContaining([
-        'course_name',
-        'department_id',
-      ]),
+      required: expect.arrayContaining(['course_name', 'department_id']),
       properties: {
         course_code: { minLength: 1, maxLength: 30, nullable: false },
         course_name: { minLength: 1, maxLength: 150, nullable: false },
@@ -846,7 +844,9 @@ describe('Course catalog CRUD boundaries and permissions (e2e)', () => {
         description: { type: 'string', nullable: true },
       },
     });
-    expect((schemas.CreateCourseDto as { required?: string[] }).required).not.toContain('course_code');
+    expect(
+      (schemas.CreateCourseDto as { required?: string[] }).required,
+    ).not.toContain('course_code');
     const updateSchema = schemas.UpdateCourseDto;
     if (!('properties' in updateSchema))
       throw new Error('Expected update schema properties');

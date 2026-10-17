@@ -1,3 +1,4 @@
+import { selectedTestDatabase } from './utils/test-database';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Test } from '@nestjs/testing';
@@ -183,7 +184,7 @@ describe('Semester CRUD boundaries and permissions (e2e)', () => {
     const [database] = await prisma.$queryRaw<
       Array<{ name: string }>
     >`SELECT current_database() AS name`;
-    expect(database.name).toBe('teacher_evaluation_test');
+    expect(database.name).toBe(selectedTestDatabase());
     const years = await prisma.academic_years.findMany({
       orderBy: { id: 'asc' },
     });

@@ -1,3 +1,5 @@
+import { backendCapabilities } from '../src/auth/backend-capabilities';
+import { selectedTestDatabase } from './utils/test-database';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -83,7 +85,7 @@ describe('Persisted enrollment counts and self academic context (e2e)', () => {
       Array<{ name: string; schema: string }>
     >`SELECT current_database() AS name, current_schema() AS schema`;
     expect(context).toEqual({
-      name: 'teacher_evaluation_test',
+      name: selectedTestDatabase(),
       schema: 'public',
     });
     expect(await db.academic_years.count({ where: { is_active: true } })).toBe(
@@ -688,6 +690,7 @@ describe('Persisted enrollment counts and self academic context (e2e)', () => {
       expect(text).not.toContain(secret);
     expect(response.body.student.academic_context).toBeDefined();
     expect(Object.keys(response.body.capabilities)).toEqual([
+      ...Object.keys(backendCapabilities),
       'change_password',
       'reviewed_assignment_enrollment_v1',
       'automatic_course_codes_v1',

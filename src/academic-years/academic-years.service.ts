@@ -1,3 +1,4 @@
+import { AcademicYearInitializationService } from './academic-year-initialization.service';
 import { inSerializableTransaction } from '../common/utils/serializable-transaction.util';
 import { calendarDate } from '../common/utils/calendar-date.util';
 import { throwKnownDatabaseConstraint } from '../common/utils/database-constraint.util';
@@ -33,10 +34,22 @@ export class AcademicYearsService {
     return academicYear;
   }
 
-  async create(dto: CreateAcademicYearDto) {
+  async create(dto: CreateAcademicYearDto, actorId?: bigint) {
     return inSerializableTransaction(
       this.prisma,
-      (db) => new AcademicYearsService(db).createInTransaction(dto),
+      async (db) => {
+        const year = await new AcademicYearsService(db).createInTransaction(
+          dto,
+        );
+        const initialized = await new AcademicYearInitializationService(
+          db,
+        ).setup(
+          { name: year.name, start_year: year.start_year ?? undefined },
+          actorId ?? 0n,
+          year.id,
+        );
+        return { ...year, rollover: initialized.rollover };
+      },
       (e: any) => {
         throwKnownDatabaseConstraint(e);
         if (e.code === 'P2002') {
@@ -113,7 +126,9 @@ export class AcademicYearsService {
         : existing.start_date;
 
     const endDate =
-      dto.end_date !== undefined ? calendarDate(dto.end_date) : existing.end_date;
+      dto.end_date !== undefined
+        ? calendarDate(dto.end_date)
+        : existing.end_date;
 
     this.checkDateOrder(startDate, endDate);
 

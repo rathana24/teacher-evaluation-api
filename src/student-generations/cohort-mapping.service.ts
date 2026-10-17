@@ -38,6 +38,9 @@ type Adapter = {
   ): Promise<Record<string, unknown>>;
 };
 const localRequire = createRequire(`${process.cwd()}/package.json`);
+const { selectedTestDatabase } = localRequire(
+  './scripts/lib/test-database.cjs',
+) as { selectedTestDatabase: () => string };
 const { isolatedHttpMappingAdapter } = localRequire(
   './scripts/lib/cohort-mapping.cjs',
 ) as {
@@ -142,7 +145,7 @@ export class CohortMappingService {
       Array<{ database: string; schema: string }>
     >`SELECT current_database() AS database,current_schema() AS schema`;
     if (
-      context.database !== 'teacher_evaluation_test' ||
+      context.database !== selectedTestDatabase() ||
       !(
         context.schema === 'public' ||
         /^cohort_(?:import_)?test_[a-f0-9]{32}$/.test(context.schema)

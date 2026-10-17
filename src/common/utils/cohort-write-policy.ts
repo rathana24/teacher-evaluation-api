@@ -78,11 +78,11 @@ export async function cohortWriteSchemaReady(db: Db): Promise<boolean> {
   const [ledger] = await db.$queryRaw<Array<{ ready: boolean }>>`
     SELECT NOT EXISTS (
       SELECT 1 FROM (VALUES
-        ('20261016010000_expand_major_scoped_cohorts','27f37fc8824921e690937816c26c5536e16a2369d990ae4f483a9d76d63417d6'),
-        ('20261016020000_add_reviewed_cohort_mapping_kind','b8f53d0e77169655501b0e0f4475f4caab353a9f545483119980869b2c07fb1b')
-      ) expected(name,checksum)
+        ('20261016010000_expand_major_scoped_cohorts',ARRAY['32bcb7a2818c9c134103dea613bbb71c5620c7f608f0240bb61c6ce0c7ce33d7','27f37fc8824921e690937816c26c5536e16a2369d990ae4f483a9d76d63417d6']),
+        ('20261016020000_add_reviewed_cohort_mapping_kind',ARRAY['b8f53d0e77169655501b0e0f4475f4caab353a9f545483119980869b2c07fb1b','e5cf2dae667a14722f7b2ca9a20ad7b82baae5049dd2f2ea58a4f5c035776701'])
+      ) expected(name,checksums)
       WHERE NOT EXISTS (SELECT 1 FROM _prisma_migrations m
-        WHERE m.migration_name=expected.name AND m.checksum=expected.checksum
+        WHERE m.migration_name=expected.name AND m.checksum=ANY(expected.checksums)
           AND m.finished_at IS NOT NULL AND m.rolled_back_at IS NULL)
     ) AS ready
   `;

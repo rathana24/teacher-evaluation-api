@@ -1,3 +1,4 @@
+import { selectedTestDatabase } from '../utils/test-database';
 import { Prisma } from '@prisma/client';
 
 async function isolated(db: Prisma.TransactionClient) {
@@ -6,7 +7,7 @@ async function isolated(db: Prisma.TransactionClient) {
   >`SELECT current_database() AS database`;
   if (
     process.env.NODE_ENV !== 'test' ||
-    context.database !== 'teacher_evaluation_test'
+    context.database !== selectedTestDatabase()
   )
     throw new Error(
       'Synthetic curriculum fixture requires the isolated test database',

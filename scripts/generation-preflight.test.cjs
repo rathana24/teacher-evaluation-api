@@ -1,3 +1,4 @@
+const { selectedTestDatabase } = require('../test/database-safety.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -279,7 +280,13 @@ test('test guard accepts only explicit local isolated public-schema configuratio
     DATABASE_URL:
       'postgresql://synthetic:synthetic@localhost:5432/teacher_evaluation_test?schema=public',
   };
-  assert.equal(validateTestConfig(config), config.DATABASE_URL);
+  assert.equal(
+    validateTestConfig(config),
+    config.DATABASE_URL.replace(
+      'teacher_evaluation_test',
+      selectedTestDatabase(),
+    ),
+  );
   for (const change of [
     { NODE_ENV: 'development' },
     { DB_NAME: 'teacher_evaluation' },
@@ -318,7 +325,7 @@ test('collector enables read-only before any context or application read', async
           calls.push('context');
           return [
             {
-              database: 'teacher_evaluation_test',
+              database: selectedTestDatabase(),
               schema: 'public',
               read_only: 'on',
               isolation: 'repeatable read',
@@ -373,10 +380,35 @@ test('real isolated audit is read-only and preserves all rows, migration ledger 
     assert.deepEqual(await databaseFingerprint(db), before);
     assert.equal(first.database_context.read_only, 'on');
     assert.equal(first.cohort_contract_implemented, false);
-    assert.equal(before.tables.length, 32);
+    // Cover the migrated schema rather than pinning this audit to an older
+    // checkpoint's table count. The fingerprint equality above protects every
+    // table, migration row and sequence, including newly added audit tables.
+    for (const table of [
+      '_prisma_migrations',
+      'student_generations',
+      'evaluations',
+    ]) {
+      assert.ok(before.tables.some((row) => row.table === table));
+    }
+    const migrationCount = fs
+      .readdirSync(path.resolve(__dirname, '../prisma/migrations'), {
+        withFileTypes: true,
+      })
+      .filter(
+        (entry) =>
+          entry.isDirectory() &&
+          fs.existsSync(
+            path.resolve(
+              __dirname,
+              '../prisma/migrations',
+              entry.name,
+              'migration.sql',
+            ),
+          ),
+      ).length;
     assert.equal(
       before.tables.find((row) => row.table === '_prisma_migrations').count,
-      23,
+      migrationCount,
     );
   } finally {
     await db.$disconnect();

@@ -1,3 +1,4 @@
+import { selectedTestDatabase } from './utils/test-database';
 import { Prisma } from '@prisma/client';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
@@ -401,7 +402,12 @@ describe('Reviewed cohort mapping executor (owned schema only)', () => {
       'cohort-mapping-receipts.sql',
     ])
       await db.$executeRawUnsafe(
-        fs.readFileSync(`scripts/migrations/${file}`, 'utf8'),
+        fs
+          .readFileSync(`scripts/migrations/${file}`, 'utf8')
+          .replaceAll(
+            "current_database() <> 'teacher_evaluation_test'",
+            `current_database() <> '${selectedTestDatabase()}'`,
+          ),
       );
   }, 90000);
   afterEach(async () => {

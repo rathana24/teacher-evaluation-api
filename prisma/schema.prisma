@@ -178,17 +178,20 @@ model student_academic_records {
 }
 
 model course_offerings {
+  source_offering_id BigInt?
+  source_offering    course_offerings?  @relation("OfferingRollover", fields: [source_offering_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  rollover_copies    course_offerings[] @relation("OfferingRollover")
   // SQL owns the nullable level CHECK and NULLS NOT DISTINCT on the index below.
   // Keep the six-field compound selector; migrate deploy preserves SQL semantics.
-  id           BigInt      @id @default(autoincrement())
-  course_id    BigInt
-  lecturer_id  BigInt
-  semester_id  BigInt
-  year_level   Int?
-  class_type   class_type?
-  section_code String?     @db.VarChar(50)
-  created_at   DateTime    @db.Timestamp(6)
-  updated_at   DateTime    @db.Timestamp(6)
+  id                 BigInt             @id @default(autoincrement())
+  course_id          BigInt
+  lecturer_id        BigInt
+  semester_id        BigInt
+  year_level         Int?
+  class_type         class_type?
+  section_code       String?            @db.VarChar(50)
+  created_at         DateTime           @db.Timestamp(6)
+  updated_at         DateTime           @db.Timestamp(6)
 
   courses      courses                        @relation(fields: [course_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   users        users                          @relation(fields: [lecturer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -286,13 +289,14 @@ model enrollments {
 }
 
 model evaluation_participants {
-  id                BigInt    @id @default(autoincrement())
-  evaluation_id     BigInt
-  student_id        BigInt
-  survey_version_id BigInt?
-  has_submitted     Boolean   @default(false)
-  submitted_at      DateTime? @db.Timestamp(6)
-  created_at        DateTime  @db.Timestamp(6)
+  placement_snapshot Json?
+  id                 BigInt    @id @default(autoincrement())
+  evaluation_id      BigInt
+  student_id         BigInt
+  survey_version_id  BigInt?
+  has_submitted      Boolean   @default(false)
+  submitted_at       DateTime? @db.Timestamp(6)
+  created_at         DateTime  @db.Timestamp(6)
 
   evaluations       evaluations        @relation(fields: [evaluation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   users             users              @relation(fields: [student_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -395,11 +399,13 @@ model question_options {
 }
 
 model responses {
-  id                BigInt   @id @default(autoincrement())
-  evaluation_id     BigInt
-  survey_version_id BigInt?
-  submitted_at      DateTime @db.Timestamp(6)
-  created_at        DateTime @db.Timestamp(6)
+  audience_major_id    BigInt?
+  audience_major_label Json?
+  id                   BigInt   @id @default(autoincrement())
+  evaluation_id        BigInt
+  survey_version_id    BigInt?
+  submitted_at         DateTime @db.Timestamp(6)
+  created_at           DateTime @db.Timestamp(6)
 
   answers         answers[]
   evaluations     evaluations      @relation(fields: [evaluation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -606,4 +612,38 @@ enum gender {
   MALE
   FEMALE
   OTHER
+}
+
+model operation_receipts {
+  id                  String   @id @default(uuid()) @db.Uuid
+  actor_id            BigInt
+  operation           String   @db.VarChar(60)
+  idempotency_key     String   @db.VarChar(128)
+  request_fingerprint String   @db.VarChar(64)
+  result_json         Json
+  created_at          DateTime @default(now()) @db.Timestamp(6)
+
+  @@unique([actor_id, operation, idempotency_key])
+}
+
+model evaluation_activity {
+  id            BigInt   @id @default(autoincrement())
+  evaluation_id BigInt
+  action        String   @db.VarChar(30)
+  occurred_at   DateTime @default(now()) @db.Timestamp(6)
+  actor_id      BigInt?
+  actor_name    String?  @db.VarChar(150)
+  before_json   Json?
+  after_json    Json?
+
+  @@index([evaluation_id, occurred_at, id])
+}
+
+model setup_audit {
+  id                  BigInt   @id @default(autoincrement())
+  destination_year_id BigInt
+  source_year_id      BigInt?
+  actor_id            BigInt
+  details             Json
+  created_at          DateTime @default(now()) @db.Timestamp(6)
 }

@@ -46,7 +46,7 @@ export class AcademicYearSetupController {
     summary:
       'Atomically create an academic year with Semester 1 and Semester 2',
     description:
-      'ADMIN only. Validate all input, then create year, optional active-year switch, both semesters and durable receipt in one SERIALIZABLE transaction. Any failure rolls back all changes. Exact retries return original IDs/counts with already_applied:true, even after later edits/deletion. Receipt recovery does not reactivate years. This B-only contract does not yet initialize student groups or teaching assignments and must not replace frontend rollover until the integrated B/F/I capability is deployed. Existing separate year/semester CRUD remains unchanged.',
+      'ADMIN only. Validate all input, then create year, optional active-year switch, both semesters and durable receipt in one SERIALIZABLE transaction. Any failure rolls back all changes. Exact retries return original IDs/counts with already_applied:true, even after later edits/deletion. Receipt recovery does not reactivate years. Missing student groups and teaching assignments are now initialized in the same transaction, with source/destination audit and rollover counts. The integrated_academic_year_rollover_v1 capability identifies this combined contract. Existing separate year/semester CRUD remains unchanged.',
   })
   @ApiResponse({
     status: 201,
@@ -85,7 +85,7 @@ export class AcademicYearSetupController {
   @ApiOperation({
     summary: 'Create only missing semester numbers for an existing year',
     description:
-      'Supply exactly numbers 1 and 2. Existing semester names/dates and year fields/active state are preserved verbatim. Return created/preserved counts and original IDs. Never overwrite teaching/evaluation history. Uses the same actor/input-bound durable receipt as setup; retain the same key/body across retries. Year ID is a positive PostgreSQL bigint string. No group/assignment rollover yet.',
+      'Supply exactly numbers 1 and 2. Existing semester names/dates and year fields/active state are preserved verbatim. Return created/preserved counts and original IDs. Never overwrite teaching/evaluation history. Uses the same actor/input-bound durable receipt as setup; retain the same key/body across retries. Year ID is a positive PostgreSQL bigint string. Missing-only group/assignment initialization is included in the same transaction.',
   })
   complete(
     @Param('id') id: string,

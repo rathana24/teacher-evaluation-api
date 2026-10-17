@@ -1,3 +1,4 @@
+const { selectedTestDatabase } = require('./lib/test-database.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const { parseEnv } = require('node:util');
@@ -74,7 +75,7 @@ function configuration(options, environment) {
   if (
     values.NODE_ENV === 'test' &&
     (!['localhost', '127.0.0.1'].includes(url.hostname) ||
-      decodeURIComponent(url.pathname.slice(1)) !== 'teacher_evaluation_test')
+      decodeURIComponent(url.pathname.slice(1)) !== selectedTestDatabase())
   )
     throw new BootstrapError(
       'INVALID_CONFIGURATION',

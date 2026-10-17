@@ -1,3 +1,4 @@
+import { backendCapabilities } from '../src/auth/backend-capabilities';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -140,6 +141,7 @@ describe('Controlled cohort write cutover (owned schema HTTP)', () => {
       expect(await db.student_generations.count()).toBe(0);
       const response = await unchanged(() => me(role), 200);
       expect(response.body.capabilities).toEqual({
+        ...backendCapabilities,
         change_password: true,
         automatic_course_codes_v1: true,
         reviewed_assignment_enrollment_v1: true,
@@ -229,7 +231,12 @@ describe('Controlled cohort write cutover (owned schema HTTP)', () => {
         if (value !== undefined)
           process.env.REQUIRE_MAJOR_SCOPED_COHORTS = value;
         const response = await unchanged(() => me(), 200);
-        expect(response.body.capabilities).toEqual({ change_password: true, automatic_course_codes_v1: true, reviewed_assignment_enrollment_v1: true });
+        expect(response.body.capabilities).toEqual({
+          ...backendCapabilities,
+          change_password: true,
+          automatic_course_codes_v1: true,
+          reviewed_assignment_enrollment_v1: true,
+        });
       },
     );
     it('can opt in and return to compatibility without rewriting records', async () => {

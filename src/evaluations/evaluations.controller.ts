@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Delete,
   Get,
@@ -62,8 +63,9 @@ export class EvaluationsController {
   findAll(
     @Query()
     query: ListEvaluationsQueryDto,
+    @CurrentUser() actor: { id: bigint },
   ) {
-    return this.evaluationsService.findAll(query);
+    return this.evaluationsService.findAll(query, actor.id);
   }
 
   @Post('participants/preview')
@@ -88,8 +90,9 @@ export class EvaluationsController {
   previewParticipants(
     @Body()
     dto: PreviewEvaluationParticipantsDto,
+    @CurrentUser() actor: { id: bigint },
   ) {
-    return this.evaluationsService.previewParticipants(dto);
+    return this.evaluationsService.previewParticipants(dto, actor.id);
   }
 
   @Get(':id')
@@ -120,8 +123,9 @@ export class EvaluationsController {
   findOne(
     @Param('id', ParseBigIntPipe)
     id: bigint,
+    @CurrentUser() actor: { id: bigint },
   ) {
-    return this.evaluationsService.findOne(id);
+    return this.evaluationsService.findOne(id, actor.id);
   }
 
   @Post()
@@ -153,6 +157,12 @@ export class EvaluationsController {
       id: bigint;
     },
   ) {
+    if (dto.publish && !dto.review_id)
+      throw new BadRequestException({
+        code: 'REVIEW_REQUIRED',
+        message:
+          'Atomic publication requires a full creation preview and review_id',
+      });
     if (dto.review_id && this.reviewedWorkflows)
       return this.reviewedWorkflows.confirmCreate(dto, currentUser.id);
     requireReviewAtCutover();
@@ -162,7 +172,8 @@ export class EvaluationsController {
   @Put(':id/schedule')
   @ApiOperation({
     summary: 'Edit a DRAFT schedule or extend a currently active OPEN deadline',
-    description: 'ADMIN only. DRAFT schedule behavior is retained. For OPEN, require start_at <= server time < current end_at and an end_at-only body strictly later than the current deadline. Supplying start_at, even unchanged/null, is rejected. Upcoming, expired, CLOSED and missing-window evaluations cannot be extended. One SERIALIZABLE transaction changes only end_at and updated_at; questionnaire/version, participants, drafts, enrollments, answers, start time and status remain unchanged. Concurrent extension/closure may return 409; reload the evaluation before retrying. After a lost response, GET the evaluation to verify its current deadline/status; do not assume a retry must return 200. No activity-history capability is introduced.',
+    description:
+      'ADMIN only. DRAFT schedule behavior is retained. For OPEN, require start_at <= server time < current end_at and an end_at-only body strictly later than the current deadline. Supplying start_at, even unchanged/null, is rejected. Upcoming, expired, CLOSED and missing-window evaluations cannot be extended. One SERIALIZABLE transaction changes only end_at and updated_at; questionnaire/version, participants, drafts, enrollments, answers, start time and status remain unchanged. Concurrent extension/closure may return 409; reload the evaluation before retrying. After a lost response, GET the evaluation to verify its current deadline/status; do not assume a retry must return 200. No activity-history capability is introduced.',
   })
   @ApiParam({
     name: 'id',
@@ -175,11 +186,13 @@ export class EvaluationsController {
   })
   @ApiResponse({
     status: 400,
-    description: 'Invalid schedule; ACTIVE_DEADLINE_START_IMMUTABLE or ACTIVE_DEADLINE_MUST_INCREASE. Rejected requests change no stored rows.',
+    description:
+      'Invalid schedule; ACTIVE_DEADLINE_START_IMMUTABLE or ACTIVE_DEADLINE_MUST_INCREASE. Rejected requests change no stored rows.',
   })
   @ApiResponse({
     status: 409,
-    description: 'EVALUATION_NOT_ACTIVE or transaction conflict. Never reopens an expired/CLOSED evaluation; reload current status/deadline.',
+    description:
+      'EVALUATION_NOT_ACTIVE or transaction conflict. Never reopens an expired/CLOSED evaluation; reload current status/deadline.',
   })
   updateSchedule(
     @Param('id', ParseBigIntPipe)
@@ -187,8 +200,9 @@ export class EvaluationsController {
 
     @Body()
     dto: UpdateScheduleDto,
+    @CurrentUser() actor: { id: bigint },
   ) {
-    return this.evaluationsService.updateSchedule(id, dto);
+    return this.evaluationsService.updateSchedule(id, dto, actor.id);
   }
 
   @Post(':id/open')
@@ -224,8 +238,9 @@ export class EvaluationsController {
   open(
     @Param('id', ParseBigIntPipe)
     id: bigint,
+    @CurrentUser() actor: { id: bigint },
   ) {
-    return this.evaluationsService.open(id);
+    return this.evaluationsService.open(id, actor.id);
   }
 
   @Post(':id/close')
@@ -253,8 +268,9 @@ export class EvaluationsController {
   close(
     @Param('id', ParseBigIntPipe)
     id: bigint,
+    @CurrentUser() actor: { id: bigint },
   ) {
-    return this.evaluationsService.close(id);
+    return this.evaluationsService.close(id, actor.id);
   }
 
   @Delete(':id')
@@ -284,7 +300,8 @@ export class EvaluationsController {
   async remove(
     @Param('id', ParseBigIntPipe)
     id: bigint,
+    @CurrentUser() actor: { id: bigint },
   ) {
-    await this.evaluationsService.remove(id);
+    await this.evaluationsService.remove(id, actor.id);
   }
 }

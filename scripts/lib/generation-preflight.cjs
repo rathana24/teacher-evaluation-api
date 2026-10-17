@@ -1,3 +1,4 @@
+const { selectedTestDatabase } = require('./test-database.cjs');
 const { createHash } = require('node:crypto');
 const { Prisma } = require('@prisma/client');
 
@@ -206,7 +207,8 @@ function validateTestConfig(config) {
     throw new Error(
       'Blocked: preflight requires local teacher_evaluation_test, public schema and NODE_ENV=test.',
     );
-  return config.DATABASE_URL;
+  url.pathname = `/${selectedTestDatabase()}`;
+  return url.toString();
 }
 
 async function inReadOnlySnapshot(db, operation) {
@@ -216,7 +218,7 @@ async function inReadOnlySnapshot(db, operation) {
       const [context] =
         await tx.$queryRaw`SELECT current_database() AS database, current_schema() AS schema, current_setting('transaction_read_only') AS read_only, current_setting('transaction_isolation') AS isolation`;
       if (
-        context.database !== 'teacher_evaluation_test' ||
+        context.database !== selectedTestDatabase() ||
         context.schema !== 'public' ||
         context.read_only !== 'on' ||
         context.isolation !== 'repeatable read'

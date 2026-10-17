@@ -1,3 +1,4 @@
+import { selectedTestDatabase } from './utils/test-database';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { SwaggerModule } from '@nestjs/swagger';
@@ -174,7 +175,7 @@ describe('Student import/export business flows (e2e)', () => {
     const [database] = await prisma.$queryRaw<
       Array<{ name: string }>
     >`SELECT current_database() AS name`;
-    expect(database.name).toBe('teacher_evaluation_test');
+    expect(database.name).toBe(selectedTestDatabase());
     databaseConfirmed = true;
     const login = await api().post('/api/auth/login').send({
       identifier: 'admin@itc.edu.kh',
@@ -364,8 +365,23 @@ describe('Student import/export business flows (e2e)', () => {
           timing: 'active' | 'future' | 'expired' | 'unscheduled',
           participants: Array<[number, boolean]>,
         ) {
-          const teachingLecturer = offerings.length === 0 ? lecturer.id : (await tx.users.create({data:{role:'LECTURER',full_name:'Synthetic import-export lecturer',email:`${prefix}lecturer-${offerings.length}@test.invalid`,password_hash:passwordHash,created_at:now,updated_at:now}})).id;
-          if (teachingLecturer !== lecturer.id) assignmentLecturers.push(teachingLecturer);
+          const teachingLecturer =
+            offerings.length === 0
+              ? lecturer.id
+              : (
+                  await tx.users.create({
+                    data: {
+                      role: 'LECTURER',
+                      full_name: 'Synthetic import-export lecturer',
+                      email: `${prefix}lecturer-${offerings.length}@test.invalid`,
+                      password_hash: passwordHash,
+                      created_at: now,
+                      updated_at: now,
+                    },
+                  })
+                ).id;
+          if (teachingLecturer !== lecturer.id)
+            assignmentLecturers.push(teachingLecturer);
           const offering = await tx.course_offerings.create({
             data: {
               course_id: course.id,
@@ -510,7 +526,9 @@ describe('Student import/export business flows (e2e)', () => {
           await tx.course_offerings.deleteMany({
             where: { id: { in: f().offerings } },
           });
-          await tx.users.deleteMany({ where: { id: { in: f().assignmentLecturers } } });
+          await tx.users.deleteMany({
+            where: { id: { in: f().assignmentLecturers } },
+          });
           await tx.questions.delete({ where: { id: f().question } });
           await tx.survey_versions.delete({ where: { id: f().version } });
           await tx.surveys.delete({ where: { id: f().survey } });

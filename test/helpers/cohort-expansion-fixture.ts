@@ -1,3 +1,4 @@
+import { selectedTestDatabase } from '../utils/test-database';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -11,6 +12,9 @@ const publicApplicationNames = Prisma.dmmf.datamodel.models
   .map((model) => model.dbName || model.name)
   .sort();
 const expandedOnly = new Set([
+  'evaluation_activity',
+  'operation_receipts',
+  'setup_audit',
   'cohort_mapping_operations',
   'student_cohort_assignment_events',
   'cohort_mapping_receipts',
@@ -59,7 +63,7 @@ export class CohortExpansionFixture {
       Array<{ database: string; schema: string }>
     >`SELECT current_database() AS database, current_schema() AS schema`;
     expect(context).toEqual({
-      database: 'teacher_evaluation_test',
+      database: selectedTestDatabase(),
       schema: 'public',
     });
     expect(this.schema).toMatch(/^cohort_test_[a-f0-9]{32}$/);
@@ -142,7 +146,7 @@ export class CohortExpansionFixture {
     >`
       SELECT current_database() AS database, current_schema() AS schema`;
     expect(owned).toEqual({
-      database: 'teacher_evaluation_test',
+      database: selectedTestDatabase(),
       schema: this.schema,
     });
     await this.assertPublicUnchanged();
@@ -155,7 +159,7 @@ export class CohortExpansionFixture {
         const [context] = await this.root.$queryRaw<
           Array<{ name: string }>
         >`SELECT current_database() AS name`;
-        expect(context.name).toBe('teacher_evaluation_test');
+        expect(context.name).toBe(selectedTestDatabase());
         expect(this.schema).toMatch(/^cohort_test_[a-f0-9]{32}$/);
         await this.root.$executeRawUnsafe(
           `DROP SCHEMA ${quote(this.schema)} CASCADE`,

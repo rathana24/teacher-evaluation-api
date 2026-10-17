@@ -1,3 +1,4 @@
+import { AcademicYearInitializationService } from './academic-year-initialization.service';
 import {
   ConflictException,
   HttpException,
@@ -172,7 +173,13 @@ export class AcademicYearSetupService {
           created.push(String(semester.id));
         }
       }
+      const initialized = await new AcademicYearInitializationService(db).setup(
+        { name: year.name, start_year: year.start_year ?? undefined },
+        actor,
+        year.id,
+      );
       const result = {
+        rollover: initialized.rollover,
         status: 'COMPLETE',
         academic_year: year,
         semesters: saved,

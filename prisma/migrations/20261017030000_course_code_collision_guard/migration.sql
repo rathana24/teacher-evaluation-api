@@ -1,0 +1,4 @@
+-- Preserve master's existing literal uniqueness for official course codes.
+-- Automatic allocation already reserves occupied case variants under its lock.
+-- alignment-preflight.cjs reports historical case variants for operator review.
+-- Official codes are never renamed or assigned a new case-insensitive identity.

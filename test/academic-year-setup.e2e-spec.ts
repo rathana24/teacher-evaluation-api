@@ -87,9 +87,12 @@ describe('Atomic academic year and semester setup (owned PostgreSQL)', () => {
     return {
       tables: (await fixture.snapshot(db)).filter(
         (t) =>
-          !['academic_years', 'semesters', 'reviewed_operations'].includes(
-            t.name,
-          ),
+          ![
+            'academic_years',
+            'semesters',
+            'reviewed_operations',
+            'setup_audit',
+          ].includes(t.name),
       ),
       semester: await db.semesters.findUnique({ where: { id: oldSemester } }),
     };
@@ -267,11 +270,11 @@ describe('Atomic academic year and semester setup (owned PostgreSQL)', () => {
     await fixture.close();
   });
 
-  it('recognizes migrated receipt support in an empty catalog without an integrated rollover capability', async () => {
+  it('recognizes migrated receipt support and integrated rollover in an empty catalog', async () => {
     expect(readyOnEmpty).toBe(true);
     expect(
       (await api().get('/api/auth/me').set(auth())).body.capabilities,
-    ).not.toHaveProperty('integrated_academic_year_rollover_v1');
+    ).toHaveProperty('integrated_academic_year_rollover_v1', true);
   });
   it('atomically creates exactly one year, Semester 1 and Semester 2 and a completed receipt', async () => {
     const input = body(),
@@ -775,13 +778,13 @@ describe('Atomic academic year and semester setup (owned PostgreSQL)', () => {
       await db.semesters.count({ where: { academic_year_id: year.id } }),
     ).toBe(2);
   });
-  it('documents setup, missing-only completion, recovery and the B-only boundary in Swagger', () => {
+  it('documents setup, missing-only completion, recovery and integrated rollover in Swagger', () => {
     const document = SwaggerModule.createDocument(
       app,
       new DocumentBuilder().addBearerAuth().build(),
     );
     expect(document.paths[`${path}/setup`].post!.description).toContain(
-      'does not yet initialize',
+      'integrated_academic_year_rollover_v1',
     );
     expect(
       document.paths[`${path}/{id}/complete-setup`].post!.description,
@@ -797,7 +800,7 @@ describe('Atomic academic year and semester setup (owned PostgreSQL)', () => {
     const result = await api()
       .post(path)
       .set(auth())
-      .send({ name: `CRUD-${++serial}`, start_year: 2099 });
+      .send({ name: `CRUD-${++serial}`, start_year: 2198 });
     expect(result.status).toBe(201);
     expect(
       await db.semesters.count({

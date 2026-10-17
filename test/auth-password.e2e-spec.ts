@@ -1,3 +1,4 @@
+import { selectedTestDatabase } from './utils/test-database';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
@@ -133,7 +134,7 @@ describe('Self-service password changes (e2e)', () => {
     const [database] = await prisma.$queryRaw<Array<{ name: string }>>`
       SELECT current_database() AS name
     `;
-    expect(database.name).toBe('teacher_evaluation_test');
+    expect(database.name).toBe(selectedTestDatabase());
     databaseConfirmed = true;
     passwordHash = await bcrypt.hash(original, 10);
     fixtures = await prisma.$transaction(async (tx) => {

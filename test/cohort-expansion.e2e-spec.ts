@@ -1,3 +1,4 @@
+import { selectedTestDatabase } from './utils/test-database';
 import { Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
@@ -9,10 +10,15 @@ import {
 
 describe('Candidate major-scoped cohort expansion (owned schema only)', () => {
   const owned = new CohortExpansionFixture();
-  const sql = fs.readFileSync(
-    'scripts/migrations/major-scoped-generations-expand.sql',
-    'utf8',
-  );
+  const sql = fs
+    .readFileSync(
+      'scripts/migrations/major-scoped-generations-expand.sql',
+      'utf8',
+    )
+    .replaceAll(
+      "current_database() <> 'teacher_evaluation_test'",
+      `current_database() <> '${selectedTestDatabase()}'`,
+    );
   const now = new Date('2060-01-01T00:00:00Z');
   let db: typeof owned.db;
   let originalRows: unknown;

@@ -1,3 +1,4 @@
+import { selectedTestDatabase } from './utils/test-database';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -96,7 +97,7 @@ describe('Major-scoped cohort catalog (real HTTP)', () => {
       Array<{ database: string; schema: string }>
     >`SELECT current_database() AS database,current_schema() AS schema`;
     expect(context).toEqual({
-      database: 'teacher_evaluation_test',
+      database: selectedTestDatabase(),
       schema: 'public',
     });
     original = await hashes();

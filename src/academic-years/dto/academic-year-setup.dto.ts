@@ -35,7 +35,7 @@ export class AcademicYearSetupDto extends CompleteAcademicYearSetupDto {
   @ApiProperty({
     type: CreateAcademicYearDto,
     description:
-      'Create one new academic year. Activation and both semesters commit together. This first setup contract does not yet perform B/F/I rollover.',
+      'Create one new academic year. Activation and both semesters commit together. Includes atomic missing-only group/assignment rollover.',
   })
   @IsDefined()
   @Type(() => CreateAcademicYearDto)

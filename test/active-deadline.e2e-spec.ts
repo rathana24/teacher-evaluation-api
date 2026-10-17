@@ -41,7 +41,7 @@ describe('Active evaluation deadline extension (owned PostgreSQL)', () => {
   }
   async function history() {
     return (await fixture.snapshot(db)).filter(
-      (table) => table.name !== 'evaluations',
+      (table) => !['evaluations', 'evaluation_activity'].includes(table.name),
     );
   }
   async function active(patch: object = {}) {

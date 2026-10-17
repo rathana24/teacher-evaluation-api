@@ -1,3 +1,4 @@
+import { selectedTestDatabase } from './utils/test-database';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Prisma, PrismaClient } from '@prisma/client';
@@ -135,7 +136,7 @@ describe('Secure first-admin provisioning (isolated schema e2e)', () => {
       Array<{ name: string; schema: string }>
     >`SELECT current_database() AS name, current_schema() AS schema`;
     expect(context).toEqual({
-      name: 'teacher_evaluation_test',
+      name: selectedTestDatabase(),
       schema: 'public',
     });
     expect(schema).toMatch(/^bootstrap_test_[a-f0-9]{32}$/);
@@ -203,11 +204,11 @@ describe('Secure first-admin provisioning (isolated schema e2e)', () => {
     const [ownedContext] = await db.$queryRaw<
       Array<{ name: string; schema: string }>
     >`SELECT current_database() AS name, current_schema() AS schema`;
-    expect(ownedContext).toEqual({ name: 'teacher_evaluation_test', schema });
+    expect(ownedContext).toEqual({ name: selectedTestDatabase(), schema });
     const migrations = await db.$queryRaw<Array<{ count: bigint }>>(
       Prisma.sql`SELECT count(*) FROM ${table('_prisma_migrations')} WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`,
     );
-    expect(migrations[0].count).toBe(23n);
+    expect(migrations[0].count).toBe(28n);
     amsBefore = await db.departments.findMany();
     expect(amsBefore).toEqual([
       expect.objectContaining({
@@ -246,7 +247,7 @@ describe('Secure first-admin provisioning (isolated schema e2e)', () => {
         const [context] = await root.$queryRaw<
           Array<{ name: string }>
         >`SELECT current_database() AS name`;
-        expect(context.name).toBe('teacher_evaluation_test');
+        expect(context.name).toBe(selectedTestDatabase());
         expect(schema).toMatch(/^bootstrap_test_[a-f0-9]{32}$/);
         await root.$executeRaw(
           Prisma.sql`DROP SCHEMA ${Prisma.raw(quote(schema))} CASCADE`,
@@ -315,76 +316,7 @@ describe('Secure first-admin provisioning (isolated schema e2e)', () => {
       'first-admin@example.test',
     );
   });
-  it('allows the provisioned ADMIN to sign in and create initial department, major and year data', async () => {
-    await provisionFirstAdmin(db, credentials());
-    const login = await api().post('/api/auth/login').send({
-      identifier: credentials().email,
-      password: credentials().password,
-    });
-    expect(login.status).toBe(200);
-    const auth = { Authorization: `Bearer ${login.body.access_token}` };
-    expect((await api().get('/api/auth/me').set(auth)).body).toMatchObject({
-      role: 'ADMIN',
-      user_departments: [],
-    });
-    const department = await api()
-      .post('/api/departments')
-      .set(auth)
-      .send({ code: 'BOOT', name: 'Bootstrap Synthetic Department' });
-    expect(department.status).toBe(201);
-    const major = await api().post('/api/majors').set(auth).send({
-      code: 'BOOT-M',
-      name: 'Bootstrap Synthetic Major',
-      department_id: department.body.id,
-    });
-    expect(major.status).toBe(201);
-    const year = await api()
-      .post('/api/academic-years')
-      .set(auth)
-      .send({ name: 'BOOT-2026', start_year: 2026, is_active: false });
-    expect(year.status).toBe(201);
-    expect(
-      (
-        await api()
-          .post('/api/semesters')
-          .set(auth)
-          .send({
-            semester_name: 'Semester 1',
-            academic_year_id: Number(year.body.id),
-            semester_number: 1,
-          })
-      ).status,
-    ).toBe(201);
-    expect(
-      (
-        await api()
-          .post('/api/users')
-          .send({ ...credentials(), role: 'ADMIN' })
-      ).status,
-    ).toBe(401);
-  });
-  it.each(['ACTIVE', 'INACTIVE'] as const)(
-    'refuses an existing %s ADMIN without resetting any account',
-    async (status) => {
-      const receipt = await provisionFirstAdmin(db, credentials());
-      if (status === 'INACTIVE')
-        await db.users.update({
-          where: { id: BigInt(receipt.id) },
-          data: { status },
-        });
-      const before = await snapshot();
-      const result = await cli(
-        credentials({
-          email: 'another@example.test',
-          password: 'DifferentSynthetic123!',
-        }),
-      );
-      expect(result.code).toBe(1);
-      expect(result.stderr).toContain('ADMIN_EXISTS');
-      expect(await snapshot()).toEqual(before);
-      noSecret(result, 'DifferentSynthetic123!');
-    },
-  );
+
   it('serializes independent CLI processes so only one first ADMIN can be created', async () => {
     const results = await Promise.all([
       cli(credentials()),
@@ -674,5 +606,75 @@ describe('Secure first-admin provisioning (isolated schema e2e)', () => {
     expect(await db.users.count()).toBe(0);
     terminal.input.end();
     terminal.output.end();
+  });
+  it.each(['ACTIVE', 'INACTIVE'] as const)(
+    'refuses an existing %s ADMIN without resetting any account',
+    async (status) => {
+      const receipt = await provisionFirstAdmin(db, credentials());
+      if (status === 'INACTIVE')
+        await db.users.update({
+          where: { id: BigInt(receipt.id) },
+          data: { status },
+        });
+      const before = await snapshot();
+      const result = await cli(
+        credentials({
+          email: 'another@example.test',
+          password: 'DifferentSynthetic123!',
+        }),
+      );
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('ADMIN_EXISTS');
+      expect(await snapshot()).toEqual(before);
+      noSecret(result, 'DifferentSynthetic123!');
+    },
+  );
+  it('allows the provisioned ADMIN to sign in and create initial department, major and year data', async () => {
+    await provisionFirstAdmin(db, credentials());
+    const login = await api().post('/api/auth/login').send({
+      identifier: credentials().email,
+      password: credentials().password,
+    });
+    expect(login.status).toBe(200);
+    const auth = { Authorization: `Bearer ${login.body.access_token}` };
+    expect((await api().get('/api/auth/me').set(auth)).body).toMatchObject({
+      role: 'ADMIN',
+      user_departments: [],
+    });
+    const department = await api()
+      .post('/api/departments')
+      .set(auth)
+      .send({ code: 'BOOT', name: 'Bootstrap Synthetic Department' });
+    expect(department.status).toBe(201);
+    const major = await api().post('/api/majors').set(auth).send({
+      code: 'BOOT-M',
+      name: 'Bootstrap Synthetic Major',
+      department_id: department.body.id,
+    });
+    expect(major.status).toBe(201);
+    const year = await api()
+      .post('/api/academic-years')
+      .set(auth)
+      .send({ name: 'BOOT-2026', start_year: 2026, is_active: false });
+    expect(year.status).toBe(201);
+    expect(
+      (
+        await api()
+          .post('/api/semesters')
+          .set(auth)
+          .send({
+            semester_name: 'Semester 1',
+            academic_year_id: Number(year.body.id),
+            semester_number: 1,
+          })
+      ).status,
+    ).toBe(201);
+    expect(
+      (
+        await api()
+          .post('/api/users')
+          .send({ ...credentials(), role: 'ADMIN' })
+      ).status,
+    ).toBe(401);
   });
 });

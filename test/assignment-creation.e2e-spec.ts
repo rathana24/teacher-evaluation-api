@@ -1178,7 +1178,7 @@ describe('Reviewed assignment creation and exact enrollment (owned PostgreSQL)',
       await db.$executeRawUnsafe(definition);
     }
   });
-  it('protects all complete identities at the SQL boundary while preserving null legacy labels', async () => {
+  it('protects complete identities at the SQL boundary while retaining incomplete legacy contexts', async () => {
     const r = await reviewed(),
       saved = await confirm(r.confirmation);
     expect(saved.status).toBe(200);
@@ -1191,13 +1191,12 @@ describe('Reviewed assignment creation and exact enrollment (owned PostgreSQL)',
         data: { ...data, section_code: 'Raw duplicate' },
       }),
     ).rejects.toMatchObject({ code: 'P2002' });
-    const a = await db.course_offerings.create({
-        data: { ...data, year_level: null, section_code: 'Legacy A' },
-      }),
-      b = await db.course_offerings.create({
-        data: { ...data, year_level: null, section_code: 'Legacy B' },
-      });
-    expect(a.id).not.toBe(b.id);
+    await db.course_offerings.create({
+      data: { ...data, year_level: null, section_code: 'Legacy A' },
+    });
+    await db.course_offerings.create({
+      data: { ...data, year_level: null, section_code: 'Legacy B' },
+    });
     const cleared = await api()
       .put(`/api/course-offerings/${existing.id}`)
       .set(auth())

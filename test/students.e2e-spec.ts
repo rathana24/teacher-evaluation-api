@@ -1,3 +1,4 @@
+import { selectedTestDatabase } from './utils/test-database';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
@@ -163,7 +164,7 @@ describe('Students CRUD and permissions (e2e)', () => {
     const [database] = await prisma.$queryRaw<
       Array<{ name: string }>
     >`SELECT current_database() AS name`;
-    expect(database.name).toBe('teacher_evaluation_test');
+    expect(database.name).toBe(selectedTestDatabase());
     testDatabaseConfirmed = true;
 
     const login = async (identifier: string) => {

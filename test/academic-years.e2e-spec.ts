@@ -1,3 +1,4 @@
+import { selectedTestDatabase } from './utils/test-database';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Test } from '@nestjs/testing';
@@ -72,6 +73,7 @@ describe('Academic years CRUD and permissions (e2e)', () => {
   function safeYear(value: Record<string, unknown>) {
     expect(Object.keys(value).sort()).toEqual(
       [
+        ...(Object.hasOwn(value, 'rollover') ? ['rollover'] : []),
         'id',
         'name',
         'start_year',
@@ -158,7 +160,7 @@ describe('Academic years CRUD and permissions (e2e)', () => {
     const [database] = await prisma.$queryRaw<
       Array<{ name: string }>
     >`SELECT current_database() AS name`;
-    expect(database.name).toBe('teacher_evaluation_test');
+    expect(database.name).toBe(selectedTestDatabase());
     const existingYears = await prisma.academic_years.findMany({
       orderBy: { id: 'asc' },
     });

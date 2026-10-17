@@ -1,3 +1,4 @@
+import { selectedTestDatabase } from './utils/test-database';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -480,7 +481,7 @@ describe('Authenticated reviewed cohort mapping (owned migrated-schema HTTP)', (
   it('inspects complete safe references read-only, including high IDs and frozen target context', async () => {
     const response = await unchanged(() => get(), 200);
     safe(response.body);
-    expect(response.body.database).toBe('teacher_evaluation_test');
+    expect(response.body.database).toBe(selectedTestDatabase());
     expect(response.body.schema).toBe(fixture.schema);
     expect(response.body.profiles.map((row: any) => row.id)).toContain(
       '9007199254740993',
@@ -577,7 +578,7 @@ describe('Authenticated reviewed cohort mapping (owned migrated-schema HTTP)', (
     const reviewed = await preview();
     safe(reviewed);
     expect(reviewed.manifest).toMatchObject({
-      database: 'teacher_evaluation_test',
+      database: selectedTestDatabase(),
       schema: fixture.schema,
       reviewer_id: String(users[0]),
     });

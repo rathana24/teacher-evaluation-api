@@ -1,3 +1,4 @@
+import { selectedTestDatabase } from './utils/test-database';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -154,7 +155,7 @@ describe('Student export group options (e2e)', () => {
     const [database] = await prisma.$queryRaw<Array<{ name: string }>>`
       SELECT current_database() AS name
     `;
-    expect(database.name).toBe('teacher_evaluation_test');
+    expect(database.name).toBe(selectedTestDatabase());
     confirmed = true;
     passwordHash = await bcrypt.hash('Password123', 10);
     fixtures = await prisma.$transaction(async (tx) => {
