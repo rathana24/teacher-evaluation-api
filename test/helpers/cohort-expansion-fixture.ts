@@ -76,6 +76,7 @@ export class CohortExpansionFixture {
     const url = new URL(process.env.DATABASE_URL!);
     url.searchParams.set('schema', this.schema);
     const targetUrl = url.toString();
+    fs.mkdirSync(path.join(process.cwd(), '.tmp'), { recursive: true });
     this.folder = fs.mkdtempSync(
       path.join(process.cwd(), '.tmp/cohort-expansion-'),
     );

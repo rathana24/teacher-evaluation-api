@@ -22,7 +22,7 @@ export class UpdateCourseOfferingDto {
     example: '1',
     description: 'ID of an existing course',
   })
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsNumberString({ no_symbols: true })
   course_id?: string;
 
@@ -30,7 +30,7 @@ export class UpdateCourseOfferingDto {
     example: '2',
     description: 'ID of a user with role LECTURER',
   })
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsNumberString({ no_symbols: true })
   lecturer_id?: string;
 
@@ -38,7 +38,7 @@ export class UpdateCourseOfferingDto {
     example: '1',
     description: 'ID of an existing semester',
   })
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsNumberString({ no_symbols: true })
   semester_id?: string;
 

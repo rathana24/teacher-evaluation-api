@@ -256,6 +256,16 @@ describe('SemestersService', () => {
     );
   });
 
+  it('rejects clearing a known semester number', async () => {
+    semesterFindUniqueMock.mockResolvedValue(semester);
+
+    await expect(
+      service.update(1n, { semester_number: null }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(semesterUpdateMock).not.toHaveBeenCalled();
+  });
+
   it('preserves an unknown historical semester number during unrelated updates', async () => {
     const historicalSemester = {
       ...semester,

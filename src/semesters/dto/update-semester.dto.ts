@@ -52,7 +52,7 @@ export class UpdateSemesterDto {
     maximum: 2,
     nullable: true,
     description:
-      'Semester number within the academic year. Omit to retain; null preserves the supported unknown classification.',
+      'Semester number within the academic year. Omit to retain. null is accepted only for a historical semester whose number is already unknown; a known number cannot be cleared.',
   })
   @IsOptional()
   @IsInt()

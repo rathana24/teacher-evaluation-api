@@ -787,7 +787,8 @@ export class ResultsService {
         .filter(
           (value: string | null): value is string =>
             value !== null && value.trim().length > 0,
-        );
+        )
+        .sort((a, b) => a.localeCompare(b)); // alphabetical, never submission order
 
       return {
         ...base,

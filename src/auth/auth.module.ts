@@ -7,6 +7,7 @@ import { StudentsModule } from '../students/students.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
+import { LoginAttemptLimiter } from './login-attempt-limiter';
 
 @Module({
   imports: [
@@ -24,6 +25,6 @@ import { JwtStrategy } from './jwt.strategy';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, LoginAttemptLimiter],
 })
 export class AuthModule {}

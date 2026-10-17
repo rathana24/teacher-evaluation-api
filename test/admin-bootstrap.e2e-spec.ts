@@ -152,6 +152,7 @@ describe('Secure first-admin provisioning (isolated schema e2e)', () => {
     const url = new URL(process.env.DATABASE_URL!);
     url.searchParams.set('schema', schema);
     targetUrl = url.toString();
+    fs.mkdirSync(path.join(repository, '.tmp'), { recursive: true });
     temporaryFolder = fs.mkdtempSync(
       path.join(repository, '.tmp', 'admin-bootstrap-'),
     );

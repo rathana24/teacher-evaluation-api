@@ -64,6 +64,7 @@ export class CohortImportFixture {
     expect(collision[0].count).toBe(0n);
     await this.root.$executeRawUnsafe(`CREATE SCHEMA ${quote(this.schema)}`);
     this.owned = true;
+    fs.mkdirSync(path.resolve('.tmp'), { recursive: true });
     this.folder = fs.mkdtempSync(path.resolve('.tmp/cohort-import-'));
     fs.copyFileSync(
       'prisma/schema.prisma',

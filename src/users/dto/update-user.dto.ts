@@ -7,6 +7,7 @@ import {
   IsString,
   MaxLength,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import { gender, user_status } from '@prisma/client';
 
@@ -15,7 +16,7 @@ export class UpdateUserDto {
     maxLength: 255,
     example: 'newlecturer@itc.edu.kh',
   })
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsEmail()
   @MaxLength(255)
   email?: string;
@@ -25,7 +26,7 @@ export class UpdateUserDto {
     maxLength: 72,
     example: 'NewPassword456',
   })
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsString()
   @MinLength(6)
   @MaxLength(72)
@@ -35,7 +36,7 @@ export class UpdateUserDto {
     maxLength: 150,
     example: 'Keo Sophal',
   })
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsNotEmpty()
   @IsString()
   @MaxLength(150)
@@ -54,7 +55,7 @@ export class UpdateUserDto {
     enum: user_status,
     example: 'INACTIVE',
   })
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsEnum(user_status)
   status?: user_status;
 }

@@ -1,8 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNumberString } from 'class-validator';
+import { IsDatabaseId } from '../../common/validators/database-id.validator';
 
 export class CreateEnrollmentDto {
   @ApiProperty({ example: '5', description: 'id of a user with role STUDENT' })
-  @IsNumberString({ no_symbols: true })
+  @IsDatabaseId()
   student_id!: string;
 }

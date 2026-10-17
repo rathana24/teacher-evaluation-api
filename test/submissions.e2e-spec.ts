@@ -46,11 +46,9 @@ describe('Submission (e2e)', () => {
 
   let mcOption1: string;
   let mcOption2: string;
-  let mcOption3: string;
 
   let checkboxOption1: string;
   let checkboxOption2: string;
-  let checkboxOption3: string;
 
   let courseId: bigint | undefined;
   let semesterId: bigint | undefined;
@@ -422,7 +420,6 @@ describe('Submission (e2e)', () => {
 
     mcOption2 = multipleChoice.body.question_options[1].id;
 
-    mcOption3 = multipleChoice.body.question_options[2].id;
 
     const checkbox = await addQuestion(versionAId, {
       question_text: 'Which learning activities were useful?',
@@ -449,7 +446,6 @@ describe('Submission (e2e)', () => {
 
     checkboxOption2 = checkbox.body.question_options[1].id;
 
-    checkboxOption3 = checkbox.body.question_options[2].id;
 
     // ------------------------------------------------
     // Version B — simple rating survey

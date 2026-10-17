@@ -26,6 +26,7 @@ import { CourseYearRulesService } from './course-year-rules.service';
 import { CreateCourseYearRuleDto } from './dto/create-course-year-rule.dto';
 import { UpdateCourseYearRuleDto } from './dto/update-course-year-rule.dto';
 import { CreateCurriculumRevisionDto } from './dto/create-curriculum-revision.dto';
+import { ApplicableRevisionQueryDto } from './dto/applicable-revision-query.dto';
 
 @ApiTags('course-year-rules')
 @ApiBearerAuth()
@@ -66,7 +67,6 @@ export class CourseYearRulesController {
     description:
       'Use the selected semester academic_year_id, not the active year. Use an enabled returned revision id as group_scopes[].curriculum_revision_id. LEGACY_UNVERSIONED returns enabled:null and does not approve new contexts; an inapplicable/withdrawn revision returns enabled:false. New/context-changing offerings independently recheck applicability, including without scopes. Unchanged historical lecturer/display edits retain saved bindings and legacy unknowns.',
   })
-  @ApiQuery({ name: 'academic_year_id', required: true, example: '1' })
   @ApiResponse({
     status: 200,
     schema: {
@@ -93,9 +93,14 @@ export class CourseYearRulesController {
   })
   applicable(
     @Param('id', ParseBigIntPipe) id: bigint,
-    @Query('academic_year_id', ParseBigIntPipe) yearId: bigint,
+    // A query DTO, not a bigint parameter: the global ValidationPipe cannot
+    // build a missing bigint value and would fail with a 500.
+    @Query() query: ApplicableRevisionQueryDto,
   ) {
-    return this.courseYearRulesService.applicableRevision(id, yearId);
+    return this.courseYearRulesService.applicableRevision(
+      id,
+      BigInt(query.academic_year_id),
+    );
   }
 
   @Post(':id/revisions')

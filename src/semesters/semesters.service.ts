@@ -91,6 +91,15 @@ export class SemestersService {
   private async updateInTransaction(id: bigint, dto: UpdateSemesterDto) {
     const existing = await this.findOne(id);
 
+    // null only preserves a historical unknown number; it never clears a known one.
+    if (dto.semester_number === null && existing.semester_number !== null) {
+      throw new BadRequestException({
+        code: 'SEMESTER_NUMBER_REQUIRED',
+        message:
+          'semester_number cannot be cleared once set. Use 1 or 2, or omit it to keep the current number.',
+      });
+    }
+
     if (
       dto.academic_year_id !== undefined &&
       BigInt(dto.academic_year_id) !== existing.academic_year_id

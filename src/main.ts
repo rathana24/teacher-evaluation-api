@@ -44,9 +44,11 @@ async function bootstrap() {
       'DELETE',
       'OPTIONS',
     ],
+    // Idempotency-Key is required by retry-safe year setup and course creation
     allowedHeaders: [
       'Content-Type',
       'Authorization',
+      'Idempotency-Key',
     ],
   });
 

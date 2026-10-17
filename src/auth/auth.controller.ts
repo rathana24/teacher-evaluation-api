@@ -3,8 +3,10 @@ import {
   Controller,
   Get,
   HttpCode,
+  Ip,
   Post,
   Put,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -18,13 +20,17 @@ import {
 import { AuthService } from './auth.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
+import { LoginAttemptLimiter } from './login-attempt-limiter';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PasswordRateLimitGuard } from '../common/guards/password-rate-limit.guard';
 
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private loginLimiter: LoginAttemptLimiter,
+  ) {}
 
   @Post('login')
   @HttpCode(200)
@@ -71,8 +77,31 @@ export class AuthController {
       },
     },
   })
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  @ApiResponse({
+    status: 429,
+    description:
+      'Five failed logins for the same identifier from the same IP within 15 minutes; a successful login resets the count',
+    schema: {
+      example: {
+        statusCode: 429,
+        message: 'Too many failed login attempts. Try again later.',
+      },
+    },
+  })
+  async login(@Body() dto: LoginDto, @Ip() ip?: string) {
+    const key = this.loginLimiter.key(ip, dto.identifier);
+    this.loginLimiter.assertAllowed(key);
+
+    try {
+      const result = await this.authService.login(dto);
+      this.loginLimiter.clear(key);
+      return result;
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        this.loginLimiter.recordFailure(key);
+      }
+      throw error;
+    }
   }
 
   @Get('me')

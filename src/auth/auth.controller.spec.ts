@@ -1,9 +1,15 @@
 import { jest } from '@jest/globals';
 
+import {
+  ForbiddenException,
+  HttpStatus,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { LoginAttemptLimiter } from './login-attempt-limiter';
 
 type LoginResult = {
   access_token: string;
@@ -67,6 +73,7 @@ describe('AuthController', () => {
             provide: AuthService,
             useValue: authServiceMock,
           },
+          LoginAttemptLimiter,
         ],
       }).compile();
 
@@ -112,6 +119,56 @@ describe('AuthController', () => {
       expect(result).toEqual(
         expectedResult,
       );
+    });
+
+    it('should return 429 after five failed logins from the same IP and identifier', async () => {
+      const dto = {
+        identifier: 'e20221111',
+        password: 'WrongPassword',
+      };
+
+      loginMock.mockRejectedValue(
+        new UnauthorizedException(
+          'Invalid identifier or password',
+        ),
+      );
+
+      for (let i = 0; i < 5; i += 1) {
+        await expect(
+          controller.login(dto, '1.2.3.4'),
+        ).rejects.toBeInstanceOf(
+          UnauthorizedException,
+        );
+      }
+
+      await expect(
+        controller.login(dto, '1.2.3.4'),
+      ).rejects.toMatchObject({
+        status: HttpStatus.TOO_MANY_REQUESTS,
+      });
+
+      expect(loginMock).toHaveBeenCalledTimes(5);
+    });
+
+    it('should not count non-credential errors such as inactive accounts', async () => {
+      const dto = {
+        identifier: 'e20221111',
+        password: 'Password123',
+      };
+
+      loginMock.mockRejectedValue(
+        new ForbiddenException(
+          'Account is not active',
+        ),
+      );
+
+      for (let i = 0; i < 6; i += 1) {
+        await expect(
+          controller.login(dto, '1.2.3.4'),
+        ).rejects.toBeInstanceOf(
+          ForbiddenException,
+        );
+      }
     });
   });
 

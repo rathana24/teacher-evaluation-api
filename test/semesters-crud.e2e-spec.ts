@@ -490,9 +490,17 @@ describe('Semester CRUD boundaries and permissions (e2e)', () => {
     expect(response.status).toBe(200);
     expect(response.body.semester_number).toBeNull();
   });
-  it('retains existing nullable semester-number update compatibility', async () => {
+  it('rejects clearing a known semester number without changing it', async () => {
     const semester = await newSemester();
-    const response = await update(semester.id, { semester_number: null });
+    const response = await rejected(
+      () => update(semester.id, { semester_number: null }),
+      400,
+    );
+    expect(response.body.code).toBe('SEMESTER_NUMBER_REQUIRED');
+  });
+  it('accepts null for a historical semester whose number is already unknown', async () => {
+    const id = String(f().semesters[5]);
+    const response = await update(id, { semester_number: null });
     expect(response.status).toBe(200);
     expect(response.body.semester_number).toBeNull();
   });
@@ -959,21 +967,20 @@ describe('Semester CRUD boundaries and permissions (e2e)', () => {
       );
     },
   );
-  it('retains nullable classification and dates in the same update as a trimmed rename', async () => {
+  it('clears nullable dates in the same update as a trimmed rename', async () => {
     const semester = await newSemester(
       body({ start_date: '2026-10-01', end_date: '2027-02-28' }),
     );
     const name = body().semester_name;
     const response = await update(semester.id, {
       semester_name: ` ${name} `,
-      semester_number: null,
       start_date: null,
       end_date: null,
     });
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({
       semester_name: name,
-      semester_number: null,
+      semester_number: 1,
       start_date: null,
       end_date: null,
       academic_year_id: String(f().years[1]),

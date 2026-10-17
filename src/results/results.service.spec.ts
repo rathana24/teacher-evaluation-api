@@ -585,6 +585,23 @@ describe('ResultsService', () => {
     ]);
   });
 
+  it('should list text feedback alphabetically, never in submission order', async () => {
+    const evaluation = buildEvaluation();
+    evaluation.responses.reverse();
+    evaluationsFindManyMock.mockResolvedValue([evaluation]);
+
+    const result = await service.getAdminResults();
+
+    const textQuestion = result[0].version_results[0].questions.find(
+      (question: any) => question.question_id === 1002n,
+    );
+
+    expect(textQuestion.feedback).toEqual([
+      'Clear explanation',
+      'Good examples',
+    ]);
+  });
+
   // =========================================================
   // UNVERSIONED HISTORICAL RESPONSES
   // =========================================================
