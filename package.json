@@ -26,8 +26,7 @@
     "test:e2e:seed": "node test/seed-e2e.cjs",
     "test:e2e": "node test/run-e2e.cjs test",
     "setup:first-admin": "node scripts/provision-first-admin.cjs",
-    "cohorts:preflight": "node scripts/generation-preflight.cjs",
-    "test:alignment:prepare": "node scripts/prepare-alignment-test.cjs"
+    "cohorts:preflight": "node scripts/generation-preflight.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",
