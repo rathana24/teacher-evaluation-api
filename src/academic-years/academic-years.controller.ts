@@ -79,11 +79,44 @@ export class AcademicYearsController {
 
   @Post()
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Create an academic year' })
+  @ApiOperation({
+    summary: 'Create an academic year',
+    description:
+      'ADMIN only. In the same SERIALIZABLE transaction as the new year, the server initializes the year from its immediate predecessor (start_year - 1). It copies missing student group placements into new records, never overwriting existing destination records. It does NOT copy teaching assignments: this endpoint creates no semesters, so every predecessor assignment is reported as skipped (INCOMPLETE_OR_UNAVAILABLE_CONTEXT). Clients that use this endpoint must still create the semesters and then copy teaching assignments themselves, or use POST /academic-years/setup, which creates the year, both semesters, the group placements and the teaching assignments atomically and idempotently. The response includes a rollover object: status COMPLETE, NO_PREDECESSOR or UNAVAILABLE (with unavailable_reason STRUCTURED_START_YEAR_REQUIRED when start_year is missing), source_academic_year_id, and groups/assignments with copied, preserved and skipped counts, copied record/offering IDs and skip reasons. Clients must not copy student group placements again.',
+  })
   @ApiResponse({
     status: 201,
-    description: 'Academic year created',
-    schema: { example: academicYearExample },
+    description:
+      'Academic year created, with the server-side rollover result',
+    schema: {
+      example: {
+        ...academicYearExample,
+        rollover: {
+          status: 'COMPLETE',
+          unavailable_reason: null,
+          source_academic_year_id: '0',
+          groups: {
+            copied: 2,
+            preserved: 0,
+            skipped: 1,
+            copied_record_ids: ['101', '102'],
+            reasons: [{ student_id: '7', reason: 'INACTIVE_ACCOUNT' }],
+          },
+          assignments: {
+            copied: 0,
+            preserved: 0,
+            skipped: 1,
+            copied_offering_ids: [],
+            reasons: [
+              {
+                source_offering_id: '55',
+                reason: 'INCOMPLETE_OR_UNAVAILABLE_CONTEXT',
+              },
+            ],
+          },
+        },
+      },
+    },
   })
   @ApiResponse({
     status: 400,

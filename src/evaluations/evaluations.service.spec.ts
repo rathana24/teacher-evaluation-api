@@ -1638,6 +1638,22 @@ describe('EvaluationsService', () => {
     });
   });
 
+  describe('findAll', () => {
+    it('selects survey_versions.survey_id for the frontend question-set link', async () => {
+      await service.findAll({});
+
+      expect(evaluationFindManyMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            survey_versions: expect.objectContaining({
+              select: expect.objectContaining({ survey_id: true }),
+            }),
+          }),
+        }),
+      );
+    });
+  });
+
   describe('findOne', () => {
     it('should return an evaluation', async () => {
       const result = await service.findOne(BigInt(50));

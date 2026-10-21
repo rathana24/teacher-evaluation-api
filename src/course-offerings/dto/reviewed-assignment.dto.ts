@@ -42,11 +42,13 @@ export class AssignmentRowDto {
   class_type!: class_type;
 
   @ApiPropertyOptional({
-    description: 'Display label only; never assignment identity.',
+    description:
+      'Display label only; never assignment identity. Empty or whitespace-only labels are rejected.',
   })
   @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/, { message: 'section_code must not be blank' })
   @MaxLength(50)
   section_code?: string;
 

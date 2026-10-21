@@ -378,14 +378,14 @@ describe('Teaching-assignment identity without display labels (owned HTTP)', () 
     }
   });
 
-  it.each(['Another label', '   ', undefined])(
+  it.each(['Another label', undefined])(
     'rejects same identity with class label %j',
     async (section_code) => {
       const existing = await create();
       await reject(() => post(body({ section_code })), 409, existing.id);
     },
   );
-  it.each(['', null])(
+  it.each(['', null, '   ', ' \t '])(
     'rejects invalid optional label %j without writes',
     async (section_code) => {
       await reject(() => post(body({ section_code })), 400);
@@ -453,13 +453,20 @@ describe('Teaching-assignment identity without display labels (owned HTTP)', () 
       await db.course_offerings.count({ where: { course_id: course } }),
     ).toBe(1);
   });
-  it.each(['', null])(
-    'rejects invalid label update %j without a trim crash',
-    async (section_code) => {
-      const original = await create();
-      await reject(() => put(original.id, { section_code }), 400);
-    },
-  );
+  it('rejects invalid label update "" without a trim crash', async () => {
+    const original = await create();
+    await reject(() => put(original.id, { section_code: '' }), 400);
+  });
+  it('clears the label on update null without a trim crash or another row', async () => {
+    const original = await create(),
+      result = await put(original.id, { section_code: null });
+    expect(result.status).toBe(200);
+    expect(result.body.id).toBe(original.id);
+    expect(result.body.section_code).toBeNull();
+    expect(
+      await db.course_offerings.count({ where: { course_id: course } }),
+    ).toBe(1);
+  });
   it('preserves a unique legacy null year/type on a display-only edit', async () => {
     const original = await raw({ year_level: null, class_type: null }),
       result = await put(original.id, { section_code: 'Legacy corrected' });

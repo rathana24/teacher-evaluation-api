@@ -112,8 +112,10 @@ describe('Backend alignment contracts and atomicity', () => {
         (y) => y.start_year,
       ),
     );
-    const start = Array.from({ length: 98 }, (_, i) => 2100 + i).find(
-      (y) => ![y - 1, y, y + 1].some((n) => used.has(n)),
+    // Stay clear of the fixed start years other suites use (up to 2101, 2198)
+    // and of each later year these tests create (start+1, start+2).
+    const start = Array.from({ length: 80 }, (_, i) => 2110 + i).find(
+      (y) => ![y - 1, y, y + 1, y + 2, y + 3].some((n) => used.has(n)),
     )!;
     ids.start = String(start);
     const year = await post('academic-years/initialize', {
@@ -914,8 +916,10 @@ describe('Backend alignment contracts and atomicity', () => {
         (y) => y.start_year,
       ),
     );
-    const start = Array.from({ length: 145 }, (_, i) => 2050 + i).find(
-      (y) => ![y - 1, y, y + 1].some((n) => used.has(n)),
+    // Stay clear of the fixed start years other suites use (up to 2101) and
+    // leave y+2 free, so no other year can treat these as its predecessor.
+    const start = Array.from({ length: 80 }, (_, i) => 2110 + i).find(
+      (y) => ![y - 1, y, y + 1, y + 2].some((n) => used.has(n)),
     )!;
     const source = await post('academic-years/initialize', {
       name: `IS-${stamp}`.slice(0, 20),
@@ -1039,6 +1043,132 @@ describe('Backend alignment contracts and atomicity', () => {
     expect(blocked.status).toBe(200);
     expect(blocked.body.items[0].outcome).toBe('BLOCKED');
     expect(blocked.body.can_confirm).toBe(false);
+  });
+  it('returns the server-side rollover from plain POST /academic-years without creating semesters', async () => {
+    const used = new Set(
+      (await db.academic_years.findMany({ select: { start_year: true } })).map(
+        (y) => y.start_year,
+      ),
+    );
+    // Stay clear of the fixed start years other suites use (up to 2101) and
+    // leave y+2 free, so no other year can treat these as its predecessor.
+    const start = Array.from({ length: 80 }, (_, i) => 2110 + i).find(
+      (y) => ![y - 1, y, y + 1, y + 2].some((n) => used.has(n)),
+    )!;
+    const source = await post('academic-years/initialize', {
+      name: `PS-${stamp}`.slice(0, 20),
+      start_year: start,
+      idempotency_key: `p-source-${stamp}`,
+    });
+    expect(source.status).toBe(201);
+    const semester = source.body.semesters.find(
+      (s: any) => s.semester_number === 1,
+    );
+    const course = await post('courses', {
+      department_id: Number(ids.department),
+      course_name: 'Plain create rollover course',
+      idempotency_key: `p-course-${stamp}`,
+    });
+    expect(course.status).toBe(201);
+    const old: string[] = [];
+    const students: string[] = [];
+    for (const [index, major] of [ids.DS, ids.FE].entries()) {
+      await post('course-year-rules', {
+        course_id: course.body.id,
+        major_id: major,
+        year_level: 2,
+        effective_academic_year_id: source.body.id,
+      }).expect(201);
+      const generation = await post('student-generations', {
+        major_id: major,
+        generation_number: 3000 + Number(source.body.id) * 2,
+        entry_academic_year_id: source.body.id,
+        starting_year_level: 2,
+      });
+      expect(generation.status).toBe(201);
+      old.push(generation.body.id);
+      const student = await post('students', {
+        student_code: `plain-${stamp}-${index}`,
+        full_name: 'Plain rollover student',
+        password: 'Password123',
+        generation_id: generation.body.id,
+        academic_year_id: source.body.id,
+        major_id: major,
+        year_level: 2,
+        class_group: index === 0 ? 'A' : 'C',
+      });
+      expect(student.status).toBe(201);
+      students.push(String(student.body.id));
+    }
+    const row = {
+      course_id: course.body.id,
+      lecturer_id: ids.lecturer,
+      semester_id: semester.id,
+      year_level: 2,
+      class_type: 'COURSE',
+      section_code: 'Plain create class',
+      group_scopes: [ids.DS, ids.FE].map((major, index) => ({
+        academic_year_id: source.body.id,
+        generation_id: old[index],
+        major_id: major,
+        year_level: 2,
+        class_groups: [index === 0 ? 'A' : 'C'],
+      })),
+    };
+    const preview = await post('course-offerings/create-preview', {
+      rows: [row],
+    });
+    expect(preview.status).toBe(200);
+    const saved = await post('course-offerings/create-confirm', {
+      rows: [row],
+      review_id: preview.body.review_id,
+      confirmations: preview.body.items.map((i: any) => ({
+        row_index: i.row_index,
+        confirmed_student_ids: i.confirmed_student_ids,
+      })),
+    });
+    expect(saved.status).toBe(201);
+
+    // The frontend creates a year with this plain endpoint, not /initialize.
+    const destination = await post('academic-years', {
+      name: `PD-${stamp}`.slice(0, 20),
+      start_year: start + 1,
+      is_active: false,
+    });
+    expect(destination.status).toBe(201);
+    const rollover = destination.body.rollover;
+    expect(rollover.status).toBe('COMPLETE');
+    expect(rollover.unavailable_reason).toBeNull();
+    expect(rollover.source_academic_year_id).toBe(String(source.body.id));
+    expect(rollover.groups.copied).toBe(2);
+    expect(rollover.groups.copied_record_ids).toHaveLength(2);
+    const placements = await db.student_academic_records.findMany({
+      where: { academic_year_id: BigInt(destination.body.id) },
+      orderBy: { id: 'asc' },
+    });
+    expect(placements.map((p) => String(p.id)).sort()).toEqual(
+      [...rollover.groups.copied_record_ids].sort(),
+    );
+    expect(placements.map((p) => p.year_level)).toEqual([3, 3]);
+    expect(placements.map((p) => p.class_group).sort()).toEqual(['A', 'C']);
+    // No destination semesters exist yet, so assignments cannot be copied here.
+    expect(rollover.assignments).toEqual({
+      copied: 0,
+      preserved: 0,
+      skipped: 1,
+      copied_offering_ids: [],
+      reasons: [
+        {
+          source_offering_id: saved.body.items[0].course_offering_id,
+          reason: 'INCOMPLETE_OR_UNAVAILABLE_CONTEXT',
+        },
+      ],
+    });
+    expect(
+      await db.semesters.count({
+        where: { academic_year_id: BigInt(destination.body.id) },
+      }),
+    ).toBe(0);
   });
   it('preserves installation-wide administrator authority for audience previews, assignment counts and results', async () => {
     const department = await db.departments.create({

@@ -796,6 +796,27 @@ describe('Atomic academic year and semester setup (owned PostgreSQL)', () => {
       (document.components!.schemas!.SetupSemesterDto as any).properties,
     ).not.toHaveProperty('academic_year_id');
   });
+  it('documents the server-side rollover returned by POST /academic-years in Swagger', () => {
+    const document = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder().addBearerAuth().build(),
+    );
+    const create = document.paths[path].post!;
+    expect(create.description).toContain('rollover');
+    expect(create.description).toContain('It does NOT copy teaching assignments');
+    expect(create.description).toContain('POST /academic-years/setup');
+    const example = (create.responses['201'] as any).content['application/json']
+      .schema.example;
+    expect(example.rollover).toMatchObject({
+      status: 'COMPLETE',
+      groups: { copied: expect.any(Number), preserved: expect.any(Number), skipped: expect.any(Number) },
+      assignments: {
+        copied: 0,
+        skipped: 1,
+        reasons: [{ reason: 'INCOMPLETE_OR_UNAVAILABLE_CONTEXT' }],
+      },
+    });
+  });
   it('keeps legacy standalone year creation free of unexpected semesters', async () => {
     const result = await api()
       .post(path)

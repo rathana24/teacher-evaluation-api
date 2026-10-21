@@ -75,6 +75,70 @@ npm run test:e2e:seed
 npm run test:e2e
 ```
 
+Run a single suite by passing its path, for example:
+
+```bash
+npm run test:e2e -- test/backend-alignment.e2e-spec.ts
+```
+
+## Verifying a running installation
+
+These checks only read data or are rejected, so they never change the `teacher_evaluation` database. Run them in Git Bash (in PowerShell, use `curl.exe` and adjust the quoting).
+
+Check the installation:
+
+```bash
+npm run lint                  # no errors
+npm run build                 # no errors
+npm test                      # all unit tests pass
+npx prisma migrate status     # "Database schema is up to date!"
+```
+
+Start the API with `npm run start:dev` and open `http://localhost:3000/api/docs`. Then, in a second terminal, replace the placeholder accounts with real ones:
+
+```bash
+API=http://localhost:3000/api
+
+# Health check
+curl -s $API/health
+
+# No token: 401
+curl -s $API/users
+
+# Sign in and keep the tokens
+ADMIN=$(curl -s -X POST $API/auth/login -H "Content-Type: application/json" \
+  -d '{"identifier":"ADMIN_EMAIL","password":"ADMIN_PASSWORD"}' \
+  | node -pe "JSON.parse(require('fs').readFileSync(0)).access_token")
+LECT=$(curl -s -X POST $API/auth/login -H "Content-Type: application/json" \
+  -d '{"identifier":"LECTURER_EMAIL","password":"LECTURER_PASSWORD"}' \
+  | node -pe "JSON.parse(require('fs').readFileSync(0)).access_token")
+
+# Profile with capability flags
+curl -s $API/auth/me -H "Authorization: Bearer $ADMIN"
+
+# Lecturer on an administrator route: 403
+curl -s $API/users -H "Authorization: Bearer $LECT"
+
+# Lecturer results: own CLOSED evaluations only, no student names or IDs
+curl -s $API/lecturer/results -H "Authorization: Bearer $LECT"
+
+# Invalid input: 400, nothing changed
+curl -s $API/users/abc -H "Authorization: Bearer $ADMIN"
+curl -s $API/users/99999999999999999999999 -H "Authorization: Bearer $ADMIN"
+curl -s -X PUT $API/users/1 -H "Authorization: Bearer $ADMIN" \
+  -H "Content-Type: application/json" -d '{"email":null}'
+
+# Login limit: attempts 1-5 return 401, attempt 6 returns 429
+# (uses a non-existent account so no real user is locked out)
+for i in 1 2 3 4 5 6; do
+  curl -s -o /dev/null -w "attempt $i: %{http_code}\n" -X POST $API/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{"identifier":"nobody@demo.test","password":"wrong"}'
+done
+```
+
+Operations that create data (year setup, create-and-publish, bulk evaluations) are demonstrated by their end-to-end suites, such as `test/backend-alignment.e2e-spec.ts` and `test/active-deadline.e2e-spec.ts`, rather than on a real database.
+
 ## Project structure
 
 ```
