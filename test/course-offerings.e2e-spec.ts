@@ -379,6 +379,76 @@ describe('Course Offerings (e2e)', () => {
       expect(res.status).toBe(200);
       expect(res.body.section_code).toBe(newSection);
     });
+
+    it('section_code null clears the label -> 200', async () => {
+      const res = await request(app.getHttpServer())
+        .put(`/api/course-offerings/${createdOfferingId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ section_code: null });
+
+      expect(res.status).toBe(200);
+      expect(res.body.section_code).toBeNull();
+      const saved = await prisma.course_offerings.findUniqueOrThrow({
+        where: { id: BigInt(createdOfferingId) },
+      });
+      expect(saved.section_code).toBeNull();
+      expect(saved.class_type).toBe(class_type.COURSE);
+      expect(saved.year_level).toBe(1);
+    });
+
+    it('omitting section_code keeps the cleared label -> 200', async () => {
+      const res = await request(app.getHttpServer())
+        .put(`/api/course-offerings/${createdOfferingId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ year_level: 1 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.section_code).toBeNull();
+    });
+
+    it.each([[''], [42], ['x'.repeat(51)]])(
+      'still rejects an invalid section_code %p -> 400 without changes',
+      async (section_code) => {
+        const res = await request(app.getHttpServer())
+          .put(`/api/course-offerings/${createdOfferingId}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ section_code });
+
+        expect(res.status).toBe(400);
+        const saved = await prisma.course_offerings.findUniqueOrThrow({
+          where: { id: BigInt(createdOfferingId) },
+        });
+        expect(saved.section_code).toBeNull();
+      },
+    );
+
+    it('a cleared label cannot bypass assignment identity -> 409', async () => {
+      const other = await request(app.getHttpServer())
+        .post('/api/course-offerings')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ ...validBody, class_type: class_type.TD, section_code: `${testSection}-TD` });
+      expect(other.status).toBe(201);
+
+      try {
+        const res = await request(app.getHttpServer())
+          .put(`/api/course-offerings/${createdOfferingId}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ class_type: class_type.TD, section_code: null });
+
+        expect(res.status).toBe(409);
+        expect(res.body.code).toBe('OFFERING_ALREADY_EXISTS');
+        expect(res.body.existing_course_offering_id).toBe(other.body.id);
+        const saved = await prisma.course_offerings.findUniqueOrThrow({
+          where: { id: BigInt(createdOfferingId) },
+        });
+        expect(saved.class_type).toBe(class_type.COURSE);
+      } finally {
+        await request(app.getHttpServer())
+          .delete(`/api/course-offerings/${other.body.id}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(204);
+      }
+    });
   });
 
   describe('DELETE /api/course-offerings/:id', () => {

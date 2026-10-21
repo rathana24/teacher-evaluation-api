@@ -386,10 +386,13 @@ export class CourseOfferingsService {
         ? BigInt(dto.semester_id)
         : existing.semester_id;
 
+    // null clears the display label; omitted preserves it.
     const sectionCode =
-      dto.section_code !== undefined
-        ? dto.section_code.trim()
-        : existing.section_code;
+      dto.section_code === null
+        ? null
+        : dto.section_code !== undefined
+          ? dto.section_code.trim()
+          : existing.section_code;
 
     const yearLevel =
       dto.year_level !== undefined ? dto.year_level : existing.year_level;

@@ -1077,6 +1077,33 @@ describe('CourseOfferingsService', () => {
       });
     });
 
+    it('clears the display label when section_code is null', async () => {
+      offeringUpdate.mockResolvedValue({ ...existingOffering, section_code: null });
+
+      await service.update(1n, { section_code: null }, 1n);
+
+      expect(offeringUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            section_code: null,
+            year_level: 3,
+            class_type: class_type.COURSE,
+          }),
+        }),
+      );
+      expect(offeringFindFirst.mock.calls[0][0].where).not.toHaveProperty('section_code');
+    });
+
+    it('clearing the label cannot bypass the assignment identity rule', async () => {
+      offeringFindFirst.mockResolvedValue({ id: 99n });
+      let failure: unknown;
+      try { await service.update(1n, { lecturer_id:'21', section_code:null }, 1n); }
+      catch (error) { failure = error; }
+      expect(failure).toBeInstanceOf(ConflictException);
+      expect((failure as ConflictException).getResponse()).toEqual(expect.objectContaining({ code:'OFFERING_ALREADY_EXISTS',existing_course_offering_id:'99' }));
+      expect(offeringUpdate).not.toHaveBeenCalled();
+    });
+
     it('rejects an identity-changing update with a different label without changing either row', async () => {
       offeringFindFirst.mockResolvedValue({ id: 99n });
       let failure: unknown;

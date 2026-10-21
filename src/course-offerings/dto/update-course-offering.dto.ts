@@ -72,13 +72,14 @@ export class UpdateCourseOfferingDto {
   @ApiPropertyOptional({
     maxLength: 50,
     example: 'A',
-    description: 'Optional display class label; changing it never creates another assignment identity. Omit to preserve it. Identity excludes labels and groups; existing legacy duplicate conflicts require separate review without merging history.',
+    nullable: true,
+    description: 'Optional display class label; changing it never creates another assignment identity. Omit to preserve it; send null to clear it. An empty string is rejected. Identity excludes labels and groups; existing legacy duplicate conflicts require separate review without merging history.',
   })
-  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @ValidateIf((_object, value: unknown) => value !== undefined && value !== null)
   @IsNotEmpty()
   @IsString()
   @MaxLength(50)
-  section_code?: string;
+  section_code?: string | null;
 
   @ApiPropertyOptional({
     type: [CourseOfferingGroupScopeDto],
