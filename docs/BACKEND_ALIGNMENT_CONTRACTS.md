@@ -2,6 +2,18 @@
 
 Contracts the frontend relies on that are easy to miss in Swagger. Each section names the endpoint, what the server already does, and what clients still have to do.
 
+## M2: class labels (`section_code`)
+
+The class label is display-only and never part of assignment identity.
+
+| Endpoint | Omitted | `null` | `""` or spaces only | Other string |
+|---|---|---|---|---|
+| `POST /api/course-offerings` | No label | 400 | 400 | Saved trimmed (max 50) |
+| `PUT /api/course-offerings/:id` | Keeps the saved label | Clears the label | 400 | Saved trimmed (max 50) |
+| `POST /api/course-offerings/create-with-enrollments/preview` and `/confirm` (each row) | No label | 400 | 400 | Saved trimmed (max 50) |
+
+Client rule: to remove a label on edit, send `null`; never send an empty or blank string. Commits `d8109e6` (null clears) and `ab2a30e` (blank rejected). Coverage: `test/course-offerings.e2e-spec.ts`, `test/offering-identity.e2e-spec.ts` and the DTO unit specs in `src/course-offerings/dto/`.
+
 ## M5: what `POST /academic-years` copies
 
 `POST /api/academic-years` (ADMIN) creates the year and, in the same SERIALIZABLE transaction, initializes it from its immediate predecessor (`start_year - 1`):
