@@ -440,6 +440,19 @@ describe('Evaluations (e2e)', () => {
       expect(res.body.some((e: any) => e.id === evalId)).toBe(true);
     });
 
+    it('list returns survey_versions.survey_id as the owning survey -> 200', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/evaluations')
+        .set(auth());
+
+      expect(res.status).toBe(200);
+      const ours = res.body.find((e: any) => e.id === evalId);
+      expect(ours.survey_versions.survey_id).toBe(tempSurveyId);
+      expect(
+        res.body.every((e: any) => typeof e.survey_versions.survey_id === 'string'),
+      ).toBe(true);
+    });
+
     it('get one shows course, lecturer, and counts -> 200', async () => {
       const res = await request(app.getHttpServer())
         .get(`/api/evaluations/${evalId}`)

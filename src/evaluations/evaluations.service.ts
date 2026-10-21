@@ -97,6 +97,8 @@ const evaluationInclude = {
     select: {
       id: true,
 
+      survey_id: true,
+
       version_no: true,
 
       status: true,
