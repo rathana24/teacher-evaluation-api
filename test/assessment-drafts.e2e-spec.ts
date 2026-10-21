@@ -781,6 +781,15 @@ describe('Assessment Drafts (e2e)', () => {
       expect(res.status).toBe(404);
     });
 
+    it('no saved draft returns 404 with the exact message the frontend matches', async () => {
+      const res = await getDraft(student2Token);
+
+      expect(res.status).toBe(404);
+      expect(res.body.message).toBe(
+        'No saved draft was found for this evaluation',
+      );
+    });
+
     it('student can save an empty draft -> 200', async () => {
       const res = await saveDraft(student2Token, []);
 
@@ -1107,6 +1116,14 @@ describe('Assessment Drafts (e2e)', () => {
         });
 
       expect(updatedParticipant.has_submitted).toBe(true);
+    });
+
+    it('loading a draft after final submission reports the submission -> 409', async () => {
+      const res = await getDraft(student1Token);
+
+      // Not the "no draft" 404: the frontend only loads drafts for unsubmitted evaluations.
+      expect(res.status).toBe(409);
+      expect(res.body.message).toBe('You have already submitted this evaluation');
     });
 
     it('student cannot save another draft after final submission -> 409', async () => {

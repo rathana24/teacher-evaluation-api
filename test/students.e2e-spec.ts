@@ -473,6 +473,22 @@ describe('Students CRUD and permissions (e2e)', () => {
       assertPrivateFieldsAbsent(res.body);
     });
 
+    it('accepts the frontend create payload with gender null and stores no gender', async () => {
+      // Shape sent by the frontend when gender, email and notes are left blank.
+      const payload: Record<string, unknown> = { ...body(), gender: null };
+      delete payload.email;
+      delete payload.notes;
+      const res = await api().post('/api/students').set(admin()).send(payload);
+      expect(res.status).toBe(201);
+      expect(res.body.users.gender).toBeNull();
+      expect(res.body.student_academic_records[0].class_group).toBe('A');
+      const saved = await prisma.users.findUniqueOrThrow({
+        where: { id: BigInt(res.body.user_id) },
+      });
+      expect(saved.gender).toBeNull();
+      assertPrivateFieldsAbsent(res.body);
+    });
+
     const invalidInputs = [
       { name: 'year zero', values: { year_level: 0 } },
       { name: 'year six', values: { year_level: 6 } },
