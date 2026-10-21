@@ -1046,8 +1046,10 @@ describe('Backend alignment contracts and atomicity', () => {
         (y) => y.start_year,
       ),
     );
-    const start = Array.from({ length: 145 }, (_, i) => 2050 + i).find(
-      (y) => ![y - 1, y, y + 1].some((n) => used.has(n)),
+    // Stay clear of the fixed start years other suites use (up to 2101) and
+    // leave y+2 free, so no other year can treat these as its predecessor.
+    const start = Array.from({ length: 80 }, (_, i) => 2110 + i).find(
+      (y) => ![y - 1, y, y + 1, y + 2].some((n) => used.has(n)),
     )!;
     const source = await post('academic-years/initialize', {
       name: `PS-${stamp}`.slice(0, 20),
