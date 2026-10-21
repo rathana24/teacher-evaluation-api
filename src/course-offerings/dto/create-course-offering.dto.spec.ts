@@ -1,11 +1,11 @@
 import { describe, expect, it } from '@jest/globals';
 import { validate } from 'class-validator';
-import { plainToInstance } from 'class-transformer';
+import { ClassConstructor, plainToInstance } from 'class-transformer';
 import { CreateCourseOfferingDto } from './create-course-offering.dto';
 import { AssignmentRowDto } from './reviewed-assignment.dto';
 
 const sectionErrors = async (
-  dto: typeof CreateCourseOfferingDto | typeof AssignmentRowDto,
+  dto: ClassConstructor<object>,
   section_code: unknown,
 ) =>
   (await validate(plainToInstance(dto, { section_code })))
