@@ -79,11 +79,39 @@ export class AcademicYearsController {
 
   @Post()
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Create an academic year' })
+  @ApiOperation({
+    summary: 'Create an academic year',
+    description:
+      'ADMIN only. In the same SERIALIZABLE transaction as the new year, the server initializes the year from its immediate predecessor (start_year - 1): it copies missing student group placements and teaching assignments into new records, never overwriting existing destination records. The response includes a rollover object: status COMPLETE, NO_PREDECESSOR or UNAVAILABLE (with unavailable_reason STRUCTURED_START_YEAR_REQUIRED when start_year is missing), source_academic_year_id, and groups/assignments with copied, preserved and skipped counts, copied record/offering IDs and skip reasons. Clients must not repeat this copy themselves. Semesters are not created by this endpoint; use POST /academic-years/setup for an idempotent year + semesters + rollover setup. The integrated_academic_year_rollover_v1 capability identifies this server-side rollover.',
+  })
   @ApiResponse({
     status: 201,
-    description: 'Academic year created',
-    schema: { example: academicYearExample },
+    description:
+      'Academic year created, with the server-side rollover result',
+    schema: {
+      example: {
+        ...academicYearExample,
+        rollover: {
+          status: 'COMPLETE',
+          unavailable_reason: null,
+          source_academic_year_id: '0',
+          groups: {
+            copied: 2,
+            preserved: 0,
+            skipped: 1,
+            copied_record_ids: ['101', '102'],
+            reasons: [{ student_id: '7', reason: 'INACTIVE_ACCOUNT' }],
+          },
+          assignments: {
+            copied: 1,
+            preserved: 0,
+            skipped: 0,
+            copied_offering_ids: ['55'],
+            reasons: [],
+          },
+        },
+      },
+    },
   })
   @ApiResponse({
     status: 400,
