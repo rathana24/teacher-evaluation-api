@@ -82,7 +82,7 @@ export class AcademicYearsController {
   @ApiOperation({
     summary: 'Create an academic year',
     description:
-      'ADMIN only. In the same SERIALIZABLE transaction as the new year, the server initializes the year from its immediate predecessor (start_year - 1): it copies missing student group placements and teaching assignments into new records, never overwriting existing destination records. The response includes a rollover object: status COMPLETE, NO_PREDECESSOR or UNAVAILABLE (with unavailable_reason STRUCTURED_START_YEAR_REQUIRED when start_year is missing), source_academic_year_id, and groups/assignments with copied, preserved and skipped counts, copied record/offering IDs and skip reasons. Clients must not repeat this copy themselves. Semesters are not created by this endpoint; use POST /academic-years/setup for an idempotent year + semesters + rollover setup. The integrated_academic_year_rollover_v1 capability identifies this server-side rollover.',
+      'ADMIN only. In the same SERIALIZABLE transaction as the new year, the server initializes the year from its immediate predecessor (start_year - 1). It copies missing student group placements into new records, never overwriting existing destination records. It does NOT copy teaching assignments: this endpoint creates no semesters, so every predecessor assignment is reported as skipped (INCOMPLETE_OR_UNAVAILABLE_CONTEXT). Clients that use this endpoint must still create the semesters and then copy teaching assignments themselves, or use POST /academic-years/setup, which creates the year, both semesters, the group placements and the teaching assignments atomically and idempotently. The response includes a rollover object: status COMPLETE, NO_PREDECESSOR or UNAVAILABLE (with unavailable_reason STRUCTURED_START_YEAR_REQUIRED when start_year is missing), source_academic_year_id, and groups/assignments with copied, preserved and skipped counts, copied record/offering IDs and skip reasons. Clients must not copy student group placements again.',
   })
   @ApiResponse({
     status: 201,
@@ -103,11 +103,16 @@ export class AcademicYearsController {
             reasons: [{ student_id: '7', reason: 'INACTIVE_ACCOUNT' }],
           },
           assignments: {
-            copied: 1,
+            copied: 0,
             preserved: 0,
-            skipped: 0,
-            copied_offering_ids: ['55'],
-            reasons: [],
+            skipped: 1,
+            copied_offering_ids: [],
+            reasons: [
+              {
+                source_offering_id: '55',
+                reason: 'INCOMPLETE_OR_UNAVAILABLE_CONTEXT',
+              },
+            ],
           },
         },
       },

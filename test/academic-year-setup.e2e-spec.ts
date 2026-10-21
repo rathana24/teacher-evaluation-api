@@ -803,14 +803,18 @@ describe('Atomic academic year and semester setup (owned PostgreSQL)', () => {
     );
     const create = document.paths[path].post!;
     expect(create.description).toContain('rollover');
-    expect(create.description).toContain('Clients must not repeat this copy');
-    expect(create.description).toContain('integrated_academic_year_rollover_v1');
+    expect(create.description).toContain('It does NOT copy teaching assignments');
+    expect(create.description).toContain('POST /academic-years/setup');
     const example = (create.responses['201'] as any).content['application/json']
       .schema.example;
     expect(example.rollover).toMatchObject({
       status: 'COMPLETE',
       groups: { copied: expect.any(Number), preserved: expect.any(Number), skipped: expect.any(Number) },
-      assignments: { copied: expect.any(Number), preserved: expect.any(Number), skipped: expect.any(Number) },
+      assignments: {
+        copied: 0,
+        skipped: 1,
+        reasons: [{ reason: 'INCOMPLETE_OR_UNAVAILABLE_CONTEXT' }],
+      },
     });
   });
   it('keeps legacy standalone year creation free of unexpected semesters', async () => {
