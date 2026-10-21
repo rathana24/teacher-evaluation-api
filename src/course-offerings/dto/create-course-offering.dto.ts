@@ -9,6 +9,7 @@ import {
   IsNumberString,
   IsString,
   Max,
+  Matches,
   MaxLength,
   Min,
   ValidateNested,
@@ -66,11 +67,12 @@ export class CreateCourseOfferingDto {
   @ApiPropertyOptional({
     maxLength: 50,
     example: 'A',
-    description: 'Optional display class label. It is not part of assignment identity and cannot distinguish otherwise duplicate course/lecturer/semester/year/class_type rows or prove student group membership.',
+    description: 'Optional display class label; empty or whitespace-only labels are rejected. It is not part of assignment identity and cannot distinguish otherwise duplicate course/lecturer/semester/year/class_type rows or prove student group membership.',
   })
   @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsNotEmpty()
   @IsString()
+  @Matches(/\S/, { message: 'section_code must not be blank' })
   @MaxLength(50)
   section_code?: string;
 

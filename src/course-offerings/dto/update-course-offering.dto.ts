@@ -10,6 +10,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  Matches,
   MaxLength,
   Min,
   ValidateNested,
@@ -73,11 +74,12 @@ export class UpdateCourseOfferingDto {
     maxLength: 50,
     example: 'A',
     nullable: true,
-    description: 'Optional display class label; changing it never creates another assignment identity. Omit to preserve it; send null to clear it. An empty string is rejected. Identity excludes labels and groups; existing legacy duplicate conflicts require separate review without merging history.',
+    description: 'Optional display class label; changing it never creates another assignment identity. Omit to preserve it; send null to clear it. An empty or whitespace-only string is rejected. Identity excludes labels and groups; existing legacy duplicate conflicts require separate review without merging history.',
   })
   @ValidateIf((_object, value: unknown) => value !== undefined && value !== null)
   @IsNotEmpty()
   @IsString()
+  @Matches(/\S/, { message: 'section_code must not be blank' })
   @MaxLength(50)
   section_code?: string | null;
 

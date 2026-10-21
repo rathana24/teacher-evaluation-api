@@ -378,14 +378,14 @@ describe('Teaching-assignment identity without display labels (owned HTTP)', () 
     }
   });
 
-  it.each(['Another label', '   ', undefined])(
+  it.each(['Another label', undefined])(
     'rejects same identity with class label %j',
     async (section_code) => {
       const existing = await create();
       await reject(() => post(body({ section_code })), 409, existing.id);
     },
   );
-  it.each(['', null])(
+  it.each(['', null, '   ', ' \t '])(
     'rejects invalid optional label %j without writes',
     async (section_code) => {
       await reject(() => post(body({ section_code })), 400);

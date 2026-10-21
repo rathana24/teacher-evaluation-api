@@ -18,7 +18,7 @@ describe('UpdateCourseOfferingDto section_code', () => {
     expect(await errorsFor({ section_code: 'I4-AMS-A' })).toEqual([]);
   });
 
-  it.each([[''], [5], [true], [['A']], ['x'.repeat(51)]])(
+  it.each([[''], ['   '], ['\t\n'], [5], [true], [['A']], ['x'.repeat(51)]])(
     'still rejects an invalid label %p',
     async (section_code) => {
       expect(await errorsFor({ section_code })).toEqual(['section_code']);

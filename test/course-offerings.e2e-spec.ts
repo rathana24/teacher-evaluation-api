@@ -406,7 +406,7 @@ describe('Course Offerings (e2e)', () => {
       expect(res.body.section_code).toBeNull();
     });
 
-    it.each([[''], [42], ['x'.repeat(51)]])(
+    it.each([[''], ['   '], [' \t '], [42], ['x'.repeat(51)]])(
       'still rejects an invalid section_code %p -> 400 without changes',
       async (section_code) => {
         const res = await request(app.getHttpServer())
