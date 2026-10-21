@@ -112,8 +112,10 @@ describe('Backend alignment contracts and atomicity', () => {
         (y) => y.start_year,
       ),
     );
-    const start = Array.from({ length: 98 }, (_, i) => 2100 + i).find(
-      (y) => ![y - 1, y, y + 1].some((n) => used.has(n)),
+    // Stay clear of the fixed start years other suites use (up to 2101, 2198)
+    // and of each later year these tests create (start+1, start+2).
+    const start = Array.from({ length: 80 }, (_, i) => 2110 + i).find(
+      (y) => ![y - 1, y, y + 1, y + 2, y + 3].some((n) => used.has(n)),
     )!;
     ids.start = String(start);
     const year = await post('academic-years/initialize', {
@@ -914,8 +916,10 @@ describe('Backend alignment contracts and atomicity', () => {
         (y) => y.start_year,
       ),
     );
-    const start = Array.from({ length: 145 }, (_, i) => 2050 + i).find(
-      (y) => ![y - 1, y, y + 1].some((n) => used.has(n)),
+    // Stay clear of the fixed start years other suites use (up to 2101) and
+    // leave y+2 free, so no other year can treat these as its predecessor.
+    const start = Array.from({ length: 80 }, (_, i) => 2110 + i).find(
+      (y) => ![y - 1, y, y + 1, y + 2].some((n) => used.has(n)),
     )!;
     const source = await post('academic-years/initialize', {
       name: `IS-${stamp}`.slice(0, 20),
