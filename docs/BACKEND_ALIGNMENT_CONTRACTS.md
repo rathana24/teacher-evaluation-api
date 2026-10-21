@@ -27,7 +27,7 @@ The 201 response is the year plus a `rollover` object:
 
 Client rules:
 
-- **Recommended:** use `POST /api/academic-years/setup` with an `idempotency_key`. It creates the year, Semester 1 and Semester 2, the student group placements and the teaching assignments in one atomic, idempotent request. Recover a lost response with `GET /api/academic-years/setup/receipts/{key}`. `/auth/me` advertises `capabilities.integrated_academic_year_rollover_v1` for this contract.
+- **Recommended:** use `POST /api/academic-years/setup` with an `Idempotency-Key` header (UUID; reuse it, with the same body, for retries). It creates the year, Semester 1 and Semester 2, the student group placements and the teaching assignments in one atomic, idempotent request. Recover a lost response with `GET /api/academic-years/setup/receipts/{key}`. `/auth/me` advertises `capabilities.integrated_academic_year_rollover_v1` for this contract.
 - **If a client uses plain `POST /academic-years`:** it must not copy student group placements again; read them from `rollover.groups`. It **must still** create the semesters and then copy the teaching assignments itself. That client copy is not redundant, but it is not atomic.
 
 Coverage: `test/backend-alignment.e2e-spec.ts` (plain `POST /academic-years` copies groups, skips assignments, creates no semesters) and `test/academic-year-setup.e2e-spec.ts` (Swagger contract and `/setup` behaviour).
